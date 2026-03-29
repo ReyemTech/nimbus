@@ -3,7 +3,7 @@
  * to any ICluster.
  *
  * Components: Traefik, cert-manager, External DNS, ArgoCD, Vault,
- * External Secrets Operator.
+ * External Secrets Operator, OAuth2 Proxy, Descheduler, and more.
  *
  * @module platform/stack
  */
@@ -12,6 +12,7 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type { ICluster } from "../cluster";
 import type {
+  IDeschedulerConfig,
   IExternalDnsConfig,
   IPlatformComponentConfig,
   IPlatformStack,
@@ -31,6 +32,8 @@ const DEFAULT_VERSIONS = {
   argocd: "7.8.26",
   vault: "0.29.1",
   externalSecrets: "0.14.4",
+  oauth2Proxy: "7.12.0",
+  descheduler: "0.32.3",
 } as const;
 
 /**
@@ -108,6 +111,256 @@ function deployToCluster(
   // 6. External Secrets Operator — optional
   if (config.externalSecrets?.enabled) {
     components["external-secrets"] = deployExternalSecrets(name, config.externalSecrets, provider);
+  }
+
+  // 7. Wildcard certificate — auto-created when cert-manager is enabled
+  if (config.certManager?.enabled !== false) {
+    const certName = config.domain.replace(/\./g, "-");
+    new k8s.apiextensions.CustomResource(
+      `${name}-wildcard-cert`,
+      {
+        apiVersion: "cert-manager.io/v1",
+        kind: "Certificate",
+        metadata: { name: `${certName}-wildcard`, namespace: "traefik" },
+        spec: {
+          secretName: `${certName}-wildcard-tls`,
+          issuerRef: { name: "letsencrypt-dns", kind: "ClusterIssuer" },
+          dnsNames: [config.domain, `*.${config.domain}`],
+        },
+      },
+      {
+        provider,
+        dependsOn: [components["cert-manager"]].filter(
+          Boolean
+        ) as k8s.helm.v3.Release[],
+      }
+    );
+  }
+
+  // 8. Default TLSStore — sets wildcard cert as default for Traefik
+  if (components["traefik"] && config.certManager?.enabled !== false) {
+    const certName = config.domain.replace(/\./g, "-");
+    new k8s.apiextensions.CustomResource(
+      `${name}-default-tlsstore`,
+      {
+        apiVersion: "traefik.io/v1alpha1",
+        kind: "TLSStore",
+        metadata: { name: "default", namespace: "traefik" },
+        spec: {
+          defaultCertificate: { secretName: `${certName}-wildcard-tls` },
+        },
+      },
+      { provider, dependsOn: [components["traefik"]] }
+    );
+  }
+
+  // 9. OAuth2 Proxy — optional, protects dashboards
+  if (config.oauth2Proxy?.enabled) {
+    components["oauth2-proxy"] = deployOAuth2Proxy(
+      name,
+      config.oauth2Proxy,
+      config.domain,
+      provider
+    );
+  }
+
+  // 10. OAuth2 Proxy ingress + Traefik dashboard IngressRoute
+  if (components["traefik"] && components["oauth2-proxy"]) {
+    // OAuth2 callback ingress
+    new k8s.networking.v1.Ingress(
+      `${name}-oauth2-ingress`,
+      {
+        metadata: {
+          name: "oauth2-proxy",
+          namespace: "traefik",
+          annotations: { "traefik.ingress.kubernetes.io/router.entrypoints": "websecure" },
+        },
+        spec: {
+          ingressClassName: "traefik",
+          rules: [
+            {
+              host: `traefik.${config.domain}`,
+              http: {
+                paths: [
+                  {
+                    path: "/oauth2",
+                    pathType: "Prefix",
+                    backend: {
+                      service: {
+                        name: "oauth2-proxy",
+                        port: { number: 4180 },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      { provider, dependsOn: [components["oauth2-proxy"]] }
+    );
+
+    // ForwardAuth middleware pointing to OAuth2 proxy
+    new k8s.apiextensions.CustomResource(
+      `${name}-forwardauth-middleware`,
+      {
+        apiVersion: "traefik.io/v1alpha1",
+        kind: "Middleware",
+        metadata: { name: "oauth2-forward-auth", namespace: "traefik" },
+        spec: {
+          forwardAuth: {
+            address: "http://oauth2-proxy.traefik.svc.cluster.local:4180/oauth2/auth",
+            trustForwardHeader: true,
+            authResponseHeaders: [
+              "X-Auth-Request-User",
+              "X-Auth-Request-Email",
+            ],
+          },
+        },
+      },
+      { provider, dependsOn: [components["traefik"]] }
+    );
+
+    // StripPrefix middleware for /dashboard
+    new k8s.apiextensions.CustomResource(
+      `${name}-strip-dashboard-prefix`,
+      {
+        apiVersion: "traefik.io/v1alpha1",
+        kind: "Middleware",
+        metadata: { name: "strip-dashboard-prefix", namespace: "traefik" },
+        spec: {
+          stripPrefix: { prefixes: ["/dashboard"] },
+        },
+      },
+      { provider, dependsOn: [components["traefik"]] }
+    );
+
+    // IngressRoute for Traefik dashboard behind ForwardAuth
+    new k8s.apiextensions.CustomResource(
+      `${name}-dashboard-ingressroute`,
+      {
+        apiVersion: "traefik.io/v1alpha1",
+        kind: "IngressRoute",
+        metadata: { name: "traefik-dashboard", namespace: "traefik" },
+        spec: {
+          entryPoints: ["websecure"],
+          routes: [
+            {
+              match: `Host(\`traefik.${config.domain}\`) && PathPrefix(\`/dashboard\`)`,
+              kind: "Rule",
+              middlewares: [
+                { name: "oauth2-forward-auth" },
+                { name: "strip-dashboard-prefix" },
+              ],
+              services: [
+                { name: "api@internal", kind: "TraefikService" },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        provider,
+        dependsOn: [components["traefik"], components["oauth2-proxy"]],
+      }
+    );
+  }
+
+  // 11. Robot blocking header — for staging environments
+  if (config.robotsBlock && components["traefik"]) {
+    new k8s.apiextensions.CustomResource(
+      `${name}-robots-block`,
+      {
+        apiVersion: "traefik.io/v1alpha1",
+        kind: "Middleware",
+        metadata: { name: "robots-block", namespace: "traefik" },
+        spec: {
+          headers: {
+            customResponseHeaders: {
+              "X-Robots-Tag": "noindex, nofollow",
+            },
+          },
+        },
+      },
+      { provider, dependsOn: [components["traefik"]] }
+    );
+  }
+
+  // 12. Image pull secrets — replicated to specified namespaces
+  if (config.imagePullSecrets) {
+    for (const secret of config.imagePullSecrets) {
+      const namespaces = secret.namespaces ?? ["default"];
+      for (const ns of namespaces) {
+        const secretName = `${secret.registry.replace(/[^a-z0-9]/gi, "-")}-pull-secret`;
+        new k8s.core.v1.Secret(
+          `${name}-pull-${secretName}-${ns}`,
+          {
+            metadata: { name: secretName, namespace: ns },
+            type: "kubernetes.io/dockerconfigjson",
+            stringData: {
+              ".dockerconfigjson": pulumi
+                .all([secret.username, secret.password, secret.email ?? ""])
+                .apply(([username, password, email]) =>
+                  JSON.stringify({
+                    auths: {
+                      [secret.registry]: {
+                        username,
+                        password,
+                        email,
+                        auth: Buffer.from(`${username}:${password}`).toString(
+                          "base64"
+                        ),
+                      },
+                    },
+                  })
+                ),
+            },
+          },
+          { provider }
+        );
+      }
+    }
+  }
+
+  // 13. Descheduler — pod rebalancing for spot instances
+  if (config.descheduler?.enabled) {
+    components["descheduler"] = deployDescheduler(
+      name,
+      config.descheduler,
+      provider
+    );
+  }
+
+  // 14. ClusterSecretStore — connects ESO to Vault
+  if (components["vault"] && components["external-secrets"]) {
+    new k8s.apiextensions.CustomResource(
+      `${name}-cluster-secret-store`,
+      {
+        apiVersion: "external-secrets.io/v1beta1",
+        kind: "ClusterSecretStore",
+        metadata: { name: "vault-backend" },
+        spec: {
+          provider: {
+            vault: {
+              server: `https://vault.${config.domain}`,
+              path: "secret",
+              version: "v2",
+              auth: {
+                kubernetes: {
+                  mountPath: "kubernetes",
+                  role: "external-secrets",
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        provider,
+        dependsOn: [components["vault"], components["external-secrets"]],
+      }
+    );
   }
 
   const traefikEndpoint = components["traefik"]
@@ -314,6 +567,92 @@ function deployExternalSecrets(
       createNamespace: true,
       values: {
         crds: { createClusterExternalSecret: true, createClusterSecretStore: true },
+        ...config.values,
+      },
+    },
+    { provider }
+  );
+}
+
+function deployOAuth2Proxy(
+  name: string,
+  config: IPlatformComponentConfig & {
+    readonly provider: "google" | "github" | "azure";
+    readonly clientId: pulumi.Input<string>;
+    readonly clientSecret: pulumi.Input<string>;
+  },
+  domain: string,
+  provider: k8s.Provider
+): k8s.helm.v3.Release {
+  // Generate a deterministic cookie secret from the stack name via SHA-256.
+  // In production, override via config.values.config.cookieSecret.
+  const cookieSecret = pulumi
+    .output(name)
+    .apply((n) => {
+      const { createHash } = require("crypto") as typeof import("crypto");
+      return createHash("sha256").update(`${n}-oauth2-proxy-cookie`).digest("base64").slice(0, 32);
+    });
+
+  return new k8s.helm.v3.Release(
+    `${name}-oauth2-proxy`,
+    {
+      chart: "oauth2-proxy",
+      repositoryOpts: { repo: "https://oauth2-proxy.github.io/manifests" },
+      version: config.version ?? DEFAULT_VERSIONS.oauth2Proxy,
+      namespace: "traefik",
+      createNamespace: true,
+      values: {
+        config: {
+          clientID: config.clientId,
+          clientSecret: config.clientSecret,
+          cookieSecret,
+        },
+        extraArgs: {
+          provider: config.provider,
+          "email-domain": "*",
+          "cookie-secure": "true",
+          "upstream": "static://202",
+          "reverse-proxy": "true",
+          "set-xauthrequest": "true",
+          "cookie-domain": `.${domain}`,
+          "whitelist-domain": `.${domain}`,
+        },
+        service: { portNumber: 4180 },
+        ...config.values,
+      },
+    },
+    { provider }
+  );
+}
+
+function deployDescheduler(
+  name: string,
+  config: IDeschedulerConfig,
+  provider: k8s.Provider
+): k8s.helm.v3.Release {
+  const strategies = config.strategies ?? [
+    "RemoveDuplicates",
+    "LowNodeUtilization",
+    "RemovePodsViolatingNodeAffinity",
+  ];
+
+  const strategyValues: Record<string, { enabled: boolean }> = {};
+  for (const strategy of strategies) {
+    strategyValues[strategy] = { enabled: true };
+  }
+
+  return new k8s.helm.v3.Release(
+    `${name}-descheduler`,
+    {
+      chart: "descheduler",
+      repositoryOpts: {
+        repo: "https://kubernetes-sigs.github.io/descheduler",
+      },
+      version: config.version ?? DEFAULT_VERSIONS.descheduler,
+      namespace: "kube-system",
+      createNamespace: false,
+      values: {
+        deschedulerPolicy: { strategies: strategyValues },
         ...config.values,
       },
     },

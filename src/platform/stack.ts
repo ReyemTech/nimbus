@@ -304,7 +304,10 @@ function deployToCluster(
         metadata: {
           name: "oauth2-proxy",
           namespace: "traefik",
-          annotations: { "traefik.ingress.kubernetes.io/router.entrypoints": "websecure" },
+          annotations: {
+            "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+            "pulumi.com/skipAwait": "true",
+          },
         },
         spec: {
           ingressClassName: "traefik",

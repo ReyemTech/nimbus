@@ -92,6 +92,20 @@ export type { CacheEngine, CacheMode, CacheArchitecture, ICacheConfig, ICache } 
 // Object Storage
 export type { ILifecycleRule, ICorsRule, IObjectStorageConfig, IObjectStorage } from "./storage";
 
+// Backup
+export type { IBackupReplicationConfig, IBackupTargetConfig, IBackupTarget } from "./backup";
+export { createBackupTarget } from "./backup";
+
+// Operator
+export type {
+  OperatorType,
+  IBackupDefaults,
+  IOperatorConfig,
+  IOperatorDatabaseConfig,
+  IOperator,
+} from "./operator";
+export { createOperator } from "./operator";
+
 // Queue
 export type { QueueEngine, QueueMode, QueueType, IQueueConfig, IQueue } from "./queue";
 

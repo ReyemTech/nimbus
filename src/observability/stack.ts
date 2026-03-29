@@ -16,11 +16,14 @@ import type {
   IPrometheusConfig,
 } from "./interfaces";
 
-/** Default Helm chart versions — pinned for reproducibility. */
-const DEFAULT_VERSIONS = {
-  kubePrometheusStack: "72.4.0",
-  loki: "6.29.0",
-  alloy: "0.12.1",
+/**
+ * Default Helm chart versions. Used only when the consumer doesn't pass `version`.
+ * Set to `undefined` to let Helm resolve the latest available version.
+ */
+const DEFAULT_VERSIONS: Record<string, string | undefined> = {
+  kubePrometheusStack: undefined,
+  loki: undefined,
+  alloy: undefined,
 } as const;
 
 /**

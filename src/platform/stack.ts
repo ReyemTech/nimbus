@@ -25,17 +25,20 @@ import { assertNever } from "../types";
 /** Number of Vault replicas in HA mode (Raft consensus requires odd count). */
 const VAULT_HA_REPLICAS = 3;
 
-/** Default Helm chart versions — pinned for reproducibility. */
-const DEFAULT_VERSIONS = {
-  traefik: "34.3.0",
-  certManager: "v1.17.2",
-  externalDns: "1.16.1",
-  argocd: "7.8.26",
-  vault: "0.29.1",
-  externalSecrets: "0.14.4",
-  oauth2Proxy: "7.12.0",
-  descheduler: "0.32.3",
-} as const;
+/**
+ * Default Helm chart versions. Used only when the consumer doesn't pass `version`.
+ * Set to `undefined` to let Helm resolve the latest available version.
+ */
+const DEFAULT_VERSIONS: Record<string, string | undefined> = {
+  traefik: undefined,
+  certManager: undefined,
+  externalDns: undefined,
+  argocd: undefined,
+  vault: undefined,
+  externalSecrets: undefined,
+  oauth2Proxy: undefined,
+  descheduler: undefined,
+};
 
 /**
  * Deploy a platform stack to one or more clusters.

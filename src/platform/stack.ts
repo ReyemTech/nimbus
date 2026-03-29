@@ -603,7 +603,7 @@ function deployExternalDns(
     ...providerValues,
     domainFilters: config.domainFilters ?? [],
     policy: "sync",
-    sources: ["ingress", "service"],
+    sources: ["ingress", "service", "traefik-proxy"],
     ...config.values,
   };
 

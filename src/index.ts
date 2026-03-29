@@ -43,6 +43,8 @@ export {
   assertValidMultiCloud,
 } from "./types";
 
+export { type StorageTier, type StorageTierMap, resolveStorageTier } from "./types";
+
 // Cluster
 export type {
   INodeTaint,

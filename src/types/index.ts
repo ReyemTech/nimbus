@@ -37,3 +37,5 @@ export {
   validateResourceName,
   assertValidMultiCloud,
 } from "./validation";
+
+export { type StorageTier, type StorageTierMap, resolveStorageTier } from "./storage-tiers";

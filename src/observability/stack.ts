@@ -99,6 +99,60 @@ export function createObservabilityStack(
     components["alloy"] = deployAlloy(name, namespace, config.alloy, provider, lokiEndpoint);
   }
 
+  // 5. Loki datasource + dashboard for Grafana
+  if (components["loki"] && grafanaEnabled) {
+    const lokiUrl = components["loki"].status.apply(
+      (s) => `http://${s?.name ?? "loki"}.${namespace}.svc.cluster.local:3100`
+    );
+
+    // Loki datasource ConfigMap (sidecar picks it up)
+    new k8s.core.v1.ConfigMap(
+      `${name}-grafana-loki-datasource`,
+      {
+        metadata: {
+          name: `${name}-grafana-loki-datasource`,
+          namespace,
+          labels: { grafana_datasource: "1" },
+        },
+        data: {
+          "loki-datasource.yaml": lokiUrl.apply((url) =>
+            JSON.stringify({
+              apiVersion: 1,
+              datasources: [
+                {
+                  name: "Loki",
+                  type: "loki",
+                  uid: "loki",
+                  url,
+                  access: "proxy",
+                  isDefault: false,
+                  jsonData: { maxLines: 1000 },
+                },
+              ],
+            })
+          ),
+        },
+      },
+      { provider, dependsOn: [components["loki"], components["kube-prometheus-stack"]].filter(Boolean) as k8s.helm.v3.Release[] }
+    );
+
+    // Loki logs explorer dashboard
+    new k8s.core.v1.ConfigMap(
+      `${name}-grafana-loki-dashboard`,
+      {
+        metadata: {
+          name: `${name}-loki-logs-dashboard`,
+          namespace,
+          labels: { grafana_dashboard: "1" },
+        },
+        data: {
+          "loki-logs.json": JSON.stringify(lokiLogsDashboard()),
+        },
+      },
+      { provider, dependsOn: [components["kube-prometheus-stack"]].filter(Boolean) as k8s.helm.v3.Release[] }
+    );
+  }
+
   return { name, cluster, components };
 }
 
@@ -355,4 +409,102 @@ loki.write "default" {
     },
     { provider }
   );
+}
+
+/** Generates a Grafana dashboard JSON for exploring Loki logs. */
+function lokiLogsDashboard(): Record<string, unknown> {
+  return {
+    uid: "loki-logs-explorer",
+    title: "Loki Logs Explorer",
+    tags: ["loki", "logs"],
+    timezone: "browser",
+    editable: true,
+    time: { from: "now-1h", to: "now" },
+    templating: {
+      list: [
+        {
+          name: "namespace",
+          type: "query",
+          datasource: { type: "loki", uid: "loki" },
+          query: { label: "namespace", refId: "A", stream: "", type: 1 },
+          refresh: 2,
+          sort: 1,
+          includeAll: true,
+          current: { text: "All", value: "$__all" },
+        },
+        {
+          name: "pod",
+          type: "query",
+          datasource: { type: "loki", uid: "loki" },
+          query: { label: "pod", refId: "A", stream: "{namespace=~\"$namespace\"}", type: 1 },
+          refresh: 2,
+          sort: 1,
+          includeAll: true,
+          current: { text: "All", value: "$__all" },
+        },
+        {
+          name: "container",
+          type: "query",
+          datasource: { type: "loki", uid: "loki" },
+          query: { label: "container", refId: "A", stream: "{namespace=~\"$namespace\", pod=~\"$pod\"}", type: 1 },
+          refresh: 2,
+          sort: 1,
+          includeAll: true,
+          current: { text: "All", value: "$__all" },
+        },
+        {
+          name: "search",
+          type: "textbox",
+          current: { text: "", value: "" },
+        },
+      ],
+    },
+    panels: [
+      {
+        id: 1,
+        title: "Log Volume",
+        type: "timeseries",
+        gridPos: { h: 6, w: 24, x: 0, y: 0 },
+        datasource: { type: "loki", uid: "loki" },
+        targets: [
+          {
+            expr: "sum(count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |~ \"$search\" [1m])) by (namespace)",
+            refId: "A",
+            legendFormat: "{{namespace}}",
+          },
+        ],
+        fieldConfig: {
+          defaults: {
+            custom: { drawStyle: "bars", fillOpacity: 30, stacking: { mode: "normal" } },
+          },
+          overrides: [],
+        },
+      },
+      {
+        id: 2,
+        title: "Logs",
+        type: "logs",
+        gridPos: { h: 20, w: 24, x: 0, y: 6 },
+        datasource: { type: "loki", uid: "loki" },
+        targets: [
+          {
+            expr: "{namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |~ \"$search\"",
+            refId: "A",
+          },
+        ],
+        options: {
+          showTime: true,
+          showLabels: true,
+          showCommonLabels: false,
+          wrapLogMessage: true,
+          prettifyLogMessage: false,
+          enableLogDetails: true,
+          sortOrder: "Descending",
+          dedupStrategy: "none",
+        },
+      },
+    ],
+    schemaVersion: 39,
+    version: 1,
+  };
 }

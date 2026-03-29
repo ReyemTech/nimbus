@@ -241,7 +241,7 @@ function deployToCluster(
 
   // 5. Vault (secrets) — optional
   if (config.vault?.enabled) {
-    components["vault"] = deployVault(name, config.vault, provider);
+    components["vault"] = deployVault(name, config.vault, config.domain, provider);
   }
 
   // 6. External Secrets Operator — optional
@@ -646,6 +646,13 @@ function deployArgocd(
             ingressClassName: "traefik",
             hostname: `argocd.${domain}`,
             tls: true,
+            extraTls: [{
+              secretName: `${domain.replace(/\./g, "-")}-wildcard-tls`,
+              hosts: [`argocd.${domain}`],
+            }],
+            annotations: {
+              "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+            },
           },
         },
         ...config.values,
@@ -658,10 +665,13 @@ function deployArgocd(
 function deployVault(
   name: string,
   config: IVaultConfig,
+  domain: string,
   provider: k8s.Provider
 ): k8s.helm.v3.Release {
   const ha = config.ha ?? false;
   const storageSize = config.storageSize ?? "5Gi";
+  const ingressHost = config.ingressHost ?? `vault.${domain}`;
+  const certName = domain.replace(/\./g, "-");
 
   const serverValues: Record<string, unknown> = {
     standalone: { enabled: !ha },
@@ -673,16 +683,16 @@ function deployVault(
         }
       : { enabled: false },
     dataStorage: { size: storageSize },
-  };
-
-  if (config.ingressHost) {
-    serverValues["ingress"] = {
+    ingress: {
       enabled: true,
       ingressClassName: "traefik",
-      hosts: [{ host: config.ingressHost }],
-      tls: [{ hosts: [config.ingressHost], secretName: "vault-tls" }],
-    };
-  }
+      hosts: [{ host: ingressHost }],
+      annotations: {
+        "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+      },
+      tls: [{ hosts: [ingressHost], secretName: `${certName}-wildcard-tls` }],
+    },
+  };
 
   return new k8s.helm.v3.Release(
     `${name}-vault`,

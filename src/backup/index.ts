@@ -28,7 +28,7 @@ export function createBackupTarget(name: string, config: IBackupTargetConfig): I
     : {};
 
   // Primary bucket
-  const bucket = new aws.s3.BucketV2(
+  const bucket = new aws.s3.Bucket(
     `${name}-bucket`,
     {
       bucket: bucketName,
@@ -38,7 +38,7 @@ export function createBackupTarget(name: string, config: IBackupTargetConfig): I
   );
 
   // Enable versioning on the primary bucket
-  new aws.s3.BucketVersioningV2(
+  new aws.s3.BucketVersioning(
     `${name}-bucket-versioning`,
     {
       bucket: bucket.bucket,
@@ -119,7 +119,7 @@ export function createBackupTarget(name: string, config: IBackupTargetConfig): I
     });
 
     const replicaBucketName = `${bucketName}-replica`;
-    const replicaBucketResource = new aws.s3.BucketV2(
+    const replicaBucketResource = new aws.s3.Bucket(
       `${name}-replica-bucket`,
       {
         bucket: replicaBucketName,
@@ -129,7 +129,7 @@ export function createBackupTarget(name: string, config: IBackupTargetConfig): I
     );
 
     // Enable versioning on replica (required for replication)
-    new aws.s3.BucketVersioningV2(
+    new aws.s3.BucketVersioning(
       `${name}-replica-bucket-versioning`,
       {
         bucket: replicaBucketResource.bucket,

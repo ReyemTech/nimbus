@@ -86,9 +86,8 @@ export function createCnpgDatabase(
   }
 
   if (backup && backupSecret) {
-    const pitrIntervalSeconds = backup.pitrIntervalSeconds ?? 300;
-
     clusterSpec["backup"] = {
+      retentionPolicy: backup.retentionDays ? `${backup.retentionDays}d` : "30d",
       barmanObjectStore: {
         destinationPath: backup.target.bucket.apply((b) => `s3://${b}/${name}`),
         s3Credentials: {
@@ -109,13 +108,11 @@ export function createCnpgDatabase(
           ? {
               compression: "gzip",
               maxParallel: 8,
-              archiveTimeout: `${pitrIntervalSeconds}s`,
             }
           : undefined,
         data: {
           compression: "gzip",
         },
-        retentionPolicy: backup.retentionDays ? `${backup.retentionDays}d` : "30d",
       },
     };
   }

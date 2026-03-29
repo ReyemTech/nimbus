@@ -13,13 +13,16 @@ import { assertNever } from "../types";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import { createCnpgDatabase } from "./cnpg";
 import { createMariadbDatabase } from "./mariadb";
-import type { IOperator, IOperatorConfig, IOperatorDatabaseConfig, OperatorType } from "./interfaces";
+import type { IOperator, IOperatorConfig, IOperatorClusterConfig, OperatorType } from "./interfaces";
 
 export type {
   OperatorType,
   IBackupDefaults,
   IOperatorConfig,
+  IOperatorClusterConfig,
   IOperatorDatabaseConfig,
+  IDatabaseInstance,
+  IClusterInstance,
   IOperator,
 } from "./interfaces";
 
@@ -121,12 +124,12 @@ export function createOperator(type: OperatorType, config: IOperatorConfig): IOp
     name: type,
     type,
     helmRelease,
-    createDatabase(name: string, dbConfig?: IOperatorDatabaseConfig) {
+    createCluster(name: string, clusterConfig?: IOperatorClusterConfig) {
       switch (type) {
         case "cloudnative-pg":
-          return createCnpgDatabase(name, dbConfig, config.backup, provider, helmRelease);
+          return createCnpgDatabase(name, clusterConfig, config.backup, provider, helmRelease);
         case "mariadb-operator":
-          return createMariadbDatabase(name, dbConfig, config.backup, provider, helmRelease);
+          return createMariadbDatabase(name, clusterConfig, config.backup, provider, helmRelease);
         default:
           return assertNever(type);
       }

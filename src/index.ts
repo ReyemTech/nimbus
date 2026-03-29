@@ -101,7 +101,10 @@ export type {
   OperatorType,
   IBackupDefaults,
   IOperatorConfig,
+  IOperatorClusterConfig,
   IOperatorDatabaseConfig,
+  IDatabaseInstance,
+  IClusterInstance,
   IOperator,
 } from "./operator";
 export { createOperator } from "./operator";

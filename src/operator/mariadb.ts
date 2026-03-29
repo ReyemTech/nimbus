@@ -1,46 +1,42 @@
 /**
- * MariaDB Operator backend — provisions MariaDB databases via the MariaDB operator.
+ * MariaDB Operator backend — provisions MariaDB instances via CRDs.
  *
- * Creates a MariaDB CRD, backup credentials Secret, and optionally a Backup CRD
- * for scheduled S3 backups.
+ * Creates a MariaDB CRD and optional backup CRDs. Returns IClusterInstance
+ * with createDatabase() for provisioning individual databases with connection
+ * secrets replicated to target namespaces.
  *
  * @module operator/mariadb
  */
 
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
-import type { IDatabase } from "../database";
 import { ensureNamespace } from "../utils/ensure-namespace";
-import type { IBackupDefaults, IOperatorDatabaseConfig } from "./interfaces";
+import type { IBackupDefaults, IOperatorClusterConfig, IClusterInstance, IOperatorDatabaseConfig, IDatabaseInstance } from "./interfaces";
 
 const DATA_NAMESPACE = "data";
-const DEFAULT_MARIADB_VERSION = "11";
+const DEFAULT_MARIADB_VERSION = "11.7";
 const DEFAULT_REPLICAS = 1;
 const DEFAULT_STORAGE_GB = 10;
 
 /**
- * Create a MariaDB database via the MariaDB operator.
+ * Create a MariaDB instance via the MariaDB Operator.
  *
- * @param name - Database name (CRD metadata name + service name prefix)
- * @param config - Per-database configuration
- * @param backupDefaults - Operator-level backup defaults (merged with per-db overrides)
- * @param provider - Kubernetes provider to use for resource creation
- * @param operatorRelease - MariaDB operator Helm release (used as dependency)
- * @returns IDatabase with endpoint pointing to the MariaDB service
+ * @returns IClusterInstance with createDatabase() for per-database provisioning
  */
 export function createMariadbDatabase(
   name: string,
-  config: IOperatorDatabaseConfig | undefined,
+  config: IOperatorClusterConfig | undefined,
   backupDefaults: IBackupDefaults | undefined,
   provider: k8s.Provider,
   operatorRelease: k8s.helm.v3.Release
-): IDatabase {
+): IClusterInstance {
   const namespace = ensureNamespace(DATA_NAMESPACE, provider);
-  const version = config?.version ?? DEFAULT_MARIADB_VERSION;
   const replicas = config?.replicas ?? DEFAULT_REPLICAS;
   const storageGb = config?.storageGb ?? DEFAULT_STORAGE_GB;
+  const dbVersion = config?.version ?? DEFAULT_MARIADB_VERSION;
+  const image = `mariadb:${dbVersion}`;
 
-  // Merge backup: per-db config overrides operator defaults
+  // Merge backup: per-cluster config overrides operator defaults
   const backup: IBackupDefaults | undefined =
     config?.backup?.target !== undefined
       ? { ...backupDefaults, ...(config.backup as IBackupDefaults) }
@@ -48,30 +44,9 @@ export function createMariadbDatabase(
 
   const dependsOn: pulumi.Resource[] = [operatorRelease, namespace];
 
-  // Create backup credentials Secret if backup is configured
-  let backupSecret: k8s.core.v1.Secret | undefined;
-  if (backup) {
-    backupSecret = new k8s.core.v1.Secret(
-      `${name}-mariadb-backup-secret`,
-      {
-        metadata: {
-          name: `${name}-backup-s3-credentials`,
-          namespace: DATA_NAMESPACE,
-        },
-        stringData: {
-          ACCESS_KEY_ID: backup.target.credentials.accessKeyId,
-          SECRET_ACCESS_KEY: backup.target.credentials.secretAccessKey,
-          REGION: backup.target.region,
-        },
-      },
-      { provider, dependsOn: [namespace] }
-    );
-    dependsOn.push(backupSecret);
-  }
-
-  // Build MariaDB CRD spec
+  // MariaDB CRD spec
   const mariadbSpec: Record<string, unknown> = {
-    image: `mariadb:${version}`,
+    image,
     rootPasswordSecretKeyRef: {
       name: `${name}-root`,
       key: "password",
@@ -89,25 +64,39 @@ export function createMariadbDatabase(
 
   if (config?.parameters) {
     mariadbSpec["myCnf"] = Object.entries(config.parameters)
-      .map(([k, v]) => `${k} = ${v}`)
+      .map(([k, v]) => `${k}=${v}`)
       .join("\n");
   }
 
-  // Multi-replica replication config
+  // Replication (replicas > 1)
   if (replicas > 1) {
     mariadbSpec["replicas"] = replicas;
     mariadbSpec["replication"] = {
       enabled: true,
-      primary: {
-        podDisruptionBudget: {
-          enabled: true,
-        },
-        automaticFailover: true,
-      },
+      primary: { automaticFailover: true },
     };
   }
 
-  // MariaDB CRD
+  // S3 backup credentials
+  if (backup) {
+    const backupSecret = new k8s.core.v1.Secret(
+      `${name}-mariadb-backup-secret`,
+      {
+        metadata: {
+          name: `${name}-backup-s3-credentials`,
+          namespace: DATA_NAMESPACE,
+        },
+        stringData: {
+          "access-key-id": backup.target.credentials.accessKeyId,
+          "secret-access-key": backup.target.credentials.secretAccessKey,
+        },
+      },
+      { provider, dependsOn: [namespace] }
+    );
+    dependsOn.push(backupSecret);
+  }
+
+  // Create the MariaDB CRD
   const mariadb = new k8s.apiextensions.CustomResource(
     `${name}-mariadb`,
     {
@@ -123,59 +112,115 @@ export function createMariadbDatabase(
     { provider, dependsOn }
   );
 
-  // Backup CRD if backup is configured
-  if (backup && backupSecret) {
+  // Scheduled backup via S3
+  if (backup) {
     new k8s.apiextensions.CustomResource(
       `${name}-mariadb-backup`,
       {
         apiVersion: "k8s.mariadb.com/v1alpha1",
         kind: "Backup",
         metadata: {
-          name: `${name}-backup`,
+          name: `${name}-scheduled-backup`,
           namespace: DATA_NAMESPACE,
         },
         spec: {
-          mariaDbRef: {
-            name,
-          },
+          mariaDbRef: { name },
           schedule: {
             cron: backup.schedule ?? "0 3 * * *",
             suspend: false,
           },
-          maxRetention: backup.retentionDays ? `${backup.retentionDays * 24}h` : "720h",
+          maxRetention: `${(backup.retentionDays ?? 7) * 24}h`,
           storage: {
             s3: {
               bucket: backup.target.bucket,
-              prefix: name,
-              endpoint: pulumi.output(`s3.${backup.target.region}.amazonaws.com`),
-              region: backup.target.region,
+              prefix: `mariadb/${name}`,
               accessKeyIdSecretKeyRef: {
-                name: backupSecret.metadata.name,
-                key: "ACCESS_KEY_ID",
+                name: `${name}-backup-s3-credentials`,
+                key: "access-key-id",
               },
               secretAccessKeySecretKeyRef: {
-                name: backupSecret.metadata.name,
-                key: "SECRET_ACCESS_KEY",
+                name: `${name}-backup-s3-credentials`,
+                key: "secret-access-key",
               },
+              region: backup.target.region,
             },
           },
         },
       },
-      { provider, dependsOn: [mariadb, backupSecret] }
+      { provider, dependsOn: [mariadb] }
     );
   }
 
+  const endpoint = pulumi.output(`${name}.${DATA_NAMESPACE}.svc.cluster.local`);
+  const port = pulumi.output(3306);
+  const rootSecretName = `${name}-root`;
+
   return {
     name,
-    cloud: { provider: "aws", region: backup?.target.region ?? "us-east-1" },
     engine: "mariadb",
-    mode: "operator",
-    endpoint: pulumi.output(`${name}.${DATA_NAMESPACE}.svc.cluster.local`),
-    port: pulumi.output(3306),
-    secretRef: {
-      path: `${name}-root`,
-      key: "password",
-    },
+    endpoint,
+    port,
     nativeResource: mariadb,
+    createDatabase(dbName: string, dbConfig: IOperatorDatabaseConfig): IDatabaseInstance {
+      const secrets: Record<string, pulumi.Output<string>> = {};
+
+      // Read root password from the operator-generated secret
+      const rootSecret = k8s.core.v1.Secret.get(
+        `${name}-${dbName}-root-src`,
+        pulumi.interpolate`${DATA_NAMESPACE}/${rootSecretName}`,
+        { provider, dependsOn: [mariadb] }
+      );
+
+      const rootPassword = rootSecret.data.apply(
+        (data) => Buffer.from(data?.["password"] ?? "", "base64").toString()
+      );
+
+      const username = dbConfig.owner ?? dbName;
+      const dbHost = endpoint;
+      const dbPort = port;
+
+      for (const targetNs of dbConfig.namespaces) {
+        const nsResource = ensureNamespace(targetNs, provider);
+        const secretName = `${name}-${dbName}-mariadb`;
+
+        new k8s.core.v1.Secret(
+          `${name}-${dbName}-secret-${targetNs}`,
+          {
+            metadata: {
+              name: secretName,
+              namespace: targetNs,
+              labels: {
+                "app.kubernetes.io/managed-by": "nimbus",
+                "nimbus/cluster": name,
+                "nimbus/database": dbName,
+              },
+            },
+            stringData: {
+              host: dbHost,
+              port: dbPort.apply((p) => String(p)),
+              username,
+              password: rootPassword,
+              database: dbName,
+              uri: pulumi.all([dbHost, dbPort, rootPassword]).apply(
+                ([h, p, pw]) => `mysql://${username}:${pw}@${h}:${p}/${dbName}`
+              ),
+            },
+          },
+          { provider, dependsOn: [mariadb, nsResource] }
+        );
+
+        secrets[targetNs] = pulumi.output(secretName);
+      }
+
+      return {
+        name: dbName,
+        clusterName: name,
+        host: endpoint,
+        port,
+        database: pulumi.output(dbName),
+        secrets,
+        nativeResource: mariadb,
+      };
+    },
   };
 }

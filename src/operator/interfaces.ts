@@ -1,22 +1,23 @@
 /**
  * Operator module interfaces for @reyemtech/nimbus.
  *
- * Abstracts Kubernetes database operator deployment and database provisioning
- * via CRDs for CloudNativePG (PostgreSQL) and MariaDB Operator.
+ * Models the real-world pattern: install an operator once, create cluster
+ * instances, then provision individual databases within each cluster.
+ * Each database gets connection secrets replicated to target namespaces.
  *
  * @module operator/interfaces
  */
 
+import type * as pulumi from "@pulumi/pulumi";
 import type * as k8s from "@pulumi/kubernetes";
 import type { ICluster } from "../cluster";
 import type { IBackupTarget } from "../backup";
-import type { IDatabase } from "../database";
 import type { StorageTier } from "../types/storage-tiers";
 
 /** Supported Kubernetes database operators. */
 export type OperatorType = "cloudnative-pg" | "mariadb-operator";
 
-/** Default backup configuration for databases provisioned by an operator. */
+/** Default backup configuration for clusters provisioned by an operator. */
 export interface IBackupDefaults {
   /** Backup target (S3 bucket + credentials). */
   readonly target: IBackupTarget;
@@ -40,21 +41,21 @@ export interface IOperatorConfig {
   readonly version?: string;
   /** Additional Helm values to merge. */
   readonly values?: Record<string, unknown>;
-  /** Default backup configuration for databases created by this operator. */
+  /** Default backup configuration for clusters created by this operator. */
   readonly backup?: IBackupDefaults;
 }
 
-/** Per-database configuration when creating a database via an operator. */
-export interface IOperatorDatabaseConfig {
-  /** Database engine version (e.g., "16" for PostgreSQL, "11" for MariaDB). */
+/** Per-cluster configuration when creating a database cluster via an operator. */
+export interface IOperatorClusterConfig {
+  /** Database engine version (e.g., "17" for PostgreSQL, "11.7" for MariaDB). */
   readonly version?: string;
-  /** Number of replicas. Default: 1. */
+  /** Number of instances/replicas. Default: 1. */
   readonly replicas?: number;
   /** Storage size in GB. Default: 10. */
   readonly storageGb?: number;
   /** Storage tier for PVC storage class selection. */
   readonly storageTier?: StorageTier;
-  /** Override operator-level backup defaults for this database. */
+  /** Override operator-level backup defaults for this cluster. */
   readonly backup?: Partial<IBackupDefaults>;
   /** CPU and memory resource requests/limits. */
   readonly resources?: {
@@ -67,6 +68,57 @@ export interface IOperatorDatabaseConfig {
   readonly tags?: Record<string, string>;
 }
 
+/** Configuration for creating a database within a cluster. */
+export interface IOperatorDatabaseConfig {
+  /** Namespaces to replicate the connection secret into. */
+  readonly namespaces: string[];
+  /** Database owner/username. Default: same as database name. */
+  readonly owner?: string;
+}
+
+/** A database within a cluster, with connection secrets in target namespaces. */
+export interface IDatabaseInstance {
+  /** Database name. */
+  readonly name: string;
+  /** Cluster this database belongs to. */
+  readonly clusterName: string;
+  /** Database connection endpoint. */
+  readonly host: pulumi.Output<string>;
+  /** Database connection port. */
+  readonly port: pulumi.Output<number>;
+  /** Database name on the server. */
+  readonly database: pulumi.Output<string>;
+  /** Secrets created in target namespaces (namespace → secret name). */
+  readonly secrets: Record<string, pulumi.Output<string>>;
+  /** Underlying Pulumi resource for dependency wiring. */
+  readonly nativeResource: pulumi.Resource;
+}
+
+/** A database cluster instance created by an operator. */
+export interface IClusterInstance {
+  /** Cluster name. */
+  readonly name: string;
+  /** Database engine type. */
+  readonly engine: "postgresql" | "mariadb";
+  /** Read-write endpoint for the cluster. */
+  readonly endpoint: pulumi.Output<string>;
+  /** Connection port. */
+  readonly port: pulumi.Output<number>;
+  /** Underlying CRD resource. */
+  readonly nativeResource: pulumi.Resource;
+  /**
+   * Create a database within this cluster and replicate connection
+   * secrets to specified namespaces.
+   *
+   * Each secret contains: host, port, username, password, database, uri.
+   *
+   * @param name - Database name
+   * @param config - Namespaces for secret replication + optional owner
+   * @returns Database instance with secret references
+   */
+  createDatabase(name: string, config: IOperatorDatabaseConfig): IDatabaseInstance;
+}
+
 /** Deployed database operator instance. */
 export interface IOperator {
   /** Logical name of the operator. */
@@ -76,11 +128,11 @@ export interface IOperator {
   /** Underlying Helm release resource. */
   readonly helmRelease: k8s.helm.v3.Release;
   /**
-   * Provision a database via the operator.
+   * Create a database cluster via the operator.
    *
-   * @param name - Database name (used for CRD metadata and service names)
-   * @param config - Per-database configuration
-   * @returns Unified IDatabase output
+   * @param name - Cluster name (used for CRD metadata and service names)
+   * @param config - Per-cluster configuration
+   * @returns Cluster instance with createDatabase() for per-database provisioning
    */
-  createDatabase(name: string, config?: IOperatorDatabaseConfig): IDatabase;
+  createCluster(name: string, config?: IOperatorClusterConfig): IClusterInstance;
 }

@@ -1,46 +1,41 @@
 /**
- * CloudNativePG backend — provisions PostgreSQL databases via the CNPG operator.
+ * CloudNativePG backend — provisions PostgreSQL clusters via the CNPG operator.
  *
- * Creates a CNPG Cluster CRD, backup credentials Secret, and optionally a
- * ScheduledBackup CRD for automated S3 backups with WAL archiving for PITR.
+ * Creates a CNPG Cluster CRD, backup credentials, and scheduled backups.
+ * Returns IClusterInstance with createDatabase() for provisioning individual
+ * databases with connection secrets replicated to target namespaces.
  *
  * @module operator/cnpg
  */
 
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
-import type { IDatabase } from "../database";
 import { ensureNamespace } from "../utils/ensure-namespace";
-import type { IBackupDefaults, IOperatorDatabaseConfig } from "./interfaces";
+import type { IBackupDefaults, IOperatorClusterConfig, IClusterInstance, IOperatorDatabaseConfig, IDatabaseInstance } from "./interfaces";
 
 const DATA_NAMESPACE = "data";
-const DEFAULT_PG_VERSION = "16";
+const DEFAULT_PG_VERSION = "17";
 const DEFAULT_REPLICAS = 1;
 const DEFAULT_STORAGE_GB = 10;
 
 /**
- * Create a PostgreSQL database via the CloudNativePG operator.
+ * Create a PostgreSQL cluster via the CloudNativePG operator.
  *
- * @param name - Database name (CRD metadata name + service name prefix)
- * @param config - Per-database configuration
- * @param backupDefaults - Operator-level backup defaults (merged with per-db overrides)
- * @param provider - Kubernetes provider to use for resource creation
- * @param operatorRelease - CNPG operator Helm release (used as dependency)
- * @returns IDatabase with endpoint pointing to the CNPG read-write service
+ * @returns IClusterInstance with createDatabase() for per-database provisioning
  */
 export function createCnpgDatabase(
   name: string,
-  config: IOperatorDatabaseConfig | undefined,
+  config: IOperatorClusterConfig | undefined,
   backupDefaults: IBackupDefaults | undefined,
   provider: k8s.Provider,
   operatorRelease: k8s.helm.v3.Release
-): IDatabase {
+): IClusterInstance {
   const namespace = ensureNamespace(DATA_NAMESPACE, provider);
   const version = config?.version ?? DEFAULT_PG_VERSION;
   const replicas = config?.replicas ?? DEFAULT_REPLICAS;
   const storageGb = config?.storageGb ?? DEFAULT_STORAGE_GB;
 
-  // Merge backup: per-db config overrides operator defaults
+  // Merge backup: per-cluster config overrides operator defaults
   const backup: IBackupDefaults | undefined =
     config?.backup?.target !== undefined
       ? { ...backupDefaults, ...(config.backup as IBackupDefaults) }
@@ -147,9 +142,7 @@ export function createCnpgDatabase(
         spec: {
           schedule: backup.schedule ?? "0 3 * * *",
           backupOwnerReference: "self",
-          cluster: {
-            name,
-          },
+          cluster: { name },
           immediate: false,
         },
       },
@@ -157,17 +150,78 @@ export function createCnpgDatabase(
     );
   }
 
+  const endpoint = pulumi.output(`${name}-rw.${DATA_NAMESPACE}.svc.cluster.local`);
+  const port = pulumi.output(5432);
+
+  // CNPG creates a secret named {clusterName}-app with: username, password, dbname, host, port, uri
+  const clusterSecretName = `${name}-app`;
+
   return {
     name,
-    cloud: { provider: "aws", region: backup?.target.region ?? "us-east-1" },
     engine: "postgresql",
-    mode: "operator",
-    endpoint: pulumi.output(`${name}-rw.${DATA_NAMESPACE}.svc.cluster.local`),
-    port: pulumi.output(5432),
-    secretRef: {
-      path: `${name}-app`,
-      key: "password",
-    },
+    endpoint,
+    port,
     nativeResource: cluster,
+    createDatabase(dbName: string, dbConfig: IOperatorDatabaseConfig): IDatabaseInstance {
+      const secrets: Record<string, pulumi.Output<string>> = {};
+
+      for (const targetNs of dbConfig.namespaces) {
+        const nsResource = ensureNamespace(targetNs, provider);
+        const secretName = `${name}-${dbName}-pg`;
+
+        // Read credentials from the CNPG-generated cluster secret and
+        // replicate to target namespace with the specific database name
+        const clusterSecret = k8s.core.v1.Secret.get(
+          `${name}-${dbName}-src-${targetNs}`,
+          pulumi.interpolate`${DATA_NAMESPACE}/${clusterSecretName}`,
+          { provider, dependsOn: [cluster] }
+        );
+
+        const username = dbConfig.owner ?? dbName;
+        const dbHost = endpoint;
+        const dbPort = port;
+        const dbPassword = clusterSecret.data.apply(
+          (data) => Buffer.from(data?.["password"] ?? "", "base64").toString()
+        );
+
+        new k8s.core.v1.Secret(
+          `${name}-${dbName}-secret-${targetNs}`,
+          {
+            metadata: {
+              name: secretName,
+              namespace: targetNs,
+              labels: {
+                "app.kubernetes.io/managed-by": "nimbus",
+                "nimbus/cluster": name,
+                "nimbus/database": dbName,
+              },
+            },
+            stringData: {
+              host: dbHost,
+              port: dbPort.apply((p) => String(p)),
+              username,
+              password: dbPassword,
+              database: dbName,
+              uri: pulumi.all([dbHost, dbPort, dbPassword]).apply(
+                ([h, p, pw]) => `postgresql://${username}:${pw}@${h}:${p}/${dbName}?sslmode=require`
+              ),
+            },
+          },
+          { provider, dependsOn: [cluster, nsResource] }
+        );
+
+        secrets[targetNs] = pulumi.output(secretName);
+      }
+
+      return {
+        name: dbName,
+        clusterName: name,
+        host: endpoint,
+        port,
+        database: pulumi.output(dbName),
+        secrets,
+        nativeResource: cluster,
+      };
+    },
   };
 }

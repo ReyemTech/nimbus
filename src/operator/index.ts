@@ -30,7 +30,13 @@ interface OperatorChartInfo {
   readonly defaultNamespace: string;
 }
 
-const OPERATOR_CHARTS: Record<OperatorType, OperatorChartInfo> = {
+/** Separate CRDs chart (installed before the operator). */
+interface OperatorCrdsInfo {
+  readonly repo: string;
+  readonly chart: string;
+}
+
+const OPERATOR_CHARTS: Record<OperatorType, OperatorChartInfo & { crds?: OperatorCrdsInfo }> = {
   "cloudnative-pg": {
     repo: "https://cloudnative-pg.github.io/charts",
     chart: "cloudnative-pg",
@@ -40,6 +46,10 @@ const OPERATOR_CHARTS: Record<OperatorType, OperatorChartInfo> = {
     repo: "https://helm.mariadb.com/mariadb-operator",
     chart: "mariadb-operator",
     defaultNamespace: "mariadb-system",
+    crds: {
+      repo: "https://helm.mariadb.com/mariadb-operator",
+      chart: "mariadb-operator-crds",
+    },
   },
 };
 
@@ -76,6 +86,23 @@ export function createOperator(type: OperatorType, config: IOperatorConfig): IOp
   // Ensure operator namespace exists
   const ns = ensureNamespace(namespace, provider);
 
+  // Install CRDs first if the operator needs a separate CRDs chart
+  const operatorDeps: k8s.helm.v3.Release[] = [];
+  if (chartInfo.crds) {
+    const crdsRelease = new k8s.helm.v3.Release(
+      `${type}-crds`,
+      {
+        chart: chartInfo.crds.chart,
+        repositoryOpts: { repo: chartInfo.crds.repo },
+        namespace,
+        createNamespace: false,
+        values: {},
+      },
+      { provider, dependsOn: [ns] }
+    );
+    operatorDeps.push(crdsRelease);
+  }
+
   // Deploy Helm release
   const helmRelease = new k8s.helm.v3.Release(
     `${type}-operator`,
@@ -87,7 +114,7 @@ export function createOperator(type: OperatorType, config: IOperatorConfig): IOp
       createNamespace: false,
       values: config.values ?? {},
     },
-    { provider, dependsOn: [ns] }
+    { provider, dependsOn: [ns, ...operatorDeps] }
   );
 
   return {

@@ -6,6 +6,7 @@
  */
 
 import * as k8s from "@pulumi/kubernetes";
+import * as pulumi from "@pulumi/pulumi";
 import type {
   IAlertmanagerConfig,
   IAlloyConfig,
@@ -90,7 +91,12 @@ export function createObservabilityStack(
 
   // 4. Alloy (log/metric collector)
   if (config.alloy?.enabled) {
-    components["alloy"] = deployAlloy(name, namespace, config.alloy, provider);
+    const lokiEndpoint = components["loki"]
+      ? components["loki"].status.apply(
+          (s) => `http://${s?.name ?? "loki"}.${namespace}.svc.cluster.local:3100/loki/api/v1/push`
+        )
+      : pulumi.output(`http://loki.${namespace}.svc.cluster.local:3100/loki/api/v1/push`);
+    components["alloy"] = deployAlloy(name, namespace, config.alloy, provider, lokiEndpoint);
   }
 
   return { name, cluster, components };
@@ -230,6 +236,7 @@ function deployLoki(
       replicas: 1,
     };
     lokiValues["loki"] = {
+      auth_enabled: false,
       commonConfig: {
         replication_factor: 1,
       },
@@ -281,8 +288,56 @@ function deployAlloy(
   name: string,
   namespace: string,
   config: IAlloyConfig,
-  provider: k8s.Provider
+  provider: k8s.Provider,
+  lokiEndpoint: pulumi.Output<string>
 ): k8s.helm.v3.Release {
+  const alloyConfig = lokiEndpoint.apply((endpoint) => `
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+discovery.kubernetes "pods" {
+  role = "pod"
+}
+
+discovery.relabel "pods" {
+  targets = discovery.kubernetes.pods.targets
+
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label  = "namespace"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "pod"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_node_name"]
+    target_label  = "node"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+    target_label  = "app"
+  }
+}
+
+loki.source.kubernetes "pods" {
+  targets    = discovery.relabel.pods.output
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "${endpoint}"
+  }
+}
+`);
+
   return new k8s.helm.v3.Release(
     `${name}-alloy`,
     {
@@ -292,6 +347,9 @@ function deployAlloy(
       namespace,
       createNamespace: false,
       values: {
+        alloy: {
+          configMap: { content: alloyConfig },
+        },
         ...config.values,
       },
     },

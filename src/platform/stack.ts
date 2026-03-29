@@ -90,7 +90,7 @@ function deployToCluster(
 
   // 1. Traefik (ingress controller) — enabled by default
   if (config.traefik?.enabled !== false) {
-    components["traefik"] = deployTraefik(name, config.traefik, provider);
+    components["traefik"] = deployTraefik(name, config.traefik, provider, config.robotsBlock);
   }
 
   // 2. cert-manager (TLS certificates) — enabled by default
@@ -343,6 +343,9 @@ function deployToCluster(
     );
 
     // ForwardAuth middleware pointing to OAuth2 proxy
+    const oauth2SvcName = components["oauth2-proxy"].status.apply(
+      (s) => s?.name ?? "oauth2-proxy"
+    );
     new k8s.apiextensions.CustomResource(
       `${name}-forwardauth-middleware`,
       {
@@ -351,27 +354,13 @@ function deployToCluster(
         metadata: { name: "oauth2-forward-auth", namespace: "traefik" },
         spec: {
           forwardAuth: {
-            address: "http://oauth2-proxy.traefik.svc.cluster.local:4180/oauth2/auth",
+            address: pulumi.interpolate`http://${oauth2SvcName}.traefik.svc.cluster.local:4180/oauth2/auth`,
             trustForwardHeader: true,
             authResponseHeaders: [
               "X-Auth-Request-User",
               "X-Auth-Request-Email",
             ],
           },
-        },
-      },
-      { provider, dependsOn: [components["traefik"]] }
-    );
-
-    // StripPrefix middleware for /dashboard
-    new k8s.apiextensions.CustomResource(
-      `${name}-strip-dashboard-prefix`,
-      {
-        apiVersion: "traefik.io/v1alpha1",
-        kind: "Middleware",
-        metadata: { name: "strip-dashboard-prefix", namespace: "traefik" },
-        spec: {
-          stripPrefix: { prefixes: ["/dashboard"] },
         },
       },
       { provider, dependsOn: [components["traefik"]] }
@@ -388,11 +377,10 @@ function deployToCluster(
           entryPoints: ["websecure"],
           routes: [
             {
-              match: `Host(\`traefik.${config.domain}\`) && PathPrefix(\`/dashboard\`)`,
+              match: `Host(\`traefik.${config.domain}\`) && (PathPrefix(\`/dashboard\`) || PathPrefix(\`/api\`))`,
               kind: "Rule",
               middlewares: [
                 { name: "oauth2-forward-auth" },
-                { name: "strip-dashboard-prefix" },
               ],
               services: [
                 { name: "api@internal", kind: "TraefikService" },
@@ -524,7 +512,8 @@ function deployToCluster(
 function deployTraefik(
   name: string,
   config: IPlatformComponentConfig | undefined,
-  provider: k8s.Provider
+  provider: k8s.Provider,
+  robotsBlock?: boolean
 ): k8s.helm.v3.Release {
   return new k8s.helm.v3.Release(
     `${name}-traefik`,
@@ -535,16 +524,23 @@ function deployTraefik(
       namespace: "traefik",
       createNamespace: true,
       values: {
+        ingressClass: { enabled: true, isDefaultClass: true, name: "traefik" },
         ingressRoute: {
           dashboard: { enabled: false },
         },
-        additionalArguments: [
-          "--entrypoints.websecure.http.tls=true",
-          "--entrypoints.web.http.redirections.entrypoint.to=websecure",
-          "--entrypoints.web.http.redirections.entrypoint.scheme=https",
-        ],
-        providers: {
-          kubernetesIngress: { publishedService: { enabled: true } },
+        ports: {
+          web: {
+            http: {
+              redirections: {
+                entryPoint: { to: "websecure", scheme: "https" },
+              },
+            },
+          },
+          ...(robotsBlock && {
+            websecure: {
+              http: { middlewares: ["traefik-robots-block@kubernetescrd"] },
+            },
+          }),
         },
         ...config?.values,
       },
@@ -641,6 +637,9 @@ function deployArgocd(
       namespace: "argocd",
       createNamespace: true,
       values: {
+        configs: {
+          params: { "server.insecure": true },
+        },
         server: {
           ingress: {
             enabled: true,

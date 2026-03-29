@@ -21,6 +21,7 @@ import type {
   IVaultConfig,
 } from "./interfaces";
 import { assertNever } from "../types";
+import { ensureNamespace } from "../utils/ensure-namespace";
 
 /** Number of Vault replicas in HA mode (Raft consensus requires odd count). */
 const VAULT_HA_REPLICAS = 3;
@@ -104,11 +105,12 @@ function deployToCluster(
     // 3a. Route53 IAM provisioning — create IAM user + access key when no manual credentials
     if (dnsConfig.dnsProvider === "route53" && !dnsConfig.dnsCredentials) {
       const awsRegion = dnsConfig.awsRegion ?? "us-east-1";
+      const awsOpts = dnsConfig.awsProvider ? { provider: dnsConfig.awsProvider } : {};
 
       const iamUser = new aws.iam.User(`${name}-external-dns-user`, {
         name: `${name}-external-dns`,
         path: "/nimbus/",
-      });
+      }, awsOpts);
 
       new aws.iam.UserPolicy(`${name}-external-dns-policy`, {
         user: iamUser.name,
@@ -133,11 +135,11 @@ function deployToCluster(
             },
           ],
         }),
-      });
+      }, awsOpts);
 
       const accessKey = new aws.iam.AccessKey(`${name}-external-dns-key`, {
         user: iamUser.name,
-      });
+      }, awsOpts);
 
       // Secret for external-dns namespace
       new k8s.core.v1.Secret(
@@ -421,6 +423,7 @@ function deployToCluster(
     for (const secret of config.imagePullSecrets) {
       const namespaces = secret.namespaces ?? ["default"];
       for (const ns of namespaces) {
+        const nsResource = ensureNamespace(ns, provider);
         const secretName = `${secret.registry.replace(/[^a-z0-9]/gi, "-")}-pull-secret`;
         new k8s.core.v1.Secret(
           `${name}-pull-${secretName}-${ns}`,
@@ -446,7 +449,7 @@ function deployToCluster(
                 ),
             },
           },
-          { provider }
+          { provider, dependsOn: [nsResource] }
         );
       }
     }
@@ -466,7 +469,7 @@ function deployToCluster(
     new k8s.apiextensions.CustomResource(
       `${name}-cluster-secret-store`,
       {
-        apiVersion: "external-secrets.io/v1beta1",
+        apiVersion: "external-secrets.io/v1",
         kind: "ClusterSecretStore",
         metadata: { name: "vault-backend" },
         spec: {
@@ -488,6 +491,7 @@ function deployToCluster(
       {
         provider,
         dependsOn: [components["vault"], components["external-secrets"]],
+        customTimeouts: { create: "5m" },
       }
     );
   }

@@ -5,3 +5,4 @@
  */
 
 export { loadProvider } from "./provider-loader";
+export { ensureNamespace } from "./ensure-namespace";

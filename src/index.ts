@@ -141,6 +141,9 @@ export {
 // Azure resource group helper
 export { ensureResourceGroup, type IResourceGroupOptions } from "./azure/resource-group";
 
+// Utilities
+export { ensureNamespace } from "./utils/ensure-namespace";
+
 // Factory functions (primary API)
 export {
   createNetwork,

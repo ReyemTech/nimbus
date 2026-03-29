@@ -34,6 +34,8 @@ export interface IExternalDnsConfig extends IPlatformComponentConfig {
   readonly dnsProvider: DnsProvider;
   /** AWS region for Route53. Required when dnsProvider is "route53". */
   readonly awsRegion?: string;
+  /** Explicit AWS provider for Route53 IAM resources. If not provided, uses default. */
+  readonly awsProvider?: pulumi.ProviderResource;
   /**
    * Manual credentials override. If provided, nimbus uses these instead of
    * creating IAM resources. Useful for non-AWS providers or pre-existing credentials.

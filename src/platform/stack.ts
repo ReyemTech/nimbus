@@ -121,6 +121,7 @@ function deployToCluster(
               Effect: "Allow",
               Action: [
                 "route53:ChangeResourceRecordSets",
+                "route53:GetChange",
                 "route53:ListResourceRecordSets",
               ],
               Resource: "arn:aws:route53:::hostedzone/*",

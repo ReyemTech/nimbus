@@ -87,7 +87,7 @@ export type {
 } from "./database";
 
 // Cache
-export type { CacheEngine, CacheMode, CacheArchitecture, ICacheConfig, ICache } from "./cache";
+export { type CacheEngine, type CacheMode, type CacheArchitecture, type ICacheConfig, type ICache, createCache } from "./cache";
 
 // Object Storage
 export type { ILifecycleRule, ICorsRule, IObjectStorageConfig, IObjectStorage } from "./storage";

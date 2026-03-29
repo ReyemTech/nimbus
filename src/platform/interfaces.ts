@@ -32,7 +32,12 @@ export interface IPlatformComponentConfig {
 /** External DNS component configuration with provider-specific auth. */
 export interface IExternalDnsConfig extends IPlatformComponentConfig {
   readonly dnsProvider: DnsProvider;
-  /** Provider-specific credentials (e.g., AWS IAM keys, Azure identity). */
+  /** AWS region for Route53. Required when dnsProvider is "route53". */
+  readonly awsRegion?: string;
+  /**
+   * Manual credentials override. If provided, nimbus uses these instead of
+   * creating IAM resources. Useful for non-AWS providers or pre-existing credentials.
+   */
   readonly dnsCredentials?: Record<string, pulumi.Input<string>>;
   /** DNS zone filter (e.g., ["reyem.tech"]). */
   readonly domainFilters?: ReadonlyArray<string>;

@@ -24,6 +24,50 @@ let createdCustomResources: Array<{ name: string; args: any }>;
 let createdSecrets: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdIngresses: Array<{ name: string; args: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdIamUsers: Array<{ name: string; args: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdIamPolicies: Array<{ name: string; args: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdIamAccessKeys: Array<{ name: string; args: any }>;
+
+// Mock @pulumi/aws
+vi.mock("@pulumi/aws", () => {
+  const mockIamUser = class {
+    name: ReturnType<typeof mockOutput>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, args: any, _opts?: any) {
+      createdIamUsers.push({ name, args });
+      this.name = mockOutput(args.name);
+    }
+  };
+
+  const mockUserPolicy = class {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, args: any, _opts?: any) {
+      createdIamPolicies.push({ name, args });
+    }
+  };
+
+  const mockAccessKey = class {
+    id: ReturnType<typeof mockOutput>;
+    secret: ReturnType<typeof mockOutput>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, args: any, _opts?: any) {
+      createdIamAccessKeys.push({ name, args });
+      this.id = mockOutput("AKIAIOSFODNN7EXAMPLE");
+      this.secret = mockOutput("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+    }
+  };
+
+  return {
+    iam: {
+      User: mockIamUser,
+      UserPolicy: mockUserPolicy,
+      AccessKey: mockAccessKey,
+    },
+  };
+});
 
 // Mock @pulumi/kubernetes
 vi.mock("@pulumi/kubernetes", () => {
@@ -96,6 +140,9 @@ beforeEach(() => {
   createdCustomResources = [];
   createdSecrets = [];
   createdIngresses = [];
+  createdIamUsers = [];
+  createdIamPolicies = [];
+  createdIamAccessKeys = [];
 });
 
 describe("platform stack — descheduler", () => {
@@ -279,6 +326,123 @@ describe("platform stack — wildcard cert and TLSStore", () => {
     const tlsStore = createdCustomResources.find((r) => r.args.kind === "TLSStore");
     expect(tlsStore).toBeDefined();
     expect(tlsStore!.args.spec.defaultCertificate.secretName).toBe("reyem-tech-wildcard-tls");
+  });
+});
+
+describe("platform stack — Route53 IAM auto-provisioning", () => {
+  it("creates IAM user, policy, access key, and K8s secrets when route53 without manual credentials", () => {
+    const cluster = makeCluster("test");
+    createPlatformStack("test", {
+      cluster,
+      domain: "reyem.tech",
+      externalDns: {
+        dnsProvider: "route53",
+        domainFilters: ["reyem.tech"],
+        awsRegion: "us-east-1",
+      },
+    });
+
+    expect(createdIamUsers).toHaveLength(1);
+    expect(createdIamUsers[0]!.args.path).toBe("/nimbus/");
+    expect(createdIamPolicies).toHaveLength(1);
+    expect(createdIamAccessKeys).toHaveLength(1);
+
+    // Two K8s secrets: one for external-dns, one for cert-manager
+    const route53Secrets = createdSecrets.filter(
+      (s) => s.args.metadata?.name === "route53-credentials"
+    );
+    expect(route53Secrets).toHaveLength(2);
+
+    const ednsSecret = route53Secrets.find(
+      (s) => s.args.metadata?.namespace === "external-dns"
+    );
+    expect(ednsSecret).toBeDefined();
+
+    const cmSecret = route53Secrets.find(
+      (s) => s.args.metadata?.namespace === "cert-manager"
+    );
+    expect(cmSecret).toBeDefined();
+  });
+
+  it("creates ClusterIssuer for DNS-01 when route53 IAM is auto-provisioned", () => {
+    const cluster = makeCluster("test");
+    createPlatformStack("test", {
+      cluster,
+      domain: "reyem.tech",
+      externalDns: {
+        dnsProvider: "route53",
+        domainFilters: ["reyem.tech"],
+      },
+    });
+
+    const issuer = createdCustomResources.find(
+      (r) => r.args.kind === "ClusterIssuer" && r.args.metadata?.name === "letsencrypt-dns"
+    );
+    expect(issuer).toBeDefined();
+    expect(issuer!.args.spec.acme.solvers[0].dns01.route53.region).toBe("us-east-1");
+  });
+
+  it("sets env overrides on external-dns helm values for route53", () => {
+    const cluster = makeCluster("test");
+    createPlatformStack("test", {
+      cluster,
+      domain: "reyem.tech",
+      certManager: { enabled: false },
+      externalDns: {
+        dnsProvider: "route53",
+        domainFilters: ["reyem.tech"],
+      },
+    });
+
+    const ednsRelease = createdReleases.find((r) => r.name.includes("external-dns"));
+    expect(ednsRelease).toBeDefined();
+    const env = (ednsRelease!.args.values as Record<string, unknown>)["env"] as Array<Record<string, unknown>>;
+    expect(env).toHaveLength(3);
+    expect(env.map((e) => e["name"])).toEqual([
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_REGION",
+    ]);
+  });
+
+  it("skips IAM provisioning when manual dnsCredentials are provided", () => {
+    const cluster = makeCluster("test");
+    createPlatformStack("test", {
+      cluster,
+      domain: "reyem.tech",
+      certManager: { enabled: false },
+      externalDns: {
+        dnsProvider: "route53",
+        dnsCredentials: { AWS_ACCESS_KEY_ID: "manual", AWS_SECRET_ACCESS_KEY: "manual" },
+        domainFilters: ["reyem.tech"],
+      },
+    });
+
+    expect(createdIamUsers).toHaveLength(0);
+    expect(createdIamAccessKeys).toHaveLength(0);
+
+    // No route53-credentials secrets
+    const route53Secrets = createdSecrets.filter(
+      (s) => s.args.metadata?.name === "route53-credentials"
+    );
+    expect(route53Secrets).toHaveLength(0);
+  });
+
+  it("defaults awsRegion to us-east-1 when not specified", () => {
+    const cluster = makeCluster("test");
+    createPlatformStack("test", {
+      cluster,
+      domain: "reyem.tech",
+      externalDns: {
+        dnsProvider: "route53",
+        domainFilters: ["reyem.tech"],
+      },
+    });
+
+    const issuer = createdCustomResources.find(
+      (r) => r.args.kind === "ClusterIssuer" && r.args.metadata?.name === "letsencrypt-dns"
+    );
+    expect(issuer!.args.spec.acme.solvers[0].dns01.route53.region).toBe("us-east-1");
   });
 });
 

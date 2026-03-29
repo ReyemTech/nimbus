@@ -126,6 +126,18 @@ export {
   createGlobalLoadBalancer,
 } from "./global-lb";
 
+// Observability
+export {
+  type IPrometheusConfig,
+  type IGrafanaConfig,
+  type ILokiConfig,
+  type IAlloyConfig,
+  type IAlertmanagerConfig,
+  type IObservabilityStackConfig,
+  type IObservabilityStack,
+  createObservabilityStack,
+} from "./observability";
+
 // Azure resource group helper
 export { ensureResourceGroup, type IResourceGroupOptions } from "./azure/resource-group";
 

@@ -132,6 +132,9 @@ function deployKubePrometheusStack(
       enabled: true,
       ingressClassName: "traefik",
       hosts: [`${promSubdomain}.${domain}`],
+      annotations: {
+        "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+      },
       tls: [{ secretName: tlsSecretName, hosts: [`${promSubdomain}.${domain}`] }],
     };
   }
@@ -146,6 +149,9 @@ function deployKubePrometheusStack(
       enabled: true,
       ingressClassName: "traefik",
       hosts: [`${grafSubdomain}.${domain}`],
+      annotations: {
+        "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+      },
       tls: [{ secretName: tlsSecretName, hosts: [`${grafSubdomain}.${domain}`] }],
     };
 
@@ -171,6 +177,9 @@ function deployKubePrometheusStack(
       enabled: true,
       ingressClassName: "traefik",
       hosts: [`${amSubdomain}.${domain}`],
+      annotations: {
+        "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+      },
       tls: [{ secretName: tlsSecretName, hosts: [`${amSubdomain}.${domain}`] }],
     };
   }

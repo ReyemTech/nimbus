@@ -538,10 +538,11 @@ function deployTraefik(
         ingressRoute: {
           dashboard: { enabled: false },
         },
-        ports: {
-          web: { redirectTo: { port: "websecure" } },
-          websecure: { tls: { enabled: true } },
-        },
+        additionalArguments: [
+          "--entrypoints.websecure.http.tls=true",
+          "--entrypoints.web.http.redirections.entrypoint.to=websecure",
+          "--entrypoints.web.http.redirections.entrypoint.scheme=https",
+        ],
         providers: {
           kubernetesIngress: { publishedService: { enabled: true } },
         },

@@ -48,6 +48,22 @@ export interface IVaultConfig extends IPlatformComponentConfig {
   readonly ingressHost?: string;
 }
 
+/** Image pull secret configuration for private registries. */
+export interface IImagePullSecret {
+  readonly registry: string;
+  readonly username: pulumi.Input<string>;
+  readonly password: pulumi.Input<string>;
+  readonly email?: pulumi.Input<string>;
+  /** Namespaces to replicate the pull secret into. */
+  readonly namespaces?: ReadonlyArray<string>;
+}
+
+/** Descheduler configuration for spot/preemptible environments. */
+export interface IDeschedulerConfig extends IPlatformComponentConfig {
+  /** Strategies to enable. Default: RemoveDuplicates, LowNodeUtilization, RemovePodsViolatingNodeAffinity */
+  readonly strategies?: ReadonlyArray<string>;
+}
+
 /**
  * Platform stack configuration input.
  *
@@ -82,6 +98,15 @@ export interface IPlatformStackConfig {
     readonly clientId: pulumi.Input<string>;
     readonly clientSecret: pulumi.Input<string>;
   };
+
+  /** Block robots/crawlers on staging environments. Default: false. */
+  readonly robotsBlock?: boolean;
+
+  /** Private registry image pull secrets, replicated to specified namespaces. */
+  readonly imagePullSecrets?: ReadonlyArray<IImagePullSecret>;
+
+  /** Descheduler for pod rebalancing on spot instances. */
+  readonly descheduler?: IDeschedulerConfig;
 
   readonly tags?: Readonly<Record<string, string>>;
 }

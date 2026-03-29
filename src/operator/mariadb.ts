@@ -134,6 +134,7 @@ export function createMariadbDatabase(
             s3: {
               bucket: backup.target.bucket,
               prefix: `mariadb/${name}`,
+              endpoint: `s3.${backup.target.region}.amazonaws.com`,
               accessKeyIdSecretKeyRef: {
                 name: `${name}-backup-s3-credentials`,
                 key: "access-key-id",

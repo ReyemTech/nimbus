@@ -318,7 +318,9 @@ function deployToCluster(
                     pathType: "Prefix",
                     backend: {
                       service: {
-                        name: "oauth2-proxy",
+                        name: components["oauth2-proxy"].status.apply(
+                          (s) => s?.name ?? "oauth2-proxy"
+                        ),
                         port: { number: 4180 },
                       },
                     },

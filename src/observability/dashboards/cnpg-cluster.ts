@@ -11,10 +11,12 @@ import { PROM_DS, createDashboardConfigMap } from "./_helpers";
 
 /** Build the per-cluster CNPG dashboard JSON filtered to a specific cluster. */
 function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
-  const f = `cluster="${clusterName}"`;
+  // Collector metrics use `cluster` label, pg_stat metrics use `pod` label
+  const fc = `cluster="${clusterName}"`;
+  const fp = `pod=~"${clusterName}-.*"`;
   return {
     uid: `nimbus-cnpg-${clusterName}`,
-    title: `Nimbus / Data / PostgreSQL / ${clusterName}`,
+    title: `Nimbus / Data / Postgres / ${clusterName}`,
     tags: ["nimbus", "cnpg", "postgresql", clusterName],
     timezone: "browser",
     editable: true,
@@ -29,7 +31,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `cnpg_collector_up{${f}}`,
+            expr: `cnpg_collector_up{${fc}}`,
             refId: "A",
             legendFormat: "up",
           },
@@ -57,7 +59,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `count(cnpg_collector_up{${f}})`,
+            expr: `count(cnpg_collector_up{${fc}})`,
             refId: "A",
             legendFormat: "instances",
           },
@@ -75,7 +77,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `cnpg_pg_replication_streaming_replicas{${f}}`,
+            expr: `cnpg_pg_replication_streaming_replicas{${fc}}`,
             refId: "A",
             legendFormat: "replicas",
           },
@@ -93,7 +95,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `cnpg_pg_stat_archiver_failed_count{${f}}`,
+            expr: `cnpg_pg_stat_archiver_failed_count{${fc}}`,
             refId: "A",
             legendFormat: "failed",
           },
@@ -118,7 +120,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `cnpg_backends_total{${f}}`,
+            expr: `cnpg_backends_total{${fp}}`,
             refId: "A",
             legendFormat: "{{pod}}",
           },
@@ -132,7 +134,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `cnpg_backends_waiting_total{${f}}`,
+            expr: `cnpg_backends_waiting_total{${fp}}`,
             refId: "A",
             legendFormat: "{{pod}}",
           },
@@ -146,12 +148,12 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `rate(cnpg_pg_stat_database_xact_commit{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_database_xact_commit{${fp}}[5m])`,
             refId: "A",
             legendFormat: "{{datname}} commits/s",
           },
           {
-            expr: `rate(cnpg_pg_stat_database_xact_rollback{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_database_xact_rollback{${fp}}[5m])`,
             refId: "B",
             legendFormat: "{{datname}} rollbacks/s",
           },
@@ -166,7 +168,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `cnpg_pg_replication_lag{${f}}`,
+            expr: `cnpg_pg_replication_lag{${fc}}`,
             refId: "A",
             legendFormat: "{{pod}}",
           },
@@ -181,7 +183,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `rate(cnpg_pg_stat_archiver_archived_count{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_archiver_archived_count{${fc}}[5m])`,
             refId: "A",
             legendFormat: "{{pod}}",
           },
@@ -196,7 +198,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `time() - cnpg_collector_last_available_backup_timestamp{${f}}`,
+            expr: `time() - cnpg_collector_last_available_backup_timestamp{${fc}}`,
             refId: "A",
             legendFormat: "age",
           },
@@ -223,7 +225,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `sum(cnpg_cache_hits{${f}}) / (sum(cnpg_cache_hits{${f}}) + sum(cnpg_cache_miss{${f}}))`,
+            expr: `sum(cnpg_cache_hits{${fp}}) / (sum(cnpg_cache_hits{${fp}}) + sum(cnpg_cache_miss{${fp}}))`,
             refId: "A",
           },
         ],
@@ -251,22 +253,22 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `rate(cnpg_pg_stat_user_tables_n_tup_ins{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_user_tables_n_tup_ins{${fp}}[5m])`,
             refId: "A",
             legendFormat: "inserts/s",
           },
           {
-            expr: `rate(cnpg_pg_stat_user_tables_n_tup_upd{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_user_tables_n_tup_upd{${fp}}[5m])`,
             refId: "B",
             legendFormat: "updates/s",
           },
           {
-            expr: `rate(cnpg_pg_stat_user_tables_n_tup_del{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_user_tables_n_tup_del{${fp}}[5m])`,
             refId: "C",
             legendFormat: "deletes/s",
           },
           {
-            expr: `rate(cnpg_pg_stat_user_tables_n_tup_fetched{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_user_tables_n_tup_fetched{${fp}}[5m])`,
             refId: "D",
             legendFormat: "fetched/s",
           },
@@ -282,7 +284,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `cnpg_pg_database_size_bytes{${f}}`,
+            expr: `cnpg_pg_database_size_bytes{${fp}}`,
             refId: "A",
             legendFormat: "{{datname}}",
             instant: true,
@@ -310,12 +312,12 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `rate(cnpg_pg_stat_database_xact_commit{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_database_xact_commit{${fp}}[5m])`,
             refId: "A",
             legendFormat: "{{datname}} commits/s",
           },
           {
-            expr: `rate(cnpg_pg_stat_database_xact_rollback{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_database_xact_rollback{${fp}}[5m])`,
             refId: "B",
             legendFormat: "{{datname}} rollbacks/s",
           },
@@ -330,7 +332,7 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `rate(cnpg_pg_stat_database_temp_bytes{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_database_temp_bytes{${fp}}[5m])`,
             refId: "A",
             legendFormat: "{{datname}}",
           },
@@ -345,12 +347,12 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `rate(cnpg_pg_stat_database_deadlocks{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_database_deadlocks{${fp}}[5m])`,
             refId: "A",
             legendFormat: "{{datname}} deadlocks",
           },
           {
-            expr: `rate(cnpg_pg_stat_database_conflicts{${f}}[5m])`,
+            expr: `rate(cnpg_pg_stat_database_conflicts{${fp}}[5m])`,
             refId: "B",
             legendFormat: "{{datname}} conflicts",
           },

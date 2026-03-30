@@ -27,7 +27,7 @@ export function cnpgDashboard(): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: "sum(cnpg_backends_total) by (cluster)",
+            expr: 'sum by (cluster) (label_replace(cnpg_backends_total, "cluster", "$1", "pod", "(.*)-\\\\d+"))',
             refId: "A",
             legendFormat: "{{cluster}}",
           },
@@ -100,12 +100,12 @@ export function cnpgDashboard(): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: "sum(rate(cnpg_pg_stat_database_xact_commit[5m])) by (cluster)",
+            expr: 'sum by (cluster) (label_replace(rate(cnpg_pg_stat_database_xact_commit[5m]), "cluster", "$1", "pod", "(.*)-\\\\d+"))',
             refId: "A",
             legendFormat: "{{cluster}} commits/s",
           },
           {
-            expr: "sum(rate(cnpg_pg_stat_database_xact_rollback[5m])) by (cluster)",
+            expr: 'sum by (cluster) (label_replace(rate(cnpg_pg_stat_database_xact_rollback[5m]), "cluster", "$1", "pod", "(.*)-\\\\d+"))',
             refId: "B",
             legendFormat: "{{cluster}} rollbacks/s",
           },

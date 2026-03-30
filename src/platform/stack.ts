@@ -12,6 +12,7 @@ import * as aws from "@pulumi/aws";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type { ICluster } from "../cluster";
+import { createPrometheusRule } from "../observability/alerts";
 import type {
   IDeschedulerConfig,
   IExternalDnsConfig,
@@ -92,6 +93,29 @@ function deployToCluster(
   // 1. Traefik (ingress controller) — enabled by default
   if (config.traefik?.enabled !== false) {
     components["traefik"] = deployTraefik(name, config.traefik, provider, config.robotsBlock);
+
+    // Traefik alert rules
+    createPrometheusRule(`${name}-traefik-alerts`, "observability", [
+      {
+        name: "nimbus.traefik",
+        rules: [
+          {
+            alert: "TraefikDown",
+            expr: `kube_deployment_status_replicas_available{namespace="traefik",deployment=~".*traefik.*"} == 0`,
+            for: "2m",
+            labels: { severity: "critical" },
+            annotations: { summary: "Traefik ingress controller has 0 available replicas — all traffic stopped" },
+          },
+          {
+            alert: "TraefikHighErrorRate",
+            expr: `sum(rate(traefik_service_requests_total{code=~"5.."}[5m])) / sum(rate(traefik_service_requests_total[5m])) > 0.05`,
+            for: "5m",
+            labels: { severity: "warning" },
+            annotations: { summary: "Traefik 5xx error rate is above 5% ({{ $value | humanizePercentage }})" },
+          },
+        ],
+      },
+    ], provider, [components["traefik"]]);
   }
 
   // 2. cert-manager (TLS certificates) — enabled by default

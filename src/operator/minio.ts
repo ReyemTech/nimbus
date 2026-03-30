@@ -19,6 +19,7 @@ import type {
   IMinIOIngressConfig,
 } from "./interfaces";
 import { resolveStorageTier } from "../types/storage-tiers";
+import { createPrometheusRule } from "../observability/alerts";
 
 const DATA_NAMESPACE = "data";
 const DEFAULT_STORAGE_GB = 20;
@@ -139,6 +140,22 @@ export function createMinioOperator(
     },
     { provider, dependsOn: [helmRelease, configSecret] }
   );
+
+  // MinIO alert rules
+  createPrometheusRule(`${TENANT_NAME}-minio-alerts`, "observability", [
+    {
+      name: "nimbus.minio",
+      rules: [
+        {
+          alert: "MinioClusterUnhealthy",
+          expr: `minio_cluster_health_status != 1`,
+          for: "5m",
+          labels: { severity: "critical" },
+          annotations: { summary: "MinIO cluster is unhealthy" },
+        },
+      ],
+    },
+  ], provider, [tenant]);
 
   // MinIO Operator creates a service named "minio" in the tenant namespace
   // S3 API at minio.data.svc.cluster.local:80 (HTTP when requestAutoCert: false)

@@ -15,6 +15,7 @@ import type { ResolvedCloudTarget } from "../types";
 import { resolveStorageTier, type StorageTierMap } from "../types/storage-tiers";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import type { ICacheConfig, ICache } from "./interfaces";
+import { createPrometheusRule } from "../observability/alerts";
 
 /** Target namespace for all cache deployments. */
 const CACHE_NAMESPACE = "data";
@@ -135,6 +136,22 @@ export function createCache(name: string, config: ICacheConfig, provider: k8s.Pr
     path: `${helmReleaseName}-redis`,
     key: "redis-password",
   };
+
+  // Redis alert rules
+  createPrometheusRule(`${name}-redis-alerts`, "observability", [
+    {
+      name: `nimbus.redis.${name}`,
+      rules: [
+        {
+          alert: "RedisDown",
+          expr: `redis_up{job=~".*${name}.*"} == 0`,
+          for: "2m",
+          labels: { severity: "critical" },
+          annotations: { summary: `Redis ${name} is DOWN` },
+        },
+      ],
+    },
+  ], provider, [release]);
 
   return {
     name,

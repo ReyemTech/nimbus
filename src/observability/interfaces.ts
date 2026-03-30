@@ -11,6 +11,37 @@ import type * as pulumi from "@pulumi/pulumi";
 import type * as k8s from "@pulumi/kubernetes";
 import type { ICluster } from "../cluster";
 import type { StorageTier } from "../types/storage-tiers";
+import type { IEmailTransport } from "../email/interfaces";
+
+// ---------------------------------------------------------------------------
+// Alerting interfaces
+// ---------------------------------------------------------------------------
+
+/** Email alert notification config — uses an IEmailTransport for SMTP. */
+export interface IAlertEmailConfig {
+  /** Recipient email address(es). */
+  readonly to: string | string[];
+  /** Email transport providing SMTP credentials. */
+  readonly transport: IEmailTransport;
+}
+
+/** Slack alert notification config. */
+export interface IAlertSlackConfig {
+  /** K8s Secret name containing the Slack webhook URL (key: "webhook-url"). */
+  readonly webhookUrlSecret: string;
+  /** Slack channel (e.g., "#alerts"). */
+  readonly channel: string;
+  /** Bot username. Default: "Nimbus Alerts". */
+  readonly username?: string;
+}
+
+/** Top-level alerting configuration for the observability stack. */
+export interface IAlertConfig {
+  /** Email notification receiver. */
+  readonly email?: IAlertEmailConfig;
+  /** Slack notification receiver. */
+  readonly slack?: IAlertSlackConfig;
+}
 
 /** Prometheus server configuration. */
 export interface IPrometheusConfig {
@@ -120,6 +151,8 @@ export interface IObservabilityStackConfig {
   readonly alloy?: IAlloyConfig;
   /** Alertmanager configuration. */
   readonly alertmanager?: IAlertmanagerConfig;
+  /** Alerting configuration: notification receivers and rule thresholds. */
+  readonly alerts?: IAlertConfig;
   /** Neo4j Bolt endpoint for Grafana datasource (e.g., "bolt://neo4j-main.data.svc.cluster.local:7687"). */
   readonly neo4jEndpoint?: pulumi.Input<string>;
   /** Neo4j admin password secret name (must have a "password" key in the data namespace). */

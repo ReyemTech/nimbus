@@ -174,13 +174,33 @@ export {
   type ILokiConfig,
   type IAlloyConfig,
   type IAlertmanagerConfig,
+  type IAlertConfig,
+  type IAlertEmailConfig,
+  type IAlertSlackConfig,
   type IObservabilityStackConfig,
   type IObservabilityStack,
+  type IPrometheusRuleGroup,
+  type IPrometheusAlertRule,
   createObservabilityStack,
+  createPrometheusRule,
+  parseDurationToSeconds,
 } from "./observability";
 
 // Azure resource group helper
 export { ensureResourceGroup, type IResourceGroupOptions } from "./azure/resource-group";
+
+// Email Transport
+export {
+  type EmailProvider,
+  type IEmailTransportConfig,
+  type ISesTransportConfig,
+  type ISmtpTransportConfig,
+  type IResendTransportConfig,
+  type IMailgunTransportConfig,
+  type IEmailTransport,
+  createEmailTransport,
+  EMAIL_PROVIDERS,
+} from "./email";
 
 // Utilities
 export { ensureNamespace } from "./utils/ensure-namespace";

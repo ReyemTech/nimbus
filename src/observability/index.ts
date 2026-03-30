@@ -10,8 +10,14 @@ export type {
   ILokiConfig,
   IAlloyConfig,
   IAlertmanagerConfig,
+  IAlertConfig,
+  IAlertEmailConfig,
+  IAlertSlackConfig,
   IObservabilityStackConfig,
   IObservabilityStack,
 } from "./interfaces";
 
 export { createObservabilityStack } from "./stack";
+
+export type { IPrometheusRuleGroup, IPrometheusAlertRule } from "./alerts";
+export { createPrometheusRule, parseDurationToSeconds } from "./alerts";

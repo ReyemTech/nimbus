@@ -21,6 +21,7 @@ import type {
   IDatabaseInstance,
 } from "./interfaces";
 import { createMariadbClusterDashboard } from "../observability/dashboards";
+import { createPrometheusRule } from "../observability/alerts";
 
 const DATA_NAMESPACE = "data";
 const DEFAULT_MARIADB_VERSION = "11.7";
@@ -307,6 +308,22 @@ function createSingleMariadbCluster(
 
   // Per-cluster Grafana dashboard
   createMariadbClusterDashboard(name, "observability", provider, [mariadb]);
+
+  // Per-cluster alert rules
+  createPrometheusRule(`${name}-mariadb-alerts`, "observability", [
+    {
+      name: `nimbus.mariadb.${name}`,
+      rules: [
+        {
+          alert: "MariadbDown",
+          expr: `mysql_up{job=~".*mariadb.*",instance=~"${name}.*"} == 0`,
+          for: "2m",
+          labels: { severity: "critical" },
+          annotations: { summary: `MariaDB instance ${name} is DOWN` },
+        },
+      ],
+    },
+  ], provider, [mariadb]);
 
   // Scheduled backup via S3
   if (backup) {

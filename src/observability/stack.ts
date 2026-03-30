@@ -18,6 +18,7 @@ import type {
 } from "./interfaces";
 import { createDashboards, lokiLogsDashboard } from "./dashboards/index";
 import { resolveStorageTier } from "../types/storage-tiers";
+import { createGlobalAlertRules, buildAlertmanagerConfig } from "./alerts";
 
 /**
  * Default Helm chart versions. Used only when the consumer doesn't pass `version`.
@@ -90,8 +91,14 @@ export function createObservabilityStack(
       config.alertmanager,
       provider,
       cluster.storageTiers,
-      grafanaPlugins
+      grafanaPlugins,
+      config.alerts
     );
+  }
+
+  // Global alert rules (PVC, cert-manager) — after kube-prometheus-stack
+  if (config.alerts && components["kube-prometheus-stack"]) {
+    createGlobalAlertRules(name, namespace, provider, [components["kube-prometheus-stack"]]);
   }
 
   // 3. Loki (log aggregation)
@@ -250,7 +257,8 @@ function deployKubePrometheusStack(
   alertmanager: IAlertmanagerConfig | undefined,
   provider: k8s.Provider,
   storageTiers?: import("../types/storage-tiers").StorageTierMap,
-  grafanaPlugins?: string[]
+  grafanaPlugins?: string[],
+  alertConfig?: import("./interfaces").IAlertConfig
 ): k8s.helm.v3.Release {
   const certName = domain.replace(/\./g, "-");
   const tlsSecretName = `${certName}-wildcard-tls`;
@@ -268,6 +276,7 @@ function deployKubePrometheusStack(
     prometheusValues["prometheusSpec"] = {
       serviceMonitorSelectorNilUsesHelmValues: false,
       podMonitorSelectorNilUsesHelmValues: false,
+      ruleSelectorNilUsesHelmValues: false,
       retention: prometheus.retention ?? "15d",
       storageSpec: {
         volumeClaimTemplate: {
@@ -314,6 +323,31 @@ function deployKubePrometheusStack(
     // Install additional Grafana plugins
     if (grafanaPlugins && grafanaPlugins.length > 0) {
       grafanaValues["plugins"] = grafanaPlugins;
+    }
+
+    // Grafana SMTP for email alerts (uses the email transport's credentials)
+    if (alertConfig?.email) {
+      const transport = alertConfig.email.transport;
+      grafanaValues["smtp"] = {
+        enabled: true,
+        host: `${transport.host}:${transport.port}`,
+        user: transport.username,
+        from_address: transport.fromAddress,
+        from_name: "Nimbus Grafana",
+      };
+      if (transport.secretName) {
+        grafanaValues["extraSecretMounts"] = [
+          {
+            name: "smtp-password",
+            secretName: transport.secretName,
+            defaultMode: "0440",
+            mountPath: "/etc/secrets/smtp-password",
+            readOnly: true,
+          },
+        ];
+        (grafanaValues["smtp"] as Record<string, unknown>)["password"] =
+          "$__file{/etc/secrets/smtp-password/password}";
+      }
     }
 
     // Dashboard + datasource sidecars for configmap-based persistence
@@ -372,6 +406,7 @@ function deployKubePrometheusStack(
         ...prometheus?.values,
         ...grafana?.values,
         ...alertmanager?.values,
+        ...(alertConfig ? { alertmanager: { ...alertmanagerValues, ...buildAlertmanagerConfig(alertConfig) } } : {}),
       },
     },
     { provider }

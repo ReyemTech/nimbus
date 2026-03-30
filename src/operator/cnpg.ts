@@ -21,6 +21,7 @@ import type {
   IDatabaseInstance,
 } from "./interfaces";
 import { createCnpgClusterDashboard } from "../observability/dashboards";
+import { createPrometheusRule } from "../observability/alerts";
 
 const DATA_NAMESPACE = "data";
 const DEFAULT_PG_VERSION = "17";
@@ -325,6 +326,37 @@ function createSingleCnpgCluster(
 
   // Per-cluster Grafana dashboard
   createCnpgClusterDashboard(name, "observability", provider, [cluster]);
+
+  // Per-cluster alert rules
+  const fc = `cluster="${name}"`;
+  createPrometheusRule(`${name}-cnpg-alerts`, "observability", [
+    {
+      name: `nimbus.cnpg.${name}`,
+      rules: [
+        {
+          alert: "CnpgClusterDown",
+          expr: `cnpg_collector_up{${fc}} == 0`,
+          for: "2m",
+          labels: { severity: "critical" },
+          annotations: { summary: `CNPG cluster ${name} is DOWN` },
+        },
+        {
+          alert: "CnpgReplicationLagCritical",
+          expr: `cnpg_pg_replication_lag{${fc}} > 120`,
+          for: "5m",
+          labels: { severity: "critical" },
+          annotations: { summary: `CNPG replication lag on ${name} is {{ $value }}s` },
+        },
+        {
+          alert: "CnpgBackupStaleCritical",
+          expr: `(time() - cnpg_collector_last_available_backup_timestamp{${fc}}) > 172800`,
+          for: "10m",
+          labels: { severity: "critical" },
+          annotations: { summary: `CNPG backup for ${name} is older than 48h` },
+        },
+      ],
+    },
+  ], provider, [cluster]);
 
   // ScheduledBackup CRD if backup is configured
   if (backup) {

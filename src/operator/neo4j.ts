@@ -25,6 +25,7 @@ import type {
   IClusterInstance,
 } from "./interfaces";
 import { createNeo4jClusterDashboard } from "../observability/dashboards";
+import { createPrometheusRule } from "../observability/alerts";
 
 const DATA_NAMESPACE = "data";
 const NEO4J_BOLT_PORT = 7687;
@@ -325,6 +326,22 @@ export function createNeo4jCluster(
   // 4. Per-cluster Grafana dashboard
   // -------------------------------------------------------------------------
   createNeo4jClusterDashboard(name, "observability", provider, [release]);
+
+  // Per-cluster alert rules
+  createPrometheusRule(`${name}-neo4j-alerts`, "observability", [
+    {
+      name: `nimbus.neo4j.${name}`,
+      rules: [
+        {
+          alert: "Neo4jDown",
+          expr: `up{job=~".*neo4j.*",instance=~"${name}.*"} == 0`,
+          for: "2m",
+          labels: { severity: "critical" },
+          annotations: { summary: `Neo4j instance ${name} is DOWN` },
+        },
+      ],
+    },
+  ], provider, [release]);
 
   // -------------------------------------------------------------------------
   // 6. Return IClusterInstance with createDatabase()

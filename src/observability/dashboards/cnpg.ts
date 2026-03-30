@@ -27,9 +27,9 @@ export function cnpgDashboard(): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: "sum(cnpg_backends_total) by (cnpg_cluster)",
+            expr: "sum(cnpg_backends_total) by (cluster)",
             refId: "A",
-            legendFormat: "{{cnpg_cluster}}",
+            legendFormat: "{{cluster}}",
           },
         ],
       },
@@ -59,7 +59,7 @@ export function cnpgDashboard(): Record<string, unknown> {
           {
             expr: "cnpg_pg_replication_lag",
             refId: "A",
-            legendFormat: "{{cnpg_cluster}}",
+            legendFormat: "{{cluster}}",
           },
         ],
         fieldConfig: { defaults: { unit: "s" }, overrides: [] },
@@ -100,14 +100,14 @@ export function cnpgDashboard(): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: "sum(rate(cnpg_pg_stat_database_xact_commit[5m])) by (cnpg_cluster)",
+            expr: "sum(rate(cnpg_pg_stat_database_xact_commit[5m])) by (cluster)",
             refId: "A",
-            legendFormat: "{{cnpg_cluster}} commits/s",
+            legendFormat: "{{cluster}} commits/s",
           },
           {
-            expr: "sum(rate(cnpg_pg_stat_database_xact_rollback[5m])) by (cnpg_cluster)",
+            expr: "sum(rate(cnpg_pg_stat_database_xact_rollback[5m])) by (cluster)",
             refId: "B",
-            legendFormat: "{{cnpg_cluster}} rollbacks/s",
+            legendFormat: "{{cluster}} rollbacks/s",
           },
         ],
         fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
@@ -122,7 +122,7 @@ export function cnpgDashboard(): Record<string, unknown> {
           {
             expr: "rate(cnpg_pg_stat_archiver_archived_count[5m])",
             refId: "A",
-            legendFormat: "{{cnpg_cluster}}",
+            legendFormat: "{{cluster}}",
           },
         ],
         fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
@@ -137,7 +137,7 @@ export function cnpgDashboard(): Record<string, unknown> {
           {
             expr: "time() - cnpg_collector_last_available_backup_timestamp",
             refId: "A",
-            legendFormat: "{{cnpg_cluster}}",
+            legendFormat: "{{cluster}}",
           },
         ],
         fieldConfig: {
@@ -164,7 +164,7 @@ export function cnpgDashboard(): Record<string, unknown> {
           {
             expr: "rate(cnpg_pg_stat_database_deadlocks[5m])",
             refId: "A",
-            legendFormat: "{{cnpg_cluster}}",
+            legendFormat: "{{cluster}}",
           },
         ],
         fieldConfig: {

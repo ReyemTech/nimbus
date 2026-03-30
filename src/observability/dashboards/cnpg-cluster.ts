@@ -11,7 +11,7 @@ import { PROM_DS, createDashboardConfigMap } from "./_helpers";
 
 /** Build the per-cluster CNPG dashboard JSON filtered to a specific cluster. */
 function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
-  const f = `cnpg_cluster="${clusterName}"`;
+  const f = `cluster="${clusterName}"`;
   return {
     uid: `nimbus-cnpg-${clusterName}`,
     title: `Nimbus / Data / PostgreSQL / ${clusterName}`,
@@ -272,6 +272,90 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
           },
         ],
         fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
+      },
+      // --- Database-level panels ---
+      {
+        id: 13,
+        title: "Database Sizes",
+        type: "bargauge",
+        gridPos: { h: 8, w: 12, x: 0, y: 36 },
+        datasource: PROM_DS,
+        targets: [
+          {
+            expr: `cnpg_pg_database_size_bytes{${f}}`,
+            refId: "A",
+            legendFormat: "{{datname}}",
+            instant: true,
+          },
+        ],
+        fieldConfig: {
+          defaults: {
+            unit: "bytes",
+            thresholds: {
+              steps: [
+                { value: 0, color: "green" },
+                { value: 1073741824, color: "yellow" },
+                { value: 10737418240, color: "red" },
+              ],
+            },
+          },
+          overrides: [],
+        },
+      },
+      {
+        id: 14,
+        title: "Transactions by Database",
+        type: "timeseries",
+        gridPos: { h: 8, w: 12, x: 12, y: 36 },
+        datasource: PROM_DS,
+        targets: [
+          {
+            expr: `rate(cnpg_pg_stat_database_xact_commit{${f}}[5m])`,
+            refId: "A",
+            legendFormat: "{{datname}} commits/s",
+          },
+          {
+            expr: `rate(cnpg_pg_stat_database_xact_rollback{${f}}[5m])`,
+            refId: "B",
+            legendFormat: "{{datname}} rollbacks/s",
+          },
+        ],
+        fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
+      },
+      {
+        id: 15,
+        title: "Temp Files by Database",
+        type: "timeseries",
+        gridPos: { h: 8, w: 12, x: 0, y: 44 },
+        datasource: PROM_DS,
+        targets: [
+          {
+            expr: `rate(cnpg_pg_stat_database_temp_bytes{${f}}[5m])`,
+            refId: "A",
+            legendFormat: "{{datname}}",
+          },
+        ],
+        fieldConfig: { defaults: { unit: "Bps" }, overrides: [] },
+      },
+      {
+        id: 16,
+        title: "Deadlocks & Conflicts by Database",
+        type: "timeseries",
+        gridPos: { h: 8, w: 12, x: 12, y: 44 },
+        datasource: PROM_DS,
+        targets: [
+          {
+            expr: `rate(cnpg_pg_stat_database_deadlocks{${f}}[5m])`,
+            refId: "A",
+            legendFormat: "{{datname}} deadlocks",
+          },
+          {
+            expr: `rate(cnpg_pg_stat_database_conflicts{${f}}[5m])`,
+            refId: "B",
+            legendFormat: "{{datname}} conflicts",
+          },
+        ],
+        fieldConfig: { defaults: { color: { mode: "fixed", fixedColor: "red" } }, overrides: [] },
       },
     ],
     schemaVersion: 39,

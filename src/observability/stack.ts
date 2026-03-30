@@ -194,6 +194,8 @@ function deployKubePrometheusStack(
   if (prometheus?.enabled) {
     const promSubdomain = prometheus.subdomain ?? "prometheus";
     prometheusValues["prometheusSpec"] = {
+      serviceMonitorSelectorNilUsesHelmValues: false,
+      podMonitorSelectorNilUsesHelmValues: false,
       retention: prometheus.retention ?? "15d",
       storageSpec: {
         volumeClaimTemplate: {

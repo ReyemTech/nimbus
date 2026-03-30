@@ -122,6 +122,9 @@ export type {
   IDatabaseInstance,
   IClusterInstance,
   IOperator,
+  IMinIOOperator,
+  IMinIOBucket,
+  IMinIOBucketConfig,
 } from "./operator";
 export { createOperator, OPERATOR_TYPES } from "./operator";
 

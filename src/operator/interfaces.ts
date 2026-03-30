@@ -18,12 +18,13 @@ import type { StorageTier } from "../types/storage-tiers";
 export type EnvironmentOverrides<T> = Record<string, Partial<T>>;
 
 /** Supported Kubernetes database operators. */
-export type OperatorType = "cloudnative-pg" | "mariadb-operator";
+export type OperatorType = "cloudnative-pg" | "mariadb-operator" | "minio";
 
 /** Typed constant map for OperatorType string literals. */
 export const OPERATOR_TYPES = {
   CLOUDNATIVE_PG: "cloudnative-pg" as const,
   MARIADB_OPERATOR: "mariadb-operator" as const,
+  MINIO: "minio" as const,
 } satisfies Record<string, OperatorType>;
 
 /** Default backup configuration for clusters provisioned by an operator. */
@@ -135,6 +136,41 @@ export interface IClusterInstance {
     name: string,
     config: IOperatorDatabaseConfig & Required<Pick<IOperatorDatabaseConfig, "environments">>
   ): Record<string, IDatabaseInstance>;
+}
+
+// ---------------------------------------------------------------------------
+// MinIO operator interfaces
+// ---------------------------------------------------------------------------
+
+/** Configuration for creating a MinIO bucket via the operator. */
+export interface IMinIOBucketConfig {
+  /** Bucket size in GB. Default: 10. */
+  readonly sizeGb?: number;
+  /** Enable public access. Default: false. */
+  readonly public?: boolean;
+  /** Namespaces to replicate the access credentials secret into. */
+  readonly namespaces?: string[];
+}
+
+/** A MinIO bucket with endpoint, credentials, and namespace secrets. */
+export interface IMinIOBucket {
+  readonly name: string;
+  readonly endpoint: pulumi.Output<string>;
+  readonly bucketName: pulumi.Output<string>;
+  readonly credentials: {
+    readonly accessKeyId: pulumi.Output<string>;
+    readonly secretAccessKey: pulumi.Output<string>;
+  };
+  /** Secrets created in target namespaces (namespace → secret name). */
+  readonly secrets: Record<string, pulumi.Output<string>>;
+  /** Underlying Pulumi resource for dependency wiring. */
+  readonly nativeResource: pulumi.Resource;
+}
+
+/** A MinIO operator instance with createBucket(). */
+export interface IMinIOOperator extends Omit<IOperator, "createCluster"> {
+  /** Create a bucket on the MinIO deployment and replicate credentials to target namespaces. */
+  createBucket(name: string, config?: IMinIOBucketConfig): IMinIOBucket;
 }
 
 /** Deployed database operator instance. */

@@ -1,9 +1,9 @@
 /**
- * Operator module — Kubernetes database operator deployment and database provisioning.
+ * Operator module — Kubernetes operator deployment and resource provisioning.
  *
- * Supports CloudNativePG (PostgreSQL) and MariaDB Operator via Helm.
- * Each operator exposes a createDatabase() method that provisions databases
- * via CRDs in the cluster.
+ * Supports CloudNativePG (PostgreSQL), MariaDB Operator, and MinIO via Helm.
+ * Database operators expose createCluster() / createDatabase(); the MinIO
+ * operator exposes createBucket() instead.
  *
  * @module operator
  */
@@ -13,8 +13,10 @@ import { assertNever } from "../types";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import { createCnpgDatabase } from "./cnpg";
 import { createMariadbDatabase } from "./mariadb";
+import { createMinioOperator, buildMinioHelmValues } from "./minio";
 import type {
   IOperator,
+  IMinIOOperator,
   IOperatorConfig,
   IOperatorClusterConfig,
   IClusterInstance,
@@ -31,8 +33,13 @@ export type {
   IDatabaseInstance,
   IClusterInstance,
   IOperator,
+  IMinIOOperator,
+  IMinIOBucket,
+  IMinIOBucketConfig,
 } from "./interfaces";
 export { OPERATOR_TYPES } from "./interfaces";
+
+const DATA_NAMESPACE = "data";
 
 /** Helm chart metadata for each operator type. */
 interface OperatorChartInfo {
@@ -62,15 +69,20 @@ const OPERATOR_CHARTS: Record<OperatorType, OperatorChartInfo & { crds?: Operato
       chart: "mariadb-operator-crds",
     },
   },
+  minio: {
+    repo: "https://charts.bitnami.com/bitnami",
+    chart: "minio",
+    defaultNamespace: DATA_NAMESPACE,
+  },
 };
 
 /**
- * Deploy a database operator to a Kubernetes cluster.
+ * Deploy an operator to a Kubernetes cluster.
  *
- * Installs the operator via Helm and returns an IOperator with a createDatabase()
- * method for provisioning databases via CRDs.
+ * - `"cloudnative-pg"` / `"mariadb-operator"` → returns IOperator with createCluster()
+ * - `"minio"` → returns IMinIOOperator with createBucket()
  *
- * @example
+ * @example Database operator
  * ```typescript
  * const op = createOperator("cloudnative-pg", {
  *   cluster,
@@ -81,15 +93,23 @@ const OPERATOR_CHARTS: Record<OperatorType, OperatorChartInfo & { crds?: Operato
  *     pitr: true,
  *   },
  * });
- *
- * const db = op.createDatabase("app-db", { replicas: 2, storageGb: 20 });
+ * const cluster = op.createCluster("app-db", { replicas: 2, storageGb: 20 });
  * ```
  *
- * @param type - Operator type: "cloudnative-pg" or "mariadb-operator"
+ * @example MinIO operator
+ * ```typescript
+ * const minio = createOperator("minio", { cluster }) as IMinIOOperator;
+ * const bucket = minio.createBucket("uploads", { namespaces: ["app"] });
+ * ```
+ *
+ * @param type - Operator type
  * @param config - Operator configuration
- * @returns Deployed IOperator instance
+ * @returns Deployed IOperator or IMinIOOperator instance
  */
-export function createOperator(type: OperatorType, config: IOperatorConfig): IOperator {
+export function createOperator(
+  type: OperatorType,
+  config: IOperatorConfig
+): IOperator | IMinIOOperator {
   const chartInfo = OPERATOR_CHARTS[type];
   const provider = config.cluster.provider;
   const namespace = config.namespace ?? chartInfo.defaultNamespace;
@@ -114,6 +134,9 @@ export function createOperator(type: OperatorType, config: IOperatorConfig): IOp
     operatorDeps.push(crdsRelease);
   }
 
+  // For MinIO, merge computed Helm values; for others, use caller-supplied values directly.
+  const helmValues = type === "minio" ? buildMinioHelmValues(config) : (config.values ?? {});
+
   // Deploy Helm release
   const helmRelease = new k8s.helm.v3.Release(
     `${type}-operator`,
@@ -123,10 +146,15 @@ export function createOperator(type: OperatorType, config: IOperatorConfig): IOp
       version: config.version,
       namespace,
       createNamespace: false,
-      values: config.values ?? {},
+      values: helmValues,
     },
     { provider, dependsOn: [ns, ...operatorDeps] }
   );
+
+  // MinIO returns a different operator shape (createBucket instead of createCluster)
+  if (type === "minio") {
+    return createMinioOperator(config, helmRelease);
+  }
 
   return {
     name: type,

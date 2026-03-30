@@ -19,13 +19,85 @@ const DEFAULT_REPLICAS = 1;
 const DEFAULT_STORAGE_GB = 10;
 
 /**
- * Create a PostgreSQL cluster via the CloudNativePG operator.
- *
- * @returns IClusterInstance with createDatabase() for per-database provisioning
+ * Create a single database instance within a CNPG cluster (no environment awareness).
  */
-export function createCnpgDatabase(
+function createSingleCnpgDatabaseInstance(
+  clusterName: string,
+  dbName: string,
+  dbConfig: Omit<IOperatorDatabaseConfig, "environments">,
+  endpoint: pulumi.Output<string>,
+  port: pulumi.Output<number>,
+  cluster: k8s.apiextensions.CustomResource,
+  provider: k8s.Provider
+): IDatabaseInstance {
+  const secrets: Record<string, pulumi.Output<string>> = {};
+  const clusterSecretName = `${clusterName}-app`;
+
+  for (const targetNs of dbConfig.namespaces) {
+    const nsResource = ensureNamespace(targetNs, provider);
+    const secretName = `${clusterName}-${dbName}-pg`;
+
+    // Read credentials from the CNPG-generated cluster secret and
+    // replicate to target namespace with the specific database name
+    const clusterSecret = k8s.core.v1.Secret.get(
+      `${clusterName}-${dbName}-src-${targetNs}`,
+      pulumi.interpolate`${DATA_NAMESPACE}/${clusterSecretName}`,
+      { provider, dependsOn: [cluster] }
+    );
+
+    const username = dbConfig.owner ?? dbName;
+    const dbHost = endpoint;
+    const dbPort = port;
+    const dbPassword = clusterSecret.data.apply(
+      (data) => Buffer.from(data?.["password"] ?? "", "base64").toString()
+    );
+
+    new k8s.core.v1.Secret(
+      `${clusterName}-${dbName}-secret-${targetNs}`,
+      {
+        metadata: {
+          name: secretName,
+          namespace: targetNs,
+          labels: {
+            "app.kubernetes.io/managed-by": "nimbus",
+            "nimbus/cluster": clusterName,
+            "nimbus/database": dbName,
+          },
+        },
+        stringData: {
+          host: dbHost,
+          port: dbPort.apply((p) => String(p)),
+          username,
+          password: dbPassword,
+          database: dbName,
+          uri: pulumi.all([dbHost, dbPort, dbPassword]).apply(
+            ([h, p, pw]) => `postgresql://${username}:${pw}@${h}:${p}/${dbName}?sslmode=require`
+          ),
+        },
+      },
+      { provider, dependsOn: [cluster, nsResource] }
+    );
+
+    secrets[targetNs] = pulumi.output(secretName);
+  }
+
+  return {
+    name: dbName,
+    clusterName,
+    host: endpoint,
+    port,
+    database: pulumi.output(dbName),
+    secrets,
+    nativeResource: cluster,
+  };
+}
+
+/**
+ * Create a single PostgreSQL cluster via the CloudNativePG operator (no environment awareness).
+ */
+function createSingleCnpgCluster(
   name: string,
-  config: IOperatorClusterConfig | undefined,
+  config: Omit<IOperatorClusterConfig, "environments"> | undefined,
   backupDefaults: IBackupDefaults | undefined,
   provider: k8s.Provider,
   operatorRelease: k8s.helm.v3.Release
@@ -153,75 +225,62 @@ export function createCnpgDatabase(
   const endpoint = pulumi.output(`${name}-rw.${DATA_NAMESPACE}.svc.cluster.local`);
   const port = pulumi.output(5432);
 
-  // CNPG creates a secret named {clusterName}-app with: username, password, dbname, host, port, uri
-  const clusterSecretName = `${name}-app`;
-
   return {
     name,
     engine: "postgresql",
     endpoint,
     port,
     nativeResource: cluster,
-    createDatabase(dbName: string, dbConfig: IOperatorDatabaseConfig): IDatabaseInstance {
-      const secrets: Record<string, pulumi.Output<string>> = {};
-
-      for (const targetNs of dbConfig.namespaces) {
-        const nsResource = ensureNamespace(targetNs, provider);
-        const secretName = `${name}-${dbName}-pg`;
-
-        // Read credentials from the CNPG-generated cluster secret and
-        // replicate to target namespace with the specific database name
-        const clusterSecret = k8s.core.v1.Secret.get(
-          `${name}-${dbName}-src-${targetNs}`,
-          pulumi.interpolate`${DATA_NAMESPACE}/${clusterSecretName}`,
-          { provider, dependsOn: [cluster] }
-        );
-
-        const username = dbConfig.owner ?? dbName;
-        const dbHost = endpoint;
-        const dbPort = port;
-        const dbPassword = clusterSecret.data.apply(
-          (data) => Buffer.from(data?.["password"] ?? "", "base64").toString()
-        );
-
-        new k8s.core.v1.Secret(
-          `${name}-${dbName}-secret-${targetNs}`,
-          {
-            metadata: {
-              name: secretName,
-              namespace: targetNs,
-              labels: {
-                "app.kubernetes.io/managed-by": "nimbus",
-                "nimbus/cluster": name,
-                "nimbus/database": dbName,
-              },
-            },
-            stringData: {
-              host: dbHost,
-              port: dbPort.apply((p) => String(p)),
-              username,
-              password: dbPassword,
-              database: dbName,
-              uri: pulumi.all([dbHost, dbPort, dbPassword]).apply(
-                ([h, p, pw]) => `postgresql://${username}:${pw}@${h}:${p}/${dbName}?sslmode=require`
-              ),
-            },
-          },
-          { provider, dependsOn: [cluster, nsResource] }
-        );
-
-        secrets[targetNs] = pulumi.output(secretName);
+    createDatabase(dbName: string, dbConfig: IOperatorDatabaseConfig) {
+      let result: IDatabaseInstance | Record<string, IDatabaseInstance>;
+      if (dbConfig.environments) {
+        const envResult: Record<string, IDatabaseInstance> = {};
+        for (const [env, envOverrides] of Object.entries(dbConfig.environments)) {
+          const { environments: _, ...baseConfig } = dbConfig;
+          const mergedConfig: Omit<IOperatorDatabaseConfig, "environments"> = { ...baseConfig, ...envOverrides };
+          envResult[env] = createSingleCnpgDatabaseInstance(`${name}`, `${dbName}-${env}`, mergedConfig, endpoint, port, cluster, provider);
+        }
+        result = envResult;
+      } else {
+        const { environments: _, ...cleanConfig } = dbConfig;
+        result = createSingleCnpgDatabaseInstance(name, dbName, cleanConfig, endpoint, port, cluster, provider);
       }
-
-      return {
-        name: dbName,
-        clusterName: name,
-        host: endpoint,
-        port,
-        database: pulumi.output(dbName),
-        secrets,
-        nativeResource: cluster,
-      };
+      // Runtime: environments → Record, otherwise → IDatabaseInstance.
+      // Overload signatures on IClusterInstance narrow the type for callers.
+      return result as IDatabaseInstance & Record<string, IDatabaseInstance>;
     },
   };
+}
+
+/**
+ * Create a PostgreSQL cluster via the CloudNativePG operator.
+ *
+ * When `config.environments` is set, creates separate clusters per environment
+ * with `{name}-{env}` naming and returns a Record of IClusterInstance.
+ *
+ * @returns IClusterInstance or Record<string, IClusterInstance> when environments is set
+ */
+export function createCnpgDatabase(
+  name: string,
+  config: IOperatorClusterConfig | undefined,
+  backupDefaults: IBackupDefaults | undefined,
+  provider: k8s.Provider,
+  operatorRelease: k8s.helm.v3.Release
+): IClusterInstance | Record<string, IClusterInstance> {
+  if (config?.environments) {
+    const result: Record<string, IClusterInstance> = {};
+    for (const [env, envOverrides] of Object.entries(config.environments)) {
+      const { environments: _, ...baseConfig } = config;
+      const mergedConfig: Omit<IOperatorClusterConfig, "environments"> = { ...baseConfig, ...envOverrides };
+      result[env] = createSingleCnpgCluster(`${name}-${env}`, mergedConfig, backupDefaults, provider, operatorRelease);
+    }
+    return result;
+  }
+
+  if (config) {
+    const { environments: _, ...cleanConfig } = config;
+    return createSingleCnpgCluster(name, cleanConfig, backupDefaults, provider, operatorRelease);
+  }
+
+  return createSingleCnpgCluster(name, config, backupDefaults, provider, operatorRelease);
 }

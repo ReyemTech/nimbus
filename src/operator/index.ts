@@ -13,10 +13,11 @@ import { assertNever } from "../types";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import { createCnpgDatabase } from "./cnpg";
 import { createMariadbDatabase } from "./mariadb";
-import type { IOperator, IOperatorConfig, IOperatorClusterConfig, OperatorType } from "./interfaces";
+import type { IOperator, IOperatorConfig, IOperatorClusterConfig, IClusterInstance, OperatorType } from "./interfaces";
 
 export type {
   OperatorType,
+  EnvironmentOverrides,
   IBackupDefaults,
   IOperatorConfig,
   IOperatorClusterConfig,
@@ -125,14 +126,20 @@ export function createOperator(type: OperatorType, config: IOperatorConfig): IOp
     type,
     helmRelease,
     createCluster(name: string, clusterConfig?: IOperatorClusterConfig) {
+      let result: IClusterInstance | Record<string, IClusterInstance>;
       switch (type) {
         case "cloudnative-pg":
-          return createCnpgDatabase(name, clusterConfig, config.backup, provider, helmRelease);
+          result = createCnpgDatabase(name, clusterConfig, config.backup, provider, helmRelease);
+          break;
         case "mariadb-operator":
-          return createMariadbDatabase(name, clusterConfig, config.backup, provider, helmRelease);
+          result = createMariadbDatabase(name, clusterConfig, config.backup, provider, helmRelease);
+          break;
         default:
           return assertNever(type);
       }
+      // Runtime: environments → Record, otherwise → IClusterInstance.
+      // Overload signatures on IOperator narrow the type for callers.
+      return result as IClusterInstance & Record<string, IClusterInstance>;
     },
   };
 }

@@ -99,6 +99,7 @@ export { createBackupTarget } from "./backup";
 // Operator
 export type {
   OperatorType,
+  EnvironmentOverrides,
   IBackupDefaults,
   IOperatorConfig,
   IOperatorClusterConfig,

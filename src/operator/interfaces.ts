@@ -14,6 +14,9 @@ import type { ICluster } from "../cluster";
 import type { IBackupTarget } from "../backup";
 import type { StorageTier } from "../types/storage-tiers";
 
+/** Per-environment config overrides. Keys are environment names (e.g. "dev", "prod"). */
+export type EnvironmentOverrides<T> = Record<string, Partial<T>>;
+
 /** Supported Kubernetes database operators. */
 export type OperatorType = "cloudnative-pg" | "mariadb-operator";
 
@@ -66,6 +69,8 @@ export interface IOperatorClusterConfig {
   readonly parameters?: Record<string, string>;
   /** Resource tags (applied as labels). */
   readonly tags?: Record<string, string>;
+  /** When set, creates separate clusters per environment with {name}-{env} naming. Per-env values override base config. */
+  readonly environments?: EnvironmentOverrides<Omit<IOperatorClusterConfig, "environments">>;
 }
 
 /** Configuration for creating a database within a cluster. */
@@ -74,6 +79,8 @@ export interface IOperatorDatabaseConfig {
   readonly namespaces: string[];
   /** Database owner/username. Default: same as database name. */
   readonly owner?: string;
+  /** When set, creates separate databases per environment with {dbName}-{env} naming. Per-env values override base config. */
+  readonly environments?: EnvironmentOverrides<Omit<IOperatorDatabaseConfig, "environments">>;
 }
 
 /** A database within a cluster, with connection secrets in target namespaces. */
@@ -117,6 +124,8 @@ export interface IClusterInstance {
    * @returns Database instance with secret references
    */
   createDatabase(name: string, config: IOperatorDatabaseConfig): IDatabaseInstance;
+  /** Overload: when environments is provided, returns a Record keyed by environment name. */
+  createDatabase(name: string, config: IOperatorDatabaseConfig & Required<Pick<IOperatorDatabaseConfig, "environments">>): Record<string, IDatabaseInstance>;
 }
 
 /** Deployed database operator instance. */
@@ -131,8 +140,10 @@ export interface IOperator {
    * Create a database cluster via the operator.
    *
    * @param name - Cluster name (used for CRD metadata and service names)
-   * @param config - Per-cluster configuration
+   * @param config - Per-cluster configuration (when environments is set, returns a Record keyed by environment name)
    * @returns Cluster instance with createDatabase() for per-database provisioning
    */
   createCluster(name: string, config?: IOperatorClusterConfig): IClusterInstance;
+  /** Overload: when environments is provided, returns a Record keyed by environment name. */
+  createCluster(name: string, config: IOperatorClusterConfig & Required<Pick<IOperatorClusterConfig, "environments">>): Record<string, IClusterInstance>;
 }

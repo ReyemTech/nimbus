@@ -74,6 +74,12 @@ export function createObservabilityStack(
   const grafanaEnabled = config.grafana?.enabled === true;
   const alertmanagerEnabled = config.alertmanager?.enabled === true;
 
+  // Grafana plugins to install (built up based on datasources configured)
+  const grafanaPlugins: string[] = [];
+  if (config.neo4jEndpoint) {
+    grafanaPlugins.push("kniepdennis-neo4j-datasource");
+  }
+
   if (prometheusEnabled || grafanaEnabled || alertmanagerEnabled) {
     components["kube-prometheus-stack"] = deployKubePrometheusStack(
       name,
@@ -83,7 +89,8 @@ export function createObservabilityStack(
       config.grafana,
       config.alertmanager,
       provider,
-      cluster.storageTiers
+      cluster.storageTiers,
+      grafanaPlugins
     );
   }
 
@@ -165,7 +172,57 @@ export function createObservabilityStack(
     );
   }
 
-  // 6. Component dashboards and ServiceMonitors
+  // 6. Neo4j Grafana datasource (Cypher query support)
+  if (config.neo4jEndpoint && grafanaEnabled && components["kube-prometheus-stack"]) {
+    // Neo4j datasource ConfigMap (sidecar picks it up).
+    // Read the admin password from the stored secret for the datasource config.
+    const neo4jPasswordSecretName = config.neo4jPasswordSecret;
+    const neo4jPassword = neo4jPasswordSecretName
+      ? k8s.core.v1.Secret.get(
+          `${name}-neo4j-ds-password-read`,
+          pulumi.interpolate`data/${neo4jPasswordSecretName}`,
+          { provider }
+        ).data.apply((d) => Buffer.from(d?.["password"] ?? "", "base64").toString())
+      : pulumi.output("neo4j");
+
+    new k8s.core.v1.ConfigMap(
+      `${name}-grafana-neo4j-datasource`,
+      {
+        metadata: {
+          name: `${name}-grafana-neo4j-datasource`,
+          namespace,
+          labels: { grafana_datasource: "1" },
+        },
+        data: {
+          "neo4j-datasource.yaml": pulumi
+            .all([pulumi.output(config.neo4jEndpoint), neo4jPassword])
+            .apply(([url, pw]) =>
+              JSON.stringify({
+                apiVersion: 1,
+                datasources: [
+                  {
+                    name: "Neo4j",
+                    type: "kniepdennis-neo4j-datasource",
+                    uid: "neo4j",
+                    url,
+                    access: "proxy",
+                    isDefault: false,
+                    jsonData: { username: "neo4j" },
+                    secureJsonData: { password: pw },
+                  },
+                ],
+              })
+            ),
+        },
+      },
+      {
+        provider,
+        dependsOn: [components["kube-prometheus-stack"]],
+      }
+    );
+  }
+
+  // 7. Component dashboards and ServiceMonitors
   if (components["kube-prometheus-stack"]) {
     createDashboards(name, {
       namespace,
@@ -185,7 +242,8 @@ function deployKubePrometheusStack(
   grafana: IGrafanaConfig | undefined,
   alertmanager: IAlertmanagerConfig | undefined,
   provider: k8s.Provider,
-  storageTiers?: import("../types/storage-tiers").StorageTierMap
+  storageTiers?: import("../types/storage-tiers").StorageTierMap,
+  grafanaPlugins?: string[]
 ): k8s.helm.v3.Release {
   const certName = domain.replace(/\./g, "-");
   const tlsSecretName = `${certName}-wildcard-tls`;
@@ -246,13 +304,23 @@ function deployKubePrometheusStack(
       tls: [{ secretName: tlsSecretName, hosts: [`${grafSubdomain}.${domain}`] }],
     };
 
-    // Dashboard sidecar for configmap-based persistence
+    // Install additional Grafana plugins
+    if (grafanaPlugins && grafanaPlugins.length > 0) {
+      grafanaValues["plugins"] = grafanaPlugins;
+    }
+
+    // Dashboard + datasource sidecars for configmap-based persistence
     if ((grafana.dashboardPersistence ?? "configmap") === "configmap") {
       grafanaValues["sidecar"] = {
         dashboards: {
           enabled: true,
           searchNamespace: "ALL",
           label: "grafana_dashboard",
+        },
+        datasources: {
+          enabled: true,
+          searchNamespace: "ALL",
+          label: "grafana_datasource",
         },
       };
     }

@@ -7,6 +7,7 @@
  * @module observability/interfaces
  */
 
+import type * as pulumi from "@pulumi/pulumi";
 import type * as k8s from "@pulumi/kubernetes";
 import type { ICluster } from "../cluster";
 import type { StorageTier } from "../types/storage-tiers";
@@ -119,6 +120,10 @@ export interface IObservabilityStackConfig {
   readonly alloy?: IAlloyConfig;
   /** Alertmanager configuration. */
   readonly alertmanager?: IAlertmanagerConfig;
+  /** Neo4j Bolt endpoint for Grafana datasource (e.g., "bolt://neo4j-main.data.svc.cluster.local:7687"). */
+  readonly neo4jEndpoint?: pulumi.Input<string>;
+  /** Neo4j admin password secret name (must have a "password" key in the data namespace). */
+  readonly neo4jPasswordSecret?: string;
   /** Resource tags propagated to all components. */
   readonly tags?: Readonly<Record<string, string>>;
 }

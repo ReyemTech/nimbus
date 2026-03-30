@@ -24,6 +24,7 @@ import type {
   IDatabaseInstance,
   IClusterInstance,
 } from "./interfaces";
+import { createNeo4jClusterDashboard } from "../observability/dashboards";
 
 const DATA_NAMESPACE = "data";
 const NEO4J_BOLT_PORT = 7687;
@@ -349,7 +350,12 @@ export function createNeo4jCluster(
   }
 
   // -------------------------------------------------------------------------
-  // 5. Return IClusterInstance with createDatabase()
+  // 5. Per-cluster Grafana dashboard
+  // -------------------------------------------------------------------------
+  createNeo4jClusterDashboard(name, "observability", provider, [release]);
+
+  // -------------------------------------------------------------------------
+  // 6. Return IClusterInstance with createDatabase()
   // -------------------------------------------------------------------------
   return {
     name,

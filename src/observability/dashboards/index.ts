@@ -16,10 +16,12 @@ import { certManagerDashboard } from "./cert-manager";
 import { redisDashboard } from "./redis";
 import { cnpgDashboard } from "./cnpg";
 import { mariadbDashboard } from "./mariadb";
+import { neo4jDashboard } from "./neo4j";
 import { argocdDashboard } from "./argocd";
 export { lokiLogsDashboard } from "./loki";
 export { createCnpgClusterDashboard } from "./cnpg-cluster";
 export { createMariadbClusterDashboard } from "./mariadb-cluster";
+export { createNeo4jClusterDashboard } from "./neo4j-cluster";
 
 interface DashboardsConfig {
   namespace: string;
@@ -144,4 +146,5 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
   );
   createDashboardConfigMap(name, "argocd", argocdDashboard(), namespace, provider, dependsOn);
   createDashboardConfigMap(name, "mariadb", mariadbDashboard(), namespace, provider, dependsOn);
+  createDashboardConfigMap(name, "neo4j", neo4jDashboard(), namespace, provider, dependsOn);
 }

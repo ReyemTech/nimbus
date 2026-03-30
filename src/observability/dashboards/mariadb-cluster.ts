@@ -258,6 +258,155 @@ function mariadbClusterDashboard(clusterName: string): Record<string, unknown> {
           overrides: [],
         },
       },
+      // --- Storage & Table panels ---
+      {
+        id: 11,
+        title: "Open Tables",
+        type: "timeseries",
+        gridPos: { h: 6, w: 8, x: 0, y: 30 },
+        datasource: PROM_DS,
+        targets: [
+          {
+            expr: 'mysql_global_status_open_tables{instance=~"$instance"}',
+            refId: "A",
+            legendFormat: "open",
+          },
+          {
+            expr: 'mysql_global_status_open_table_definitions{instance=~"$instance"}',
+            refId: "B",
+            legendFormat: "definitions",
+          },
+        ],
+      },
+      {
+        id: 12,
+        title: "Table Cache Hit Ratio",
+        type: "gauge",
+        gridPos: { h: 6, w: 8, x: 8, y: 30 },
+        datasource: PROM_DS,
+        targets: [
+          {
+            expr: 'mysql_global_status_table_open_cache_hits{instance=~"$instance"} / (mysql_global_status_table_open_cache_hits{instance=~"$instance"} + mysql_global_status_table_open_cache_misses{instance=~"$instance"})',
+            refId: "A",
+          },
+        ],
+        fieldConfig: {
+          defaults: {
+            unit: "percentunit",
+            min: 0,
+            max: 1,
+            thresholds: {
+              steps: [
+                { value: 0, color: "red" },
+                { value: 0.8, color: "yellow" },
+                { value: 0.95, color: "green" },
+              ],
+            },
+          },
+          overrides: [],
+        },
+      },
+      {
+        id: 13,
+        title: "Temporary Tables (disk vs memory)",
+        type: "timeseries",
+        gridPos: { h: 6, w: 8, x: 16, y: 30 },
+        datasource: PROM_DS,
+        targets: [
+          {
+            expr: 'rate(mysql_global_status_created_tmp_tables{instance=~"$instance"}[5m])',
+            refId: "A",
+            legendFormat: "memory/s",
+          },
+          {
+            expr: 'rate(mysql_global_status_created_tmp_disk_tables{instance=~"$instance"}[5m])',
+            refId: "B",
+            legendFormat: "disk/s",
+          },
+        ],
+        fieldConfig: {
+          defaults: {},
+          overrides: [
+            {
+              matcher: { id: "byName", options: "disk/s" },
+              properties: [{ id: "color", value: { mode: "fixed", fixedColor: "red" } }],
+            },
+          ],
+        },
+      },
+      {
+        id: 14,
+        title: "InnoDB Row Operations / sec",
+        type: "timeseries",
+        gridPos: { h: 6, w: 12, x: 0, y: 36 },
+        datasource: PROM_DS,
+        targets: [
+          {
+            expr: 'rate(mysql_global_status_innodb_rows_read{instance=~"$instance"}[5m])',
+            refId: "A",
+            legendFormat: "reads",
+          },
+          {
+            expr: 'rate(mysql_global_status_innodb_rows_inserted{instance=~"$instance"}[5m])',
+            refId: "B",
+            legendFormat: "inserts",
+          },
+          {
+            expr: 'rate(mysql_global_status_innodb_rows_updated{instance=~"$instance"}[5m])',
+            refId: "C",
+            legendFormat: "updates",
+          },
+          {
+            expr: 'rate(mysql_global_status_innodb_rows_deleted{instance=~"$instance"}[5m])',
+            refId: "D",
+            legendFormat: "deletes",
+          },
+        ],
+        fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
+      },
+      {
+        id: 15,
+        title: "InnoDB Buffer Pool Hit Ratio",
+        type: "gauge",
+        gridPos: { h: 6, w: 6, x: 12, y: 36 },
+        datasource: PROM_DS,
+        targets: [
+          {
+            expr: '1 - (rate(mysql_global_status_innodb_buffer_pool_reads{instance=~"$instance"}[5m]) / rate(mysql_global_status_innodb_buffer_pool_read_requests{instance=~"$instance"}[5m]))',
+            refId: "A",
+          },
+        ],
+        fieldConfig: {
+          defaults: {
+            unit: "percentunit",
+            min: 0,
+            max: 1,
+            thresholds: {
+              steps: [
+                { value: 0, color: "red" },
+                { value: 0.95, color: "yellow" },
+                { value: 0.99, color: "green" },
+              ],
+            },
+          },
+          overrides: [],
+        },
+      },
+      {
+        id: 16,
+        title: "Handler Operations / sec",
+        type: "timeseries",
+        gridPos: { h: 6, w: 6, x: 18, y: 36 },
+        datasource: PROM_DS,
+        targets: [
+          {
+            expr: 'rate(mysql_global_status_handlers_total{instance=~"$instance"}[5m])',
+            refId: "A",
+            legendFormat: "{{handler}}",
+          },
+        ],
+        fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
+      },
     ],
     schemaVersion: 39,
     version: 1,

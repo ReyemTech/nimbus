@@ -431,4 +431,3 @@ loki.write "default" {
     { provider }
   );
 }
-

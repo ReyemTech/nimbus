@@ -41,9 +41,19 @@ vi.mock("@pulumi/kubernetes", () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockConfigMap = class {};
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockCustomResource = class {};
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockSecret = class {};
+
   return {
     helm: { v3: { Release: mockRelease } },
-    core: { v1: { Namespace: mockNamespace } },
+    core: { v1: { Namespace: mockNamespace, ConfigMap: mockConfigMap, Secret: mockSecret } },
+    apiextensions: { CustomResource: mockCustomResource },
     // eslint-disable-next-line @typescript-eslint/no-extraneous-class
     Provider: class {},
   };

@@ -33,40 +33,52 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
   // --- ServiceMonitors ---
 
   // Cert-manager (metrics on port 9402 in cert-manager namespace)
-  new k8s.apiextensions.CustomResource(`${name}-sm-cert-manager`, {
-    apiVersion: "monitoring.coreos.com/v1",
-    kind: "ServiceMonitor",
-    metadata: { name: "cert-manager", namespace, labels: { release: name } },
-    spec: {
-      namespaceSelector: { matchNames: ["cert-manager"] },
-      selector: { matchLabels: { "app.kubernetes.io/name": "cert-manager" } },
-      endpoints: [{ port: "tcp-prometheus-servicemonitor", interval: "30s" }],
+  new k8s.apiextensions.CustomResource(
+    `${name}-sm-cert-manager`,
+    {
+      apiVersion: "monitoring.coreos.com/v1",
+      kind: "ServiceMonitor",
+      metadata: { name: "cert-manager", namespace, labels: { release: name } },
+      spec: {
+        namespaceSelector: { matchNames: ["cert-manager"] },
+        selector: { matchLabels: { "app.kubernetes.io/name": "cert-manager" } },
+        endpoints: [{ port: "tcp-prometheus-servicemonitor", interval: "30s" }],
+      },
     },
-  }, { provider, dependsOn });
+    { provider, dependsOn }
+  );
 
   // Redis exporter (metrics on port 9121 in data namespace)
-  new k8s.apiextensions.CustomResource(`${name}-sm-redis`, {
-    apiVersion: "monitoring.coreos.com/v1",
-    kind: "ServiceMonitor",
-    metadata: { name: "redis-metrics", namespace, labels: { release: name } },
-    spec: {
-      namespaceSelector: { matchNames: ["data"] },
-      selector: { matchLabels: { "app.kubernetes.io/name": "redis" } },
-      endpoints: [{ port: "http-metrics", interval: "30s" }],
+  new k8s.apiextensions.CustomResource(
+    `${name}-sm-redis`,
+    {
+      apiVersion: "monitoring.coreos.com/v1",
+      kind: "ServiceMonitor",
+      metadata: { name: "redis-metrics", namespace, labels: { release: name } },
+      spec: {
+        namespaceSelector: { matchNames: ["data"] },
+        selector: { matchLabels: { "app.kubernetes.io/name": "redis" } },
+        endpoints: [{ port: "http-metrics", interval: "30s" }],
+      },
     },
-  }, { provider, dependsOn });
+    { provider, dependsOn }
+  );
 
   // CNPG PostgreSQL (PodMonitor — pods expose metrics directly on port 9187)
-  new k8s.apiextensions.CustomResource(`${name}-pm-cnpg`, {
-    apiVersion: "monitoring.coreos.com/v1",
-    kind: "PodMonitor",
-    metadata: { name: "cnpg-clusters", namespace, labels: { release: name } },
-    spec: {
-      namespaceSelector: { matchNames: ["data"] },
-      selector: { matchExpressions: [{ key: "cnpg.io/cluster", operator: "Exists" }] },
-      podMetricsEndpoints: [{ port: "metrics" }],
+  new k8s.apiextensions.CustomResource(
+    `${name}-pm-cnpg`,
+    {
+      apiVersion: "monitoring.coreos.com/v1",
+      kind: "PodMonitor",
+      metadata: { name: "cnpg-clusters", namespace, labels: { release: name } },
+      spec: {
+        namespaceSelector: { matchNames: ["data"] },
+        selector: { matchExpressions: [{ key: "cnpg.io/cluster", operator: "Exists" }] },
+        podMetricsEndpoints: [{ port: "metrics" }],
+      },
     },
-  }, { provider, dependsOn });
+    { provider, dependsOn }
+  );
 
   // NOTE: Traefik ServiceMonitor requires `ports.metrics.expose.default: true`
   // in the Traefik Helm values (platform stack). The dashboard is provisioned
@@ -74,10 +86,24 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
 
   // --- Dashboard ConfigMaps ---
 
-  createDashboardConfigMap(name, "cert-manager", certManagerDashboard(), namespace, provider, dependsOn);
+  createDashboardConfigMap(
+    name,
+    "cert-manager",
+    certManagerDashboard(),
+    namespace,
+    provider,
+    dependsOn
+  );
   createDashboardConfigMap(name, "redis", redisDashboard(), namespace, provider, dependsOn);
   createDashboardConfigMap(name, "cnpg", cnpgDashboard(), namespace, provider, dependsOn);
-  createDashboardConfigMap(name, "traefik-ingress", traefikDashboard(), namespace, provider, dependsOn);
+  createDashboardConfigMap(
+    name,
+    "traefik-ingress",
+    traefikDashboard(),
+    namespace,
+    provider,
+    dependsOn
+  );
 }
 
 function createDashboardConfigMap(
@@ -86,17 +112,21 @@ function createDashboardConfigMap(
   json: Record<string, unknown>,
   namespace: string,
   provider: k8s.Provider,
-  dependsOn: pulumi.Resource[],
+  dependsOn: pulumi.Resource[]
 ): void {
-  new k8s.core.v1.ConfigMap(`${name}-dashboard-${dashName}`, {
-    metadata: {
-      name: `${name}-${dashName}-dashboard`,
-      namespace,
-      labels: FOLDER_LABEL,
-      annotations: FOLDER_ANNOTATION,
+  new k8s.core.v1.ConfigMap(
+    `${name}-dashboard-${dashName}`,
+    {
+      metadata: {
+        name: `${name}-${dashName}-dashboard`,
+        namespace,
+        labels: FOLDER_LABEL,
+        annotations: FOLDER_ANNOTATION,
+      },
+      data: { [`${dashName}.json`]: JSON.stringify(json) },
     },
-    data: { [`${dashName}.json`]: JSON.stringify(json) },
-  }, { provider, dependsOn });
+    { provider, dependsOn }
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -225,12 +255,17 @@ function certManagerDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 6, w: 8, x: 0, y: 0 },
         datasource: PROM_DS,
-        targets: [{
-          expr: 'sum(certmanager_certificate_ready_status{condition="True"})',
-          refId: "A",
-          legendFormat: "Ready",
-        }],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }] } }, overrides: [] },
+        targets: [
+          {
+            expr: 'sum(certmanager_certificate_ready_status{condition="True"})',
+            refId: "A",
+            legendFormat: "Ready",
+          },
+        ],
+        fieldConfig: {
+          defaults: { thresholds: { steps: [{ color: "green", value: 0 }] } },
+          overrides: [],
+        },
       },
       {
         id: 2,
@@ -238,12 +273,24 @@ function certManagerDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 6, w: 8, x: 8, y: 0 },
         datasource: PROM_DS,
-        targets: [{
-          expr: 'sum(certmanager_certificate_ready_status{condition="False"})',
-          refId: "A",
-          legendFormat: "Not Ready",
-        }],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }, { color: "red", value: 1 }] } }, overrides: [] },
+        targets: [
+          {
+            expr: 'sum(certmanager_certificate_ready_status{condition="False"})',
+            refId: "A",
+            legendFormat: "Not Ready",
+          },
+        ],
+        fieldConfig: {
+          defaults: {
+            thresholds: {
+              steps: [
+                { color: "green", value: 0 },
+                { color: "red", value: 1 },
+              ],
+            },
+          },
+          overrides: [],
+        },
       },
       {
         id: 3,
@@ -251,15 +298,25 @@ function certManagerDashboard(): Record<string, unknown> {
         type: "table",
         gridPos: { h: 6, w: 8, x: 16, y: 0 },
         datasource: PROM_DS,
-        targets: [{
-          expr: "(certmanager_certificate_expiration_timestamp_seconds - time()) / 86400",
-          refId: "A",
-          legendFormat: "{{name}}",
-          instant: true,
-          format: "table",
-        }],
+        targets: [
+          {
+            expr: "(certmanager_certificate_expiration_timestamp_seconds - time()) / 86400",
+            refId: "A",
+            legendFormat: "{{name}}",
+            instant: true,
+            format: "table",
+          },
+        ],
         fieldConfig: {
-          defaults: { thresholds: { steps: [{ color: "red", value: 0 }, { color: "yellow", value: 7 }, { color: "green", value: 30 }] } },
+          defaults: {
+            thresholds: {
+              steps: [
+                { color: "red", value: 0 },
+                { color: "yellow", value: 7 },
+                { color: "green", value: 30 },
+              ],
+            },
+          },
           overrides: [],
         },
       },
@@ -269,11 +326,13 @@ function certManagerDashboard(): Record<string, unknown> {
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 0, y: 6 },
         datasource: PROM_DS,
-        targets: [{
-          expr: "sum(rate(certmanager_http_acme_client_request_count[5m])) by (status)",
-          refId: "A",
-          legendFormat: "{{status}}",
-        }],
+        targets: [
+          {
+            expr: "sum(rate(certmanager_http_acme_client_request_count[5m])) by (status)",
+            refId: "A",
+            legendFormat: "{{status}}",
+          },
+        ],
       },
       {
         id: 5,
@@ -281,11 +340,13 @@ function certManagerDashboard(): Record<string, unknown> {
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 12, y: 6 },
         datasource: PROM_DS,
-        targets: [{
-          expr: "certmanager_certificate_expiration_timestamp_seconds",
-          refId: "A",
-          legendFormat: "{{name}} ({{namespace}})",
-        }],
+        targets: [
+          {
+            expr: "certmanager_certificate_expiration_timestamp_seconds",
+            refId: "A",
+            legendFormat: "{{name}} ({{namespace}})",
+          },
+        ],
         fieldConfig: { defaults: { unit: "dateTimeFromNow" }, overrides: [] },
       },
     ],
@@ -342,7 +403,9 @@ function redisDashboard(): Record<string, unknown> {
         type: "timeseries",
         gridPos: { h: 6, w: 8, x: 8, y: 8 },
         datasource: PROM_DS,
-        targets: [{ expr: "rate(redis_commands_processed_total[5m])", refId: "A", legendFormat: "cmd/s" }],
+        targets: [
+          { expr: "rate(redis_commands_processed_total[5m])", refId: "A", legendFormat: "cmd/s" },
+        ],
         fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
       },
       {
@@ -375,11 +438,13 @@ function cnpgDashboard(): Record<string, unknown> {
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 0, y: 0 },
         datasource: PROM_DS,
-        targets: [{
-          expr: 'cnpg_pg_stat_activity_count{state="active"}',
-          refId: "A",
-          legendFormat: "{{pod}}",
-        }],
+        targets: [
+          {
+            expr: 'cnpg_pg_stat_activity_count{state="active"}',
+            refId: "A",
+            legendFormat: "{{pod}}",
+          },
+        ],
       },
       {
         id: 2,
@@ -387,11 +452,13 @@ function cnpgDashboard(): Record<string, unknown> {
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 12, y: 0 },
         datasource: PROM_DS,
-        targets: [{
-          expr: "cnpg_pg_replication_lag",
-          refId: "A",
-          legendFormat: "{{pod}}",
-        }],
+        targets: [
+          {
+            expr: "cnpg_pg_replication_lag",
+            refId: "A",
+            legendFormat: "{{pod}}",
+          },
+        ],
         fieldConfig: { defaults: { unit: "s" }, overrides: [] },
       },
       {
@@ -401,8 +468,16 @@ function cnpgDashboard(): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 0, y: 8 },
         datasource: PROM_DS,
         targets: [
-          { expr: "rate(cnpg_pg_stat_database_xact_commit[5m])", refId: "A", legendFormat: "{{datname}} commits/s" },
-          { expr: "rate(cnpg_pg_stat_database_xact_rollback[5m])", refId: "B", legendFormat: "{{datname}} rollbacks/s" },
+          {
+            expr: "rate(cnpg_pg_stat_database_xact_commit[5m])",
+            refId: "A",
+            legendFormat: "{{datname}} commits/s",
+          },
+          {
+            expr: "rate(cnpg_pg_stat_database_xact_rollback[5m])",
+            refId: "B",
+            legendFormat: "{{datname}} rollbacks/s",
+          },
         ],
         fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
       },
@@ -412,11 +487,13 @@ function cnpgDashboard(): Record<string, unknown> {
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 12, y: 8 },
         datasource: PROM_DS,
-        targets: [{
-          expr: "rate(cnpg_pg_stat_bgwriter_buffers_checkpoint[5m])",
-          refId: "A",
-          legendFormat: "{{pod}} buffers/s",
-        }],
+        targets: [
+          {
+            expr: "rate(cnpg_pg_stat_bgwriter_buffers_checkpoint[5m])",
+            refId: "A",
+            legendFormat: "{{pod}} buffers/s",
+          },
+        ],
         fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
       },
       {
@@ -425,11 +502,13 @@ function cnpgDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 6, w: 12, x: 0, y: 16 },
         datasource: PROM_DS,
-        targets: [{
-          expr: "cnpg_pg_database_size_bytes",
-          refId: "A",
-          legendFormat: "{{datname}}",
-        }],
+        targets: [
+          {
+            expr: "cnpg_pg_database_size_bytes",
+            refId: "A",
+            legendFormat: "{{datname}}",
+          },
+        ],
         fieldConfig: { defaults: { unit: "bytes" }, overrides: [] },
       },
       {
@@ -438,12 +517,24 @@ function cnpgDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 6, w: 12, x: 12, y: 16 },
         datasource: PROM_DS,
-        targets: [{
-          expr: "cnpg_collector_last_collection_error",
-          refId: "A",
-          legendFormat: "{{pod}}",
-        }],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }, { color: "red", value: 1 }] } }, overrides: [] },
+        targets: [
+          {
+            expr: "cnpg_collector_last_collection_error",
+            refId: "A",
+            legendFormat: "{{pod}}",
+          },
+        ],
+        fieldConfig: {
+          defaults: {
+            thresholds: {
+              steps: [
+                { color: "green", value: 0 },
+                { color: "red", value: 1 },
+              ],
+            },
+          },
+          overrides: [],
+        },
       },
     ],
     schemaVersion: 39,
@@ -467,11 +558,13 @@ function traefikDashboard(): Record<string, unknown> {
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 0, y: 0 },
         datasource: PROM_DS,
-        targets: [{
-          expr: "sum(rate(traefik_service_requests_total[5m])) by (service)",
-          refId: "A",
-          legendFormat: "{{service}}",
-        }],
+        targets: [
+          {
+            expr: "sum(rate(traefik_service_requests_total[5m])) by (service)",
+            refId: "A",
+            legendFormat: "{{service}}",
+          },
+        ],
         fieldConfig: { defaults: { unit: "reqps" }, overrides: [] },
       },
       {
@@ -481,9 +574,21 @@ function traefikDashboard(): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 12, y: 0 },
         datasource: PROM_DS,
         targets: [
-          { expr: "histogram_quantile(0.50, sum(rate(traefik_service_request_duration_seconds_bucket[5m])) by (le))", refId: "A", legendFormat: "p50" },
-          { expr: "histogram_quantile(0.95, sum(rate(traefik_service_request_duration_seconds_bucket[5m])) by (le))", refId: "B", legendFormat: "p95" },
-          { expr: "histogram_quantile(0.99, sum(rate(traefik_service_request_duration_seconds_bucket[5m])) by (le))", refId: "C", legendFormat: "p99" },
+          {
+            expr: "histogram_quantile(0.50, sum(rate(traefik_service_request_duration_seconds_bucket[5m])) by (le))",
+            refId: "A",
+            legendFormat: "p50",
+          },
+          {
+            expr: "histogram_quantile(0.95, sum(rate(traefik_service_request_duration_seconds_bucket[5m])) by (le))",
+            refId: "B",
+            legendFormat: "p95",
+          },
+          {
+            expr: "histogram_quantile(0.99, sum(rate(traefik_service_request_duration_seconds_bucket[5m])) by (le))",
+            refId: "C",
+            legendFormat: "p99",
+          },
         ],
         fieldConfig: { defaults: { unit: "s" }, overrides: [] },
       },
@@ -494,8 +599,16 @@ function traefikDashboard(): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 0, y: 8 },
         datasource: PROM_DS,
         targets: [
-          { expr: 'sum(rate(traefik_service_requests_total{code=~"4.."}[5m]))', refId: "A", legendFormat: "4xx" },
-          { expr: 'sum(rate(traefik_service_requests_total{code=~"5.."}[5m]))', refId: "B", legendFormat: "5xx" },
+          {
+            expr: 'sum(rate(traefik_service_requests_total{code=~"4.."}[5m]))',
+            refId: "A",
+            legendFormat: "4xx",
+          },
+          {
+            expr: 'sum(rate(traefik_service_requests_total{code=~"5.."}[5m]))',
+            refId: "B",
+            legendFormat: "5xx",
+          },
         ],
         fieldConfig: { defaults: { unit: "reqps" }, overrides: [] },
       },
@@ -505,11 +618,13 @@ function traefikDashboard(): Record<string, unknown> {
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 12, y: 8 },
         datasource: PROM_DS,
-        targets: [{
-          expr: "sum(rate(traefik_entrypoint_requests_total[5m])) by (entrypoint)",
-          refId: "A",
-          legendFormat: "{{entrypoint}}",
-        }],
+        targets: [
+          {
+            expr: "sum(rate(traefik_entrypoint_requests_total[5m])) by (entrypoint)",
+            refId: "A",
+            legendFormat: "{{entrypoint}}",
+          },
+        ],
         fieldConfig: { defaults: { unit: "reqps" }, overrides: [] },
       },
       {
@@ -518,17 +633,25 @@ function traefikDashboard(): Record<string, unknown> {
         type: "table",
         gridPos: { h: 6, w: 24, x: 0, y: 16 },
         datasource: PROM_DS,
-        targets: [{
-          expr: "(traefik_tls_certs_not_after - time()) / 86400",
-          refId: "A",
-          legendFormat: "{{cn}}",
-          instant: true,
-          format: "table",
-        }],
+        targets: [
+          {
+            expr: "(traefik_tls_certs_not_after - time()) / 86400",
+            refId: "A",
+            legendFormat: "{{cn}}",
+            instant: true,
+            format: "table",
+          },
+        ],
         fieldConfig: {
           defaults: {
             unit: "d",
-            thresholds: { steps: [{ color: "red", value: 0 }, { color: "yellow", value: 7 }, { color: "green", value: 30 }] },
+            thresholds: {
+              steps: [
+                { color: "red", value: 0 },
+                { color: "yellow", value: 7 },
+                { color: "green", value: 30 },
+              ],
+            },
           },
           overrides: [],
         },

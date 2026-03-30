@@ -5,3 +5,4 @@
  */
 
 export type { SecretBackend, ISecretRef, ISecretsConfig, ISecrets } from "./interfaces";
+export { SECRET_BACKENDS } from "./interfaces";

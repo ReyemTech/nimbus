@@ -25,6 +25,26 @@ export type CacheArchitecture =
   | "replication" // Master + replicas
   | "cluster"; // Redis Cluster mode (sharded)
 
+/** Typed constant map for CacheEngine string literals. */
+export const CACHE_ENGINES = {
+  REDIS: "redis" as const,
+  MEMCACHED: "memcached" as const,
+  VALKEY: "valkey" as const,
+} satisfies Record<string, CacheEngine>;
+
+/** Typed constant map for CacheMode string literals. */
+export const CACHE_MODES = {
+  MANAGED: "managed" as const,
+  HELM: "helm" as const,
+} satisfies Record<string, CacheMode>;
+
+/** Typed constant map for CacheArchitecture string literals. */
+export const CACHE_ARCHITECTURES = {
+  STANDALONE: "standalone" as const,
+  REPLICATION: "replication" as const,
+  CLUSTER: "cluster" as const,
+} satisfies Record<string, CacheArchitecture>;
+
 /**
  * Cache configuration input.
  *

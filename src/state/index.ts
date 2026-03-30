@@ -11,3 +11,4 @@ export type {
   IStateBackendConfig,
   IStateBackend,
 } from "./interfaces";
+export { STATE_BACKEND_TYPES } from "./interfaces";

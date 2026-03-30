@@ -20,6 +20,12 @@ export type EnvironmentOverrides<T> = Record<string, Partial<T>>;
 /** Supported Kubernetes database operators. */
 export type OperatorType = "cloudnative-pg" | "mariadb-operator";
 
+/** Typed constant map for OperatorType string literals. */
+export const OPERATOR_TYPES = {
+  CLOUDNATIVE_PG: "cloudnative-pg" as const,
+  MARIADB_OPERATOR: "mariadb-operator" as const,
+} satisfies Record<string, OperatorType>;
+
 /** Default backup configuration for clusters provisioned by an operator. */
 export interface IBackupDefaults {
   /** Backup target (S3 bucket + credentials). */

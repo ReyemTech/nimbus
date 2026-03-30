@@ -13,6 +13,18 @@ import type { CloudArg, ResolvedCloudTarget } from "../types";
 /** Supported DNS record types. */
 export type DnsRecordType = "A" | "AAAA" | "CNAME" | "TXT" | "MX" | "NS" | "SRV" | "CAA";
 
+/** Typed constant map for DnsRecordType string literals. */
+export const DNS_RECORD_TYPES = {
+  A: "A" as const,
+  AAAA: "AAAA" as const,
+  CNAME: "CNAME" as const,
+  TXT: "TXT" as const,
+  MX: "MX" as const,
+  NS: "NS" as const,
+  SRV: "SRV" as const,
+  CAA: "CAA" as const,
+} satisfies Record<string, DnsRecordType>;
+
 /** DNS record configuration. */
 export interface IDnsRecord {
   /** Record name relative to zone (e.g., "www" or "argocd"). Use "@" for apex. */

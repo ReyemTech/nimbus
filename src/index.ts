@@ -16,6 +16,7 @@ export {
   type ResolvedCloudTarget,
   DEFAULT_REGIONS,
   CLOUD_PROVIDERS,
+  CLOUD_PROVIDER,
   isCloudProvider,
   isCloudTarget,
   resolveCloudTarget,
@@ -59,6 +60,7 @@ export type {
 
 // Network
 export type { NatStrategy, ISubnetConfig, INetworkConfig, INetwork } from "./network";
+export { NAT_STRATEGIES } from "./network";
 
 export {
   parseCidr,
@@ -72,9 +74,11 @@ export {
 
 // DNS
 export type { DnsRecordType, IDnsRecord, IDnsConfig, IDns } from "./dns";
+export { DNS_RECORD_TYPES } from "./dns";
 
 // Secrets
 export type { SecretBackend, ISecretRef, ISecretsConfig, ISecrets } from "./secrets";
+export { SECRET_BACKENDS } from "./secrets";
 
 // Database
 export type {
@@ -85,9 +89,10 @@ export type {
   IDatabaseConfig,
   IDatabase,
 } from "./database";
+export { DATABASE_ENGINES, DATABASE_MODES, DATABASE_OPERATORS } from "./database";
 
 // Cache
-export { type CacheEngine, type CacheMode, type CacheArchitecture, type ICacheConfig, type ICache, createCache } from "./cache";
+export { type CacheEngine, type CacheMode, type CacheArchitecture, type ICacheConfig, type ICache, createCache, CACHE_ENGINES, CACHE_MODES, CACHE_ARCHITECTURES } from "./cache";
 
 // Object Storage
 export type { ILifecycleRule, ICorsRule, IObjectStorageConfig, IObjectStorage } from "./storage";
@@ -108,10 +113,11 @@ export type {
   IClusterInstance,
   IOperator,
 } from "./operator";
-export { createOperator } from "./operator";
+export { createOperator, OPERATOR_TYPES } from "./operator";
 
 // Queue
 export type { QueueEngine, QueueMode, QueueType, IQueueConfig, IQueue } from "./queue";
+export { QUEUE_ENGINES, QUEUE_MODES, QUEUE_TYPES } from "./queue";
 
 // State Backend
 export type {
@@ -121,6 +127,7 @@ export type {
   IStateBackendConfig,
   IStateBackend,
 } from "./state";
+export { STATE_BACKEND_TYPES } from "./state";
 
 // Platform
 export {
@@ -131,6 +138,7 @@ export {
   type IPlatformStackConfig,
   type IPlatformStack,
   createPlatformStack,
+  DNS_PROVIDERS,
 } from "./platform";
 
 // Global Load Balancer

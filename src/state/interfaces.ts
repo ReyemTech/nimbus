@@ -13,6 +13,13 @@ import type { CloudArg, ResolvedCloudTarget } from "../types";
 /** Supported state backend storage types. */
 export type StateBackendType = "s3" | "azblob" | "gs";
 
+/** Typed constant map for StateBackendType string literals. */
+export const STATE_BACKEND_TYPES = {
+  S3: "s3" as const,
+  AZBLOB: "azblob" as const,
+  GS: "gs" as const,
+} satisfies Record<string, StateBackendType>;
+
 /** Cross-region replication configuration. */
 export interface IReplicationConfig {
   /** Enable cross-region replication for disaster recovery. */

@@ -11,6 +11,7 @@ export {
   type ResolvedCloudTarget,
   DEFAULT_REGIONS,
   CLOUD_PROVIDERS,
+  CLOUD_PROVIDER,
   isCloudProvider,
   isCloudTarget,
   resolveCloudTarget,

@@ -19,6 +19,14 @@ export type DnsProvider =
   | "cloud-dns" // GCP Cloud DNS
   | "cloudflare"; // Cloudflare DNS
 
+/** Typed constant map for DnsProvider string literals. */
+export const DNS_PROVIDERS = {
+  ROUTE53: "route53" as const,
+  AZURE_DNS: "azure-dns" as const,
+  CLOUD_DNS: "cloud-dns" as const,
+  CLOUDFLARE: "cloudflare" as const,
+} satisfies Record<string, DnsProvider>;
+
 /** Individual platform component configuration. */
 export interface IPlatformComponentConfig {
   /** Enable or disable this component. Default: true for core components. */

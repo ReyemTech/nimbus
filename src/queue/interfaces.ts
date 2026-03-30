@@ -28,6 +28,29 @@ export type QueueType =
   | "fifo" // Exactly-once, ordered
   | "streaming"; // Log-based (Kafka, NATS JetStream)
 
+/** Typed constant map for QueueEngine string literals. */
+export const QUEUE_ENGINES = {
+  SQS: "sqs" as const,
+  SERVICE_BUS: "service-bus" as const,
+  PUB_SUB: "pub-sub" as const,
+  NATS: "nats" as const,
+  RABBITMQ: "rabbitmq" as const,
+  KAFKA: "kafka" as const,
+} satisfies Record<string, QueueEngine>;
+
+/** Typed constant map for QueueMode string literals. */
+export const QUEUE_MODES = {
+  MANAGED: "managed" as const,
+  OPERATOR: "operator" as const,
+} satisfies Record<string, QueueMode>;
+
+/** Typed constant map for QueueType string literals. */
+export const QUEUE_TYPES = {
+  STANDARD: "standard" as const,
+  FIFO: "fifo" as const,
+  STREAMING: "streaming" as const,
+} satisfies Record<string, QueueType>;
+
 /**
  * Queue configuration input.
  *

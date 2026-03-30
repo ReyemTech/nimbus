@@ -27,6 +27,28 @@ export type DatabaseOperator =
   | "cloudnative-pg" // CloudNativePG for PostgreSQL
   | "mongodb-operator"; // MongoDB Community/Enterprise Operator
 
+/** Typed constant map for DatabaseEngine string literals. */
+export const DATABASE_ENGINES = {
+  MYSQL: "mysql" as const,
+  MARIADB: "mariadb" as const,
+  POSTGRESQL: "postgresql" as const,
+  MONGODB: "mongodb" as const,
+} satisfies Record<string, DatabaseEngine>;
+
+/** Typed constant map for DatabaseMode string literals. */
+export const DATABASE_MODES = {
+  MANAGED: "managed" as const,
+  OPERATOR: "operator" as const,
+} satisfies Record<string, DatabaseMode>;
+
+/** Typed constant map for DatabaseOperator string literals. */
+export const DATABASE_OPERATORS = {
+  PXC: "pxc" as const,
+  MARIADB_OPERATOR: "mariadb-operator" as const,
+  CLOUDNATIVE_PG: "cloudnative-pg" as const,
+  MONGODB_OPERATOR: "mongodb-operator" as const,
+} satisfies Record<string, DatabaseOperator>;
+
 /** Database backup configuration. */
 export interface IDatabaseBackupConfig {
   /** Whether automated backups are enabled. */

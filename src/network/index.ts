@@ -5,6 +5,7 @@
  */
 
 export type { NatStrategy, ISubnetConfig, INetworkConfig, INetwork } from "./interfaces";
+export { NAT_STRATEGIES } from "./interfaces";
 
 export {
   parseCidr,

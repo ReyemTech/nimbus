@@ -26,6 +26,7 @@ export type {
   IClusterInstance,
   IOperator,
 } from "./interfaces";
+export { OPERATOR_TYPES } from "./interfaces";
 
 /** Helm chart metadata for each operator type. */
 interface OperatorChartInfo {

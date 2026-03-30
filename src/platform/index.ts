@@ -12,5 +12,6 @@ export type {
   IPlatformStackConfig,
   IPlatformStack,
 } from "./interfaces";
+export { DNS_PROVIDERS } from "./interfaces";
 
 export { createPlatformStack } from "./stack";

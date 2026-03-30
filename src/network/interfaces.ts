@@ -17,6 +17,13 @@ export type NatStrategy =
   | "fck-nat" // fck-nat instance on AWS (~$3/mo) — AWS only
   | "none"; // No NAT (public subnets only or hosted K8s)
 
+/** Typed constant map for NatStrategy string literals. */
+export const NAT_STRATEGIES = {
+  MANAGED: "managed" as const,
+  FCK_NAT: "fck-nat" as const,
+  NONE: "none" as const,
+} satisfies Record<string, NatStrategy>;
+
 /** Subnet configuration. */
 export interface ISubnetConfig {
   /** CIDR block for the subnet (e.g., "10.0.1.0/24"). */

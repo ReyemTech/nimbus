@@ -76,6 +76,14 @@ export const CLOUD_PROVIDERS: ReadonlyArray<CloudProvider> = [
   "rackspace",
 ] as const;
 
+/** Typed constant map for CloudProvider string literals. */
+export const CLOUD_PROVIDER = {
+  AWS: "aws" as const,
+  AZURE: "azure" as const,
+  GCP: "gcp" as const,
+  RACKSPACE: "rackspace" as const,
+} satisfies Record<string, CloudProvider>;
+
 /**
  * Type guard: is the value a CloudProvider string?
  *

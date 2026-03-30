@@ -17,6 +17,14 @@ export type SecretBackend =
   | "azure-key-vault" // Azure Key Vault (used by MetrixGroup)
   | "gcp-secret-manager"; // GCP Secret Manager
 
+/** Typed constant map for SecretBackend string literals. */
+export const SECRET_BACKENDS = {
+  VAULT: "vault" as const,
+  AWS_SECRETS_MANAGER: "aws-secrets-manager" as const,
+  AZURE_KEY_VAULT: "azure-key-vault" as const,
+  GCP_SECRET_MANAGER: "gcp-secret-manager" as const,
+} satisfies Record<string, SecretBackend>;
+
 /** Reference to a secret (path + optional key within the secret). */
 export interface ISecretRef {
   /** Secret path (e.g., "operators/mysql" or "production"). */

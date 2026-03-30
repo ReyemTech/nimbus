@@ -28,7 +28,7 @@ export function neo4jDashboard(): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 0, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "MATCH (n) RETURN count(n) AS nodes", refId: "A" },
+          { cypherQuery: "MATCH (n) RETURN count(n) AS nodes", refId: "A" },
         ],
         fieldConfig: { defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } }, overrides: [] },
       },
@@ -39,7 +39,7 @@ export function neo4jDashboard(): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 6, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "MATCH ()-[r]->() RETURN count(r) AS relationships", refId: "A" },
+          { cypherQuery: "MATCH ()-[r]->() RETURN count(r) AS relationships", refId: "A" },
         ],
         fieldConfig: { defaults: { thresholds: { steps: [{ color: "purple", value: 0 }] } }, overrides: [] },
       },
@@ -50,7 +50,7 @@ export function neo4jDashboard(): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 12, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "SHOW TRANSACTIONS YIELD transactionId RETURN count(transactionId) AS active", refId: "A" },
+          { cypherQuery: "SHOW TRANSACTIONS YIELD transactionId RETURN count(transactionId) AS active", refId: "A" },
         ],
         fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }, { color: "yellow", value: 10 }, { color: "red", value: 50 }] } }, overrides: [] },
       },
@@ -61,7 +61,7 @@ export function neo4jDashboard(): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 18, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "SHOW DATABASES YIELD name, currentStatus, role RETURN name, currentStatus, role", refId: "A" },
+          { cypherQuery: "SHOW DATABASES YIELD name, currentStatus, role RETURN name, currentStatus, role", refId: "A" },
         ],
       },
       // --- Row 2: Label & Relationship type distribution ---
@@ -72,7 +72,7 @@ export function neo4jDashboard(): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 0, y: 4 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "CALL db.labels() YIELD label CALL { WITH label MATCH (n) WHERE label IN labels(n) RETURN count(n) AS count } RETURN label, count ORDER BY count DESC LIMIT 15", refId: "A" },
+          { cypherQuery: "CALL db.labels() YIELD label CALL { WITH label MATCH (n) WHERE label IN labels(n) RETURN count(n) AS count } RETURN label, count ORDER BY count DESC LIMIT 15", refId: "A" },
         ],
       },
       {
@@ -82,7 +82,7 @@ export function neo4jDashboard(): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 12, y: 4 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "CALL db.relationshipTypes() YIELD relationshipType AS type CALL { WITH type MATCH ()-[r]->() WHERE type(r) = type RETURN count(r) AS count } RETURN type, count ORDER BY count DESC LIMIT 15", refId: "A" },
+          { cypherQuery: "CALL db.relationshipTypes() YIELD relationshipType AS type CALL { WITH type MATCH ()-[r]->() WHERE type(r) = type RETURN count(r) AS count } RETURN type, count ORDER BY count DESC LIMIT 15", refId: "A" },
         ],
       },
       // --- Row 3: Prometheus metrics (Enterprise) ---

@@ -34,7 +34,7 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 0, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "MATCH (n) RETURN count(n) AS nodes", refId: "A" },
+          { cypherQuery: "MATCH (n) RETURN count(n) AS nodes", refId: "A" },
         ],
         fieldConfig: { defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } }, overrides: [] },
       },
@@ -45,7 +45,7 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 6, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "MATCH ()-[r]->() RETURN count(r) AS relationships", refId: "A" },
+          { cypherQuery: "MATCH ()-[r]->() RETURN count(r) AS relationships", refId: "A" },
         ],
         fieldConfig: { defaults: { thresholds: { steps: [{ color: "purple", value: 0 }] } }, overrides: [] },
       },
@@ -56,7 +56,7 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 12, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "CALL db.labels() YIELD label MATCH (n) WHERE label IN labels(n) RETURN label, count(n) AS count ORDER BY count DESC LIMIT 10", refId: "A" },
+          { cypherQuery: "CALL db.labels() YIELD label MATCH (n) WHERE label IN labels(n) RETURN label, count(n) AS count ORDER BY count DESC LIMIT 10", refId: "A" },
         ],
         fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }] } }, overrides: [] },
       },
@@ -67,7 +67,7 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 18, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "CALL dbms.queryJmx('org.neo4j:instance=kernel#0,name=Store sizes') YIELD attributes RETURN attributes['TotalStoreSize']['value'] AS bytes", refId: "A" },
+          { cypherQuery: "CALL dbms.queryJmx('org.neo4j:instance=kernel#0,name=Store sizes') YIELD attributes RETURN attributes['TotalStoreSize']['value'] AS bytes", refId: "A" },
         ],
         fieldConfig: { defaults: { unit: "bytes" }, overrides: [] },
       },
@@ -79,7 +79,7 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 4, w: 8, x: 0, y: 4 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "SHOW TRANSACTIONS YIELD transactionId RETURN count(transactionId) AS active_transactions", refId: "A" },
+          { cypherQuery: "SHOW TRANSACTIONS YIELD transactionId RETURN count(transactionId) AS active_transactions", refId: "A" },
         ],
         fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }, { color: "yellow", value: 10 }, { color: "red", value: 50 }] } }, overrides: [] },
       },
@@ -90,7 +90,7 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 4, w: 16, x: 8, y: 4 },
         datasource: NEO4J_DS,
         targets: [
-          { rawQuery: true, query: "SHOW DATABASES YIELD name, currentStatus, role, store RETURN name, currentStatus, role, store", refId: "A" },
+          { cypherQuery: "SHOW DATABASES YIELD name, currentStatus, role, store RETURN name, currentStatus, role, store", refId: "A" },
         ],
       },
       // --- Row 3: Prometheus metrics (Enterprise — shown when available) ---

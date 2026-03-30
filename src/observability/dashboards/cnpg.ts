@@ -12,7 +12,7 @@ import { PROM_DS } from "./_helpers";
 export function cnpgDashboard(): Record<string, unknown> {
   return {
     uid: "nimbus-cnpg",
-    title: "Nimbus / CNPG PostgreSQL",
+    title: "Nimbus / Data / Postgres",
     tags: ["nimbus", "cnpg", "postgresql"],
     timezone: "browser",
     editable: true,

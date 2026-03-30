@@ -11,7 +11,7 @@ import { PROM_DS } from "./_helpers";
 export function redisDashboard(): Record<string, unknown> {
   return {
     uid: "nimbus-redis",
-    title: "Nimbus / Redis",
+    title: "Nimbus / Data / Redis",
     tags: ["nimbus", "redis"],
     timezone: "browser",
     editable: true,

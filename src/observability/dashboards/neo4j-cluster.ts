@@ -1,6 +1,6 @@
 /**
  * Per-cluster Neo4j Grafana dashboard — created once per Neo4j instance
- * with metrics filtered by the instance name.
+ * with metrics from JMX Prometheus exporter filtered by instance.
  *
  * @module observability/dashboards/neo4j-cluster
  */
@@ -38,41 +38,53 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
       },
       {
         id: 2,
-        title: "Store Size",
-        type: "stat",
+        title: "JVM Heap Used",
+        type: "gauge",
         gridPos: { h: 4, w: 6, x: 6, y: 0 },
         datasource: PROM_DS,
-        targets: [{ expr: `neo4j_database_store_size_total{${fi}}`, refId: "A", legendFormat: "{{database}}" }],
-        fieldConfig: { defaults: { unit: "bytes" }, overrides: [] },
+        targets: [
+          {
+            expr: `jvm_memory_HeapMemoryUsage_used{${fi}} / jvm_memory_HeapMemoryUsage_max{${fi}}`,
+            refId: "A",
+          },
+        ],
+        fieldConfig: {
+          defaults: {
+            unit: "percentunit", min: 0, max: 1,
+            thresholds: { steps: [{ color: "green", value: 0 }, { color: "yellow", value: 0.75 }, { color: "red", value: 0.9 }] },
+          },
+          overrides: [],
+        },
       },
       {
         id: 3,
-        title: "Node Count",
+        title: "Active Threads",
         type: "stat",
         gridPos: { h: 4, w: 6, x: 12, y: 0 },
         datasource: PROM_DS,
-        targets: [{ expr: `neo4j_database_count_node{${fi}}`, refId: "A", legendFormat: "{{database}}" }],
+        targets: [{ expr: `jvm_threading_ThreadCount{${fi}}`, refId: "A" }],
         fieldConfig: { defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } }, overrides: [] },
       },
       {
         id: 4,
-        title: "Relationship Count",
+        title: "Open File Descriptors",
         type: "stat",
         gridPos: { h: 4, w: 6, x: 18, y: 0 },
         datasource: PROM_DS,
-        targets: [{ expr: `neo4j_database_count_relationship{${fi}}`, refId: "A", legendFormat: "{{database}}" }],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } }, overrides: [] },
+        targets: [{ expr: `jvm_os_OpenFileDescriptorCount{${fi}}`, refId: "A" }],
+        fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }, { color: "yellow", value: 500 }, { color: "red", value: 900 }] } }, overrides: [] },
       },
       // --- Row 2: JVM ---
       {
         id: 5,
-        title: "JVM Heap Usage",
+        title: "JVM Heap Memory",
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 0, y: 4 },
         datasource: PROM_DS,
         targets: [
-          { expr: `neo4j_vm_memory_pool_bytes{${fi},pool="heap"}`, refId: "A", legendFormat: "used" },
-          { expr: `neo4j_vm_memory_pool_bytes_max{${fi},pool="heap"}`, refId: "B", legendFormat: "max" },
+          { expr: `jvm_memory_HeapMemoryUsage_used{${fi}}`, refId: "A", legendFormat: "used" },
+          { expr: `jvm_memory_HeapMemoryUsage_committed{${fi}}`, refId: "B", legendFormat: "committed" },
+          { expr: `jvm_memory_HeapMemoryUsage_max{${fi}}`, refId: "C", legendFormat: "max" },
         ],
         fieldConfig: { defaults: { unit: "bytes" }, overrides: [] },
       },
@@ -83,11 +95,11 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 12, y: 4 },
         datasource: PROM_DS,
         targets: [
-          { expr: `rate(neo4j_vm_gc_time_total{${fi}}[5m])`, refId: "A", legendFormat: "{{gc}}" },
+          { expr: `rate(jvm_gc_CollectionTime{${fi}}[5m])`, refId: "A", legendFormat: "{{gc}}" },
         ],
         fieldConfig: { defaults: { unit: "ms" }, overrides: [] },
       },
-      // --- Row 3: Transactions & Queries ---
+      // --- Row 3: Transactions & Bolt ---
       {
         id: 7,
         title: "Transactions",
@@ -95,9 +107,9 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 0, y: 12 },
         datasource: PROM_DS,
         targets: [
-          { expr: `rate(neo4j_database_transaction_committed_total{${fi}}[5m])`, refId: "A", legendFormat: "committed/s" },
-          { expr: `rate(neo4j_database_transaction_rollbacks_total{${fi}}[5m])`, refId: "B", legendFormat: "rollbacks/s" },
-          { expr: `neo4j_database_transaction_active`, refId: "C", legendFormat: "active" },
+          { expr: `rate(neo4j_transaction_committed_total{${fi}}[5m])`, refId: "A", legendFormat: "committed/s" },
+          { expr: `rate(neo4j_transaction_rollbacks_total{${fi}}[5m])`, refId: "B", legendFormat: "rollbacks/s" },
+          { expr: `neo4j_transaction_active{${fi}}`, refId: "C", legendFormat: "active" },
         ],
         fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
       },
@@ -114,14 +126,19 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
           { expr: `neo4j_bolt_connections_idle{${fi}}`, refId: "D", legendFormat: "idle" },
         ],
       },
-      // --- Row 4: Page Cache & Disk ---
+      // --- Row 4: Page Cache ---
       {
         id: 9,
         title: "Page Cache Hit Ratio",
         type: "gauge",
         gridPos: { h: 8, w: 12, x: 0, y: 20 },
         datasource: PROM_DS,
-        targets: [{ expr: `neo4j_page_cache_hit_ratio{${fi}}`, refId: "A" }],
+        targets: [
+          {
+            expr: `neo4j_page_cache_hits_total{${fi}} / (neo4j_page_cache_hits_total{${fi}} + neo4j_page_cache_faults_total{${fi}})`,
+            refId: "A",
+          },
+        ],
         fieldConfig: {
           defaults: {
             unit: "percentunit", min: 0, max: 1,
@@ -132,39 +149,41 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
       },
       {
         id: 10,
-        title: "Page Cache Pages",
+        title: "Page Cache Operations",
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 12, y: 20 },
         datasource: PROM_DS,
         targets: [
-          { expr: `rate(neo4j_page_cache_page_faults_total{${fi}}[5m])`, refId: "A", legendFormat: "faults/s" },
-          { expr: `rate(neo4j_page_cache_evictions_total{${fi}}[5m])`, refId: "B", legendFormat: "evictions/s" },
+          { expr: `rate(neo4j_page_cache_hits_total{${fi}}[5m])`, refId: "A", legendFormat: "hits/s" },
+          { expr: `rate(neo4j_page_cache_faults_total{${fi}}[5m])`, refId: "B", legendFormat: "faults/s" },
+          { expr: `rate(neo4j_page_cache_evictions_total{${fi}}[5m])`, refId: "C", legendFormat: "evictions/s" },
         ],
         fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
       },
-      // --- Row 5: Checkpoint & Logs ---
+      // --- Row 5: Checkpoints & Bolt messages ---
       {
         id: 11,
-        title: "Checkpoints",
+        title: "Checkpoint Events",
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 0, y: 28 },
         datasource: PROM_DS,
         targets: [
           { expr: `rate(neo4j_check_point_events_total{${fi}}[5m])`, refId: "A", legendFormat: "events/s" },
-          { expr: `neo4j_check_point_total_time_total{${fi}}`, refId: "B", legendFormat: "total time" },
+          { expr: `neo4j_check_point_total_time_total{${fi}}`, refId: "B", legendFormat: "total time ms" },
         ],
-        fieldConfig: { defaults: { unit: "ms" }, overrides: [] },
       },
       {
         id: 12,
-        title: "Transaction Log Size",
+        title: "Bolt Messages",
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 12, y: 28 },
         datasource: PROM_DS,
         targets: [
-          { expr: `neo4j_database_transaction_log_size{${fi}}`, refId: "A", legendFormat: "{{database}}" },
+          { expr: `rate(neo4j_bolt_messages_received_total{${fi}}[5m])`, refId: "A", legendFormat: "received/s" },
+          { expr: `rate(neo4j_bolt_messages_started_total{${fi}}[5m])`, refId: "B", legendFormat: "started/s" },
+          { expr: `rate(neo4j_bolt_messages_done_total{${fi}}[5m])`, refId: "C", legendFormat: "done/s" },
         ],
-        fieldConfig: { defaults: { unit: "bytes" }, overrides: [] },
+        fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
       },
     ],
     schemaVersion: 39,
@@ -174,8 +193,6 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
 
 /**
  * Create a per-cluster Neo4j dashboard ConfigMap.
- *
- * Called from `operator/neo4j.ts` after creating each Neo4j instance.
  */
 export function createNeo4jClusterDashboard(
   clusterName: string,

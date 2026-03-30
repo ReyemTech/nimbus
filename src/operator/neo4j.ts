@@ -74,7 +74,9 @@ function buildNeo4jHelmValues(
     ...(config?.config ?? {}),
   };
 
-  // Enable Prometheus metrics endpoint
+  // Enable Prometheus metrics endpoint. This is Enterprise-only but harmless
+  // on Community (the config is accepted but the endpoint doesn't activate).
+  // On Enterprise, it exposes metrics at :2004/metrics.
   if (metricsEnabled) {
     neo4jConfig["server.metrics.prometheus.enabled"] = "true";
     neo4jConfig["server.metrics.prometheus.endpoint"] = `0.0.0.0:${NEO4J_METRICS_PORT}`;
@@ -107,6 +109,17 @@ function buildNeo4jHelmValues(
     };
   }
 
+  // Use chart's built-in ServiceMonitor (works with Enterprise metrics endpoint)
+  if (metricsEnabled) {
+    values["serviceMonitor"] = {
+      enabled: true,
+      labels: { release: "reyemtech-kube-prometheus-stack" },
+      port: String(NEO4J_METRICS_PORT),
+      path: "/metrics",
+      interval: "30s",
+    };
+  }
+
   return { ...values, ...(config?.values ?? {}) };
 }
 
@@ -125,7 +138,6 @@ export function createNeo4jCluster(
   storageTiers?: StorageTierMap
 ): IClusterInstance {
   const namespace = ensureNamespace(DATA_NAMESPACE, provider);
-  const metricsEnabled = config?.metrics !== false;
   const neo4jPassword = config?.password
     ? pulumi.output(config.password)
     : pulumi.secret(crypto.randomBytes(24).toString("base64url"));
@@ -310,47 +322,7 @@ export function createNeo4jCluster(
   }
 
   // -------------------------------------------------------------------------
-  // 4. Prometheus ServiceMonitor
-  // -------------------------------------------------------------------------
-  if (metricsEnabled) {
-    new k8s.apiextensions.CustomResource(
-      `${name}-neo4j-servicemonitor`,
-      {
-        apiVersion: "monitoring.coreos.com/v1",
-        kind: "ServiceMonitor",
-        metadata: {
-          name: `${name}-neo4j`,
-          namespace: DATA_NAMESPACE,
-          labels: {
-            "app.kubernetes.io/managed-by": "nimbus",
-            "release": "reyemtech-kube-prometheus-stack",
-          },
-        },
-        spec: {
-          selector: {
-            matchLabels: {
-              "app": name,
-            },
-          },
-          namespaceSelector: {
-            matchNames: [DATA_NAMESPACE],
-          },
-          endpoints: [
-            {
-              port: "metrics",
-              targetPort: NEO4J_METRICS_PORT,
-              interval: "30s",
-              path: "/metrics",
-            },
-          ],
-        },
-      },
-      { provider, dependsOn: [release] }
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // 5. Per-cluster Grafana dashboard
+  // 4. Per-cluster Grafana dashboard
   // -------------------------------------------------------------------------
   createNeo4jClusterDashboard(name, "observability", provider, [release]);
 

@@ -12,7 +12,7 @@ import { PROM_DS } from "./_helpers";
 export function mariadbDashboard(): Record<string, unknown> {
   return {
     uid: "nimbus-mariadb",
-    title: "Nimbus / MariaDB",
+    title: "Nimbus / Data / MariaDB",
     tags: ["nimbus", "mariadb"],
     timezone: "browser",
     editable: true,

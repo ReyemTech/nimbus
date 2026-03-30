@@ -125,6 +125,43 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
     { provider, dependsOn }
   );
 
+  // MinIO Tenant (metrics on :9000/minio/v2/metrics/cluster in data namespace)
+  new k8s.apiextensions.CustomResource(
+    `${name}-pm-minio`,
+    {
+      apiVersion: "monitoring.coreos.com/v1",
+      kind: "PodMonitor",
+      metadata: { name: "minio-metrics", namespace, labels: { release: name } },
+      spec: {
+        namespaceSelector: { matchNames: ["data"] },
+        selector: { matchLabels: { "v1.min.io/tenant": "minio" } },
+        podMetricsEndpoints: [
+          { port: "minio-port", path: "/minio/v2/metrics/cluster", interval: "30s" },
+          { port: "minio-port", path: "/minio/v2/metrics/node", interval: "30s" },
+        ],
+      },
+    },
+    { provider, dependsOn }
+  );
+
+  // Neo4j (metrics on :2004/metrics in data namespace — Enterprise only, pre-configured for upgrade)
+  new k8s.apiextensions.CustomResource(
+    `${name}-pm-neo4j`,
+    {
+      apiVersion: "monitoring.coreos.com/v1",
+      kind: "PodMonitor",
+      metadata: { name: "neo4j-metrics", namespace, labels: { release: name } },
+      spec: {
+        namespaceSelector: { matchNames: ["data"] },
+        selector: { matchLabels: { "helm.neo4j.com/pod_category": "neo4j-instance" } },
+        podMetricsEndpoints: [
+          { port: "tcp-http", path: "/metrics", interval: "30s" },
+        ],
+      },
+    },
+    { provider, dependsOn }
+  );
+
   // --- Dashboard ConfigMaps ---
 
   createDashboardConfigMap(

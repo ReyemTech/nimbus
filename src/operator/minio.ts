@@ -67,7 +67,7 @@ export function createMinioOperator(
         labels: { "app.kubernetes.io/managed-by": "nimbus" },
       },
       stringData: {
-        "config.env": pulumi.interpolate`export MINIO_ROOT_USER="${rootUser}"\nexport MINIO_ROOT_PASSWORD="${rootPassword}"`,
+        "config.env": pulumi.interpolate`export MINIO_ROOT_USER="${rootUser}"\nexport MINIO_ROOT_PASSWORD="${rootPassword}"\nexport MINIO_PROMETHEUS_AUTH_TYPE="public"`,
       },
     },
     { provider, dependsOn: [namespace, helmRelease], ignoreChanges: ["data", "stringData"] }
@@ -131,6 +131,10 @@ export function createMinioOperator(
           },
         ],
         mountPath: "/export",
+        // Allow Prometheus to scrape metrics without auth
+        env: [
+          { name: "MINIO_PROMETHEUS_AUTH_TYPE", value: "public" },
+        ],
       },
     },
     { provider, dependsOn: [helmRelease, configSecret] }

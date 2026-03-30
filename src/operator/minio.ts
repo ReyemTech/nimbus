@@ -20,7 +20,7 @@ import type {
 } from "./interfaces";
 
 const DATA_NAMESPACE = "data";
-const DEFAULT_STORAGE_GB = 50;
+const DEFAULT_STORAGE_GB = 20;
 const MINIO_SERVICE_PORT = 9000;
 
 /**
@@ -201,10 +201,13 @@ export function buildMinioHelmValues(config: IOperatorConfig): Record<string, un
     persistence: {
       enabled: true,
       size: `${storageGb}Gi`,
+      storageClass: "sata",
     },
     resources: {
       requests: { memory: "256Mi", cpu: "100m" },
     },
+    // Disable the object browser console to avoid image pull issues
+    disableWebUI: true,
     // Merge caller-supplied overrides last
     ...(config.values ?? {}),
   };

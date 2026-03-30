@@ -106,6 +106,15 @@ const OPERATOR_CHARTS: Record<OperatorType, OperatorChartInfo & { crds?: Operato
  * @param config - Operator configuration
  * @returns Deployed IOperator or IMinIOOperator instance
  */
+export function createOperator(type: "minio", config: IOperatorConfig): IMinIOOperator;
+export function createOperator(
+  type: "cloudnative-pg" | "mariadb-operator",
+  config: IOperatorConfig
+): IOperator;
+export function createOperator(
+  type: OperatorType,
+  config: IOperatorConfig
+): IOperator | IMinIOOperator;
 export function createOperator(
   type: OperatorType,
   config: IOperatorConfig

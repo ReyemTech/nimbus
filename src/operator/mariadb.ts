@@ -146,6 +146,12 @@ function createSingleMariadbCluster(
       .join("\n");
   }
 
+  // Metrics exporter sidecar
+  mariadbSpec["metrics"] = {
+    enabled: true,
+    exporter: { image: "prom/mysqld-exporter:v0.16.0", port: 9104 },
+  };
+
   // Replication (replicas > 1)
   if (replicas > 1) {
     mariadbSpec["replicas"] = replicas;

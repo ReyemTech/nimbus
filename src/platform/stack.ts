@@ -515,6 +515,7 @@ function deployTraefik(
           dashboard: { enabled: false },
         },
         ports: {
+          metrics: { expose: { default: true } },
           web: {
             http: {
               redirections: {
@@ -642,6 +643,13 @@ function deployArgocd(
               "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
             },
           },
+          metrics: { enabled: true, serviceMonitor: { enabled: true } },
+        },
+        controller: {
+          metrics: { enabled: true, serviceMonitor: { enabled: true } },
+        },
+        repoServer: {
+          metrics: { enabled: true, serviceMonitor: { enabled: true } },
         },
         ...config.values,
       },

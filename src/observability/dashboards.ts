@@ -80,9 +80,41 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
     { provider, dependsOn }
   );
 
-  // NOTE: Traefik ServiceMonitor requires `ports.metrics.expose.default: true`
-  // in the Traefik Helm values (platform stack). The dashboard is provisioned
-  // here but metrics won't flow until that value is set.
+  // Traefik (metrics on port 9100 in traefik namespace)
+  new k8s.apiextensions.CustomResource(
+    `${name}-sm-traefik`,
+    {
+      apiVersion: "monitoring.coreos.com/v1",
+      kind: "ServiceMonitor",
+      metadata: { name: "traefik", namespace, labels: { release: name } },
+      spec: {
+        namespaceSelector: { matchNames: ["traefik"] },
+        selector: { matchLabels: { "app.kubernetes.io/name": "traefik" } },
+        endpoints: [{ port: "metrics", interval: "15s" }],
+      },
+    },
+    { provider, dependsOn }
+  );
+
+  // ArgoCD (metrics created by ArgoCD Helm chart's serviceMonitor.enabled)
+  // ServiceMonitors are auto-created by the ArgoCD Helm chart — no need to create here.
+  // We only provision the dashboard.
+
+  // MariaDB (metrics exporter sidecar on port 9104 in data namespace)
+  new k8s.apiextensions.CustomResource(
+    `${name}-pm-mariadb`,
+    {
+      apiVersion: "monitoring.coreos.com/v1",
+      kind: "PodMonitor",
+      metadata: { name: "mariadb-metrics", namespace, labels: { release: name } },
+      spec: {
+        namespaceSelector: { matchNames: ["data"] },
+        selector: { matchLabels: { "app.kubernetes.io/name": "mariadb" } },
+        podMetricsEndpoints: [{ port: "metrics", interval: "30s" }],
+      },
+    },
+    { provider, dependsOn }
+  );
 
   // --- Dashboard ConfigMaps ---
 
@@ -104,6 +136,8 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
     provider,
     dependsOn
   );
+  createDashboardConfigMap(name, "argocd", argocdDashboard(), namespace, provider, dependsOn);
+  createDashboardConfigMap(name, "mariadb", mariadbDashboard(), namespace, provider, dependsOn);
 }
 
 function createDashboardConfigMap(
@@ -650,6 +684,214 @@ function traefikDashboard(): Record<string, unknown> {
                 { color: "red", value: 0 },
                 { color: "yellow", value: 7 },
                 { color: "green", value: 30 },
+              ],
+            },
+          },
+          overrides: [],
+        },
+      },
+    ],
+    schemaVersion: 39,
+    version: 1,
+  };
+}
+
+/** ArgoCD dashboard — sync status, app health, deployment frequency. */
+function argocdDashboard(): Record<string, unknown> {
+  return {
+    uid: "nimbus-argocd",
+    title: "Nimbus: ArgoCD",
+    tags: ["nimbus", "argocd"],
+    timezone: "browser",
+    editable: true,
+    time: { from: "now-1h", to: "now" },
+    panels: [
+      {
+        id: 1,
+        title: "Application Sync Status",
+        type: "stat",
+        gridPos: { h: 6, w: 8, x: 0, y: 0 },
+        datasource: { type: "prometheus", uid: "prometheus" },
+        targets: [
+          {
+            expr: 'count(argocd_app_info{sync_status="Synced"})',
+            refId: "A",
+            legendFormat: "Synced",
+          },
+        ],
+        fieldConfig: {
+          defaults: {
+            color: { mode: "thresholds" },
+            thresholds: { steps: [{ value: 0, color: "green" }] },
+          },
+          overrides: [],
+        },
+      },
+      {
+        id: 2,
+        title: "Application Health",
+        type: "piechart",
+        gridPos: { h: 6, w: 8, x: 8, y: 0 },
+        datasource: { type: "prometheus", uid: "prometheus" },
+        targets: [
+          {
+            expr: "count(argocd_app_info) by (health_status)",
+            refId: "A",
+            legendFormat: "{{health_status}}",
+          },
+        ],
+      },
+      {
+        id: 3,
+        title: "Sync Operations / 5m",
+        type: "timeseries",
+        gridPos: { h: 6, w: 8, x: 16, y: 0 },
+        datasource: { type: "prometheus", uid: "prometheus" },
+        targets: [
+          {
+            expr: "sum(rate(argocd_app_sync_total[5m])) by (phase)",
+            refId: "A",
+            legendFormat: "{{phase}}",
+          },
+        ],
+      },
+      {
+        id: 4,
+        title: "Reconciliation Duration (p95)",
+        type: "timeseries",
+        gridPos: { h: 6, w: 12, x: 0, y: 6 },
+        datasource: { type: "prometheus", uid: "prometheus" },
+        targets: [
+          {
+            expr: "histogram_quantile(0.95, sum(rate(argocd_app_reconcile_bucket[5m])) by (le))",
+            refId: "A",
+            legendFormat: "p95",
+          },
+        ],
+        fieldConfig: { defaults: { unit: "s" }, overrides: [] },
+      },
+      {
+        id: 5,
+        title: "API Server Requests / sec",
+        type: "timeseries",
+        gridPos: { h: 6, w: 12, x: 12, y: 6 },
+        datasource: { type: "prometheus", uid: "prometheus" },
+        targets: [
+          {
+            expr: "sum(rate(argocd_redis_request_total[5m])) by (failed)",
+            refId: "A",
+            legendFormat: "failed={{failed}}",
+          },
+        ],
+      },
+    ],
+    schemaVersion: 39,
+    version: 1,
+  };
+}
+
+/** MariaDB dashboard — connections, replication, slow queries. */
+function mariadbDashboard(): Record<string, unknown> {
+  return {
+    uid: "nimbus-mariadb",
+    title: "Nimbus: MariaDB",
+    tags: ["nimbus", "mariadb"],
+    timezone: "browser",
+    editable: true,
+    time: { from: "now-1h", to: "now" },
+    panels: [
+      {
+        id: 1,
+        title: "Active Connections",
+        type: "timeseries",
+        gridPos: { h: 6, w: 12, x: 0, y: 0 },
+        datasource: { type: "prometheus", uid: "prometheus" },
+        targets: [
+          {
+            expr: "mysql_global_status_threads_connected",
+            refId: "A",
+            legendFormat: "{{instance}}",
+          },
+        ],
+      },
+      {
+        id: 2,
+        title: "Queries / sec",
+        type: "timeseries",
+        gridPos: { h: 6, w: 12, x: 12, y: 0 },
+        datasource: { type: "prometheus", uid: "prometheus" },
+        targets: [
+          {
+            expr: "rate(mysql_global_status_queries[5m])",
+            refId: "A",
+            legendFormat: "{{instance}}",
+          },
+        ],
+      },
+      {
+        id: 3,
+        title: "Slow Queries / min",
+        type: "timeseries",
+        gridPos: { h: 6, w: 12, x: 0, y: 6 },
+        datasource: { type: "prometheus", uid: "prometheus" },
+        targets: [
+          {
+            expr: "rate(mysql_global_status_slow_queries[5m]) * 60",
+            refId: "A",
+            legendFormat: "{{instance}}",
+          },
+        ],
+        fieldConfig: { defaults: { color: { mode: "fixed", fixedColor: "red" } }, overrides: [] },
+      },
+      {
+        id: 4,
+        title: "InnoDB Buffer Pool Usage",
+        type: "gauge",
+        gridPos: { h: 6, w: 6, x: 12, y: 6 },
+        datasource: { type: "prometheus", uid: "prometheus" },
+        targets: [
+          {
+            expr: "mysql_global_status_innodb_buffer_pool_pages_data / mysql_global_status_innodb_buffer_pool_pages_total",
+            refId: "A",
+          },
+        ],
+        fieldConfig: {
+          defaults: {
+            unit: "percentunit",
+            min: 0,
+            max: 1,
+            thresholds: {
+              steps: [
+                { value: 0, color: "green" },
+                { value: 0.8, color: "yellow" },
+                { value: 0.95, color: "red" },
+              ],
+            },
+          },
+          overrides: [],
+        },
+      },
+      {
+        id: 5,
+        title: "Replication Lag",
+        type: "stat",
+        gridPos: { h: 6, w: 6, x: 18, y: 6 },
+        datasource: { type: "prometheus", uid: "prometheus" },
+        targets: [
+          {
+            expr: "mysql_slave_status_seconds_behind_master",
+            refId: "A",
+            legendFormat: "{{instance}}",
+          },
+        ],
+        fieldConfig: {
+          defaults: {
+            unit: "s",
+            thresholds: {
+              steps: [
+                { value: 0, color: "green" },
+                { value: 5, color: "yellow" },
+                { value: 30, color: "red" },
               ],
             },
           },

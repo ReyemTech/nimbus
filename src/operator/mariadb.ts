@@ -18,6 +18,7 @@ import type {
   IOperatorDatabaseConfig,
   IDatabaseInstance,
 } from "./interfaces";
+import { createMariadbClusterDashboard } from "../observability/dashboards";
 
 const DATA_NAMESPACE = "data";
 const DEFAULT_MARIADB_VERSION = "11.7";
@@ -195,6 +196,9 @@ function createSingleMariadbCluster(
     },
     { provider, dependsOn }
   );
+
+  // Per-cluster Grafana dashboard
+  createMariadbClusterDashboard(name, "observability", provider, [mariadb]);
 
   // Scheduled backup via S3
   if (backup) {

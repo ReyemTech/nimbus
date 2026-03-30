@@ -16,7 +16,7 @@ import type {
   IObservabilityStackConfig,
   IPrometheusConfig,
 } from "./interfaces";
-import { createDashboards, lokiLogsDashboard } from "./dashboards";
+import { createDashboards, lokiLogsDashboard } from "./dashboards/index";
 
 /**
  * Default Helm chart versions. Used only when the consumer doesn't pass `version`.

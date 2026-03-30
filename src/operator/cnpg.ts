@@ -18,6 +18,7 @@ import type {
   IOperatorDatabaseConfig,
   IDatabaseInstance,
 } from "./interfaces";
+import { createCnpgClusterDashboard } from "../observability/dashboards";
 
 const DATA_NAMESPACE = "data";
 const DEFAULT_PG_VERSION = "17";
@@ -207,6 +208,9 @@ function createSingleCnpgCluster(
     },
     { provider, dependsOn }
   );
+
+  // Per-cluster Grafana dashboard
+  createCnpgClusterDashboard(name, "observability", provider, [cluster]);
 
   // ScheduledBackup CRD if backup is configured
   if (backup) {

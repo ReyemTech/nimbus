@@ -7,7 +7,7 @@
 
 import type * as k8s from "@pulumi/kubernetes";
 import type * as pulumi from "@pulumi/pulumi";
-import { PROM_DS, createDashboardConfigMap } from "./_helpers";
+import { PROM_DS, createDashboardConfigMap, pvcDiskUsagePanels } from "./_helpers";
 
 /** Build the per-cluster MariaDB dashboard JSON with an instance template variable. */
 function mariadbClusterDashboard(clusterName: string): Record<string, unknown> {
@@ -407,6 +407,8 @@ function mariadbClusterDashboard(clusterName: string): Record<string, unknown> {
         ],
         fieldConfig: { defaults: { unit: "ops" }, overrides: [] },
       },
+      // --- PVC Disk Usage ---
+      ...pvcDiskUsagePanels(`persistentvolumeclaim=~"storage-${clusterName}-.*"`, 19, 52),
     ],
     schemaVersion: 39,
     version: 1,

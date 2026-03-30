@@ -5,7 +5,7 @@
  * @module observability/dashboards/minio
  */
 
-import { PROM_DS } from "./_helpers";
+import { PROM_DS, pvcDiskUsagePanels } from "./_helpers";
 
 /** Build the MinIO overview dashboard JSON. */
 export function minioDashboard(): Record<string, unknown> {
@@ -201,6 +201,8 @@ export function minioDashboard(): Record<string, unknown> {
           overrides: [],
         },
       },
+      // --- PVC Disk Usage ---
+      ...pvcDiskUsagePanels(`persistentvolumeclaim=~"data.*minio.*"`, 15, 32),
     ],
     schemaVersion: 39,
     version: 1,

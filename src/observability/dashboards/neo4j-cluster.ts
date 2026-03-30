@@ -10,7 +10,7 @@
 
 import type * as k8s from "@pulumi/kubernetes";
 import type * as pulumi from "@pulumi/pulumi";
-import { PROM_DS, createDashboardConfigMap } from "./_helpers";
+import { PROM_DS, createDashboardConfigMap, pvcDiskUsagePanels } from "./_helpers";
 
 const NEO4J_DS = { type: "kniepdennis-neo4j-datasource", uid: "neo4j" };
 
@@ -153,6 +153,8 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         ],
         fieldConfig: { defaults: { unit: "bytes", noValue: "Enterprise metrics not available" }, overrides: [] },
       },
+      // --- PVC Disk Usage ---
+      ...pvcDiskUsagePanels(`persistentvolumeclaim=~"data-${clusterName}-.*"`, 11, 24),
     ],
     schemaVersion: 39,
     version: 1,

@@ -5,7 +5,7 @@
  * @module observability/dashboards/redis
  */
 
-import { PROM_DS } from "./_helpers";
+import { PROM_DS, pvcDiskUsagePanels } from "./_helpers";
 
 /** Grafana dashboard JSON for Redis metrics (10 panels). */
 export function redisDashboard(): Record<string, unknown> {
@@ -210,6 +210,8 @@ export function redisDashboard(): Record<string, unknown> {
           overrides: [],
         },
       },
+      // --- PVC Disk Usage ---
+      ...pvcDiskUsagePanels(`persistentvolumeclaim=~"redis-data-.*"`, 11, 28),
     ],
     schemaVersion: 39,
     version: 1,

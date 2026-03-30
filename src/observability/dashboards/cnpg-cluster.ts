@@ -7,7 +7,7 @@
 
 import type * as k8s from "@pulumi/kubernetes";
 import type * as pulumi from "@pulumi/pulumi";
-import { PROM_DS, createDashboardConfigMap } from "./_helpers";
+import { PROM_DS, createDashboardConfigMap, pvcDiskUsagePanels } from "./_helpers";
 
 /** Build the per-cluster CNPG dashboard JSON filtered to a specific cluster. */
 function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
@@ -359,6 +359,8 @@ function cnpgClusterDashboard(clusterName: string): Record<string, unknown> {
         ],
         fieldConfig: { defaults: { color: { mode: "fixed", fixedColor: "red" } }, overrides: [] },
       },
+      // --- PVC Disk Usage ---
+      ...pvcDiskUsagePanels(`persistentvolumeclaim=~"${clusterName}-.*"`, 17, 52),
     ],
     schemaVersion: 39,
     version: 1,

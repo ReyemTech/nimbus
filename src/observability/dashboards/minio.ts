@@ -1,8 +1,6 @@
 /**
- * MinIO overview Grafana dashboard — S3 object storage metrics.
- *
- * MinIO exposes Prometheus metrics natively at /minio/v2/metrics/cluster
- * and /minio/v2/metrics/node endpoints.
+ * MinIO Grafana dashboard — S3 object storage metrics from the MinIO
+ * Operator Tenant. Metric names match the MinIO v2 metrics API.
  *
  * @module observability/dashboards/minio
  */
@@ -20,10 +18,10 @@ export function minioDashboard(): Record<string, unknown> {
     time: { from: "now-1h", to: "now" },
     refresh: "30s",
     panels: [
-      // --- Row 1: Status ---
+      // --- Row 1: Cluster status ---
       {
         id: 1,
-        title: "Instance Status",
+        title: "Cluster Health",
         type: "stat",
         gridPos: { h: 4, w: 6, x: 0, y: 0 },
         datasource: PROM_DS,
@@ -39,126 +37,48 @@ export function minioDashboard(): Record<string, unknown> {
       },
       {
         id: 2,
-        title: "Total Storage Used",
+        title: "Storage Used",
         type: "stat",
         gridPos: { h: 4, w: 6, x: 6, y: 0 },
         datasource: PROM_DS,
         targets: [
-          { expr: `minio_cluster_usage_total_bytes`, refId: "A", legendFormat: "used" },
+          { expr: `minio_cluster_usage_total_bytes`, refId: "A" },
         ],
         fieldConfig: { defaults: { unit: "bytes" }, overrides: [] },
       },
       {
         id: 3,
-        title: "Total Objects",
+        title: "Objects",
         type: "stat",
         gridPos: { h: 4, w: 6, x: 12, y: 0 },
         datasource: PROM_DS,
         targets: [
-          { expr: `minio_cluster_usage_object_total`, refId: "A", legendFormat: "objects" },
+          { expr: `minio_cluster_usage_object_total`, refId: "A" },
         ],
         fieldConfig: { defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } }, overrides: [] },
       },
       {
         id: 4,
-        title: "Total Buckets",
+        title: "Buckets",
         type: "stat",
         gridPos: { h: 4, w: 6, x: 18, y: 0 },
         datasource: PROM_DS,
         targets: [
-          { expr: `minio_cluster_usage_buckets_total`, refId: "A", legendFormat: "buckets" },
+          { expr: `minio_cluster_bucket_total`, refId: "A" },
         ],
         fieldConfig: { defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } }, overrides: [] },
       },
-      // --- Row 2: S3 API ---
+      // --- Row 2: Capacity ---
       {
         id: 5,
-        title: "S3 API Request Rate",
-        type: "timeseries",
-        gridPos: { h: 8, w: 12, x: 0, y: 4 },
-        datasource: PROM_DS,
-        targets: [
-          { expr: `rate(minio_s3_requests_total[5m])`, refId: "A", legendFormat: "{{api}} {{method}}" },
-        ],
-        fieldConfig: { defaults: { unit: "reqps" }, overrides: [] },
-      },
-      {
-        id: 6,
-        title: "S3 Error Rate",
-        type: "timeseries",
-        gridPos: { h: 8, w: 12, x: 12, y: 4 },
-        datasource: PROM_DS,
-        targets: [
-          { expr: `rate(minio_s3_requests_errors_total[5m])`, refId: "A", legendFormat: "{{api}} errors/s" },
-        ],
-        fieldConfig: { defaults: { unit: "reqps", color: { mode: "fixed", fixedColor: "red" } }, overrides: [] },
-      },
-      // --- Row 3: Traffic ---
-      {
-        id: 7,
-        title: "Network Traffic (Received)",
-        type: "timeseries",
-        gridPos: { h: 8, w: 12, x: 0, y: 12 },
-        datasource: PROM_DS,
-        targets: [
-          { expr: `rate(minio_s3_traffic_received_bytes[5m])`, refId: "A", legendFormat: "received" },
-        ],
-        fieldConfig: { defaults: { unit: "Bps" }, overrides: [] },
-      },
-      {
-        id: 8,
-        title: "Network Traffic (Sent)",
-        type: "timeseries",
-        gridPos: { h: 8, w: 12, x: 12, y: 12 },
-        datasource: PROM_DS,
-        targets: [
-          { expr: `rate(minio_s3_traffic_sent_bytes[5m])`, refId: "A", legendFormat: "sent" },
-        ],
-        fieldConfig: { defaults: { unit: "Bps" }, overrides: [] },
-      },
-      // --- Row 4: Bucket-level ---
-      {
-        id: 9,
-        title: "Bucket Sizes",
-        type: "bargauge",
-        gridPos: { h: 8, w: 12, x: 0, y: 20 },
-        datasource: PROM_DS,
-        targets: [
-          { expr: `minio_bucket_usage_total_bytes`, refId: "A", legendFormat: "{{bucket}}", instant: true },
-        ],
-        fieldConfig: {
-          defaults: {
-            unit: "bytes",
-            thresholds: { steps: [{ value: 0, color: "green" }, { value: 1073741824, color: "yellow" }, { value: 10737418240, color: "red" }] },
-          },
-          overrides: [],
-        },
-      },
-      {
-        id: 10,
-        title: "Bucket Object Count",
-        type: "bargauge",
-        gridPos: { h: 8, w: 12, x: 12, y: 20 },
-        datasource: PROM_DS,
-        targets: [
-          { expr: `minio_bucket_usage_object_total`, refId: "A", legendFormat: "{{bucket}}", instant: true },
-        ],
-        fieldConfig: {
-          defaults: { thresholds: { steps: [{ value: 0, color: "blue" }] } },
-          overrides: [],
-        },
-      },
-      // --- Row 5: Disk & Healing ---
-      {
-        id: 11,
         title: "Disk Usage",
         type: "gauge",
-        gridPos: { h: 8, w: 12, x: 0, y: 28 },
+        gridPos: { h: 8, w: 8, x: 0, y: 4 },
         datasource: PROM_DS,
         targets: [
           {
-            expr: `minio_node_disk_used_bytes / minio_node_disk_total_bytes`,
-            refId: "A", legendFormat: "disk usage",
+            expr: `minio_node_drive_used_bytes / minio_node_drive_total_bytes`,
+            refId: "A", legendFormat: "{{drive}}",
           },
         ],
         fieldConfig: {
@@ -170,15 +90,116 @@ export function minioDashboard(): Record<string, unknown> {
         },
       },
       {
-        id: 12,
-        title: "S3 Request Duration (p99)",
+        id: 6,
+        title: "Capacity (Raw)",
         type: "timeseries",
-        gridPos: { h: 8, w: 12, x: 12, y: 28 },
+        gridPos: { h: 8, w: 8, x: 8, y: 4 },
         datasource: PROM_DS,
         targets: [
-          { expr: `histogram_quantile(0.99, rate(minio_s3_requests_duration_seconds_bucket[5m]))`, refId: "A", legendFormat: "p99 latency" },
+          { expr: `minio_cluster_capacity_raw_total_bytes`, refId: "A", legendFormat: "total" },
+          { expr: `minio_cluster_capacity_raw_free_bytes`, refId: "B", legendFormat: "free" },
+        ],
+        fieldConfig: { defaults: { unit: "bytes" }, overrides: [] },
+      },
+      {
+        id: 7,
+        title: "Process Memory",
+        type: "timeseries",
+        gridPos: { h: 8, w: 8, x: 16, y: 4 },
+        datasource: PROM_DS,
+        targets: [
+          { expr: `minio_node_process_resident_memory_bytes`, refId: "A", legendFormat: "RSS" },
+        ],
+        fieldConfig: { defaults: { unit: "bytes" }, overrides: [] },
+      },
+      // --- Row 3: S3 API ---
+      {
+        id: 8,
+        title: "S3 Incoming Requests",
+        type: "timeseries",
+        gridPos: { h: 8, w: 12, x: 0, y: 12 },
+        datasource: PROM_DS,
+        targets: [
+          { expr: `rate(minio_s3_requests_incoming_total[5m])`, refId: "A", legendFormat: "incoming/s" },
+        ],
+        fieldConfig: { defaults: { unit: "reqps" }, overrides: [] },
+      },
+      {
+        id: 9,
+        title: "S3 Rejected Requests",
+        type: "timeseries",
+        gridPos: { h: 8, w: 12, x: 12, y: 12 },
+        datasource: PROM_DS,
+        targets: [
+          { expr: `rate(minio_s3_requests_rejected_auth_total[5m])`, refId: "A", legendFormat: "auth rejected/s" },
+          { expr: `rate(minio_s3_requests_rejected_invalid_total[5m])`, refId: "B", legendFormat: "invalid/s" },
+          { expr: `rate(minio_s3_requests_rejected_header_total[5m])`, refId: "C", legendFormat: "bad header/s" },
+        ],
+        fieldConfig: { defaults: { unit: "reqps", color: { mode: "fixed", fixedColor: "red" } }, overrides: [] },
+      },
+      // --- Row 4: Traffic ---
+      {
+        id: 10,
+        title: "S3 Traffic",
+        type: "timeseries",
+        gridPos: { h: 8, w: 12, x: 0, y: 20 },
+        datasource: PROM_DS,
+        targets: [
+          { expr: `rate(minio_s3_traffic_received_bytes[5m])`, refId: "A", legendFormat: "received" },
+          { expr: `rate(minio_s3_traffic_sent_bytes[5m])`, refId: "B", legendFormat: "sent" },
+        ],
+        fieldConfig: { defaults: { unit: "Bps" }, overrides: [] },
+      },
+      {
+        id: 11,
+        title: "Drive Latency",
+        type: "timeseries",
+        gridPos: { h: 8, w: 12, x: 12, y: 20 },
+        datasource: PROM_DS,
+        targets: [
+          { expr: `minio_node_drive_latency_us`, refId: "A", legendFormat: "{{api}} {{drive}}" },
+        ],
+        fieldConfig: { defaults: { unit: "\u00b5s" }, overrides: [] },
+      },
+      // --- Row 5: Node ---
+      {
+        id: 12,
+        title: "Uptime",
+        type: "stat",
+        gridPos: { h: 4, w: 8, x: 0, y: 28 },
+        datasource: PROM_DS,
+        targets: [
+          { expr: `minio_node_process_uptime_seconds`, refId: "A" },
         ],
         fieldConfig: { defaults: { unit: "s" }, overrides: [] },
+      },
+      {
+        id: 13,
+        title: "Go Routines",
+        type: "stat",
+        gridPos: { h: 4, w: 8, x: 8, y: 28 },
+        datasource: PROM_DS,
+        targets: [
+          { expr: `minio_node_go_routine_total`, refId: "A" },
+        ],
+        fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }, { color: "yellow", value: 500 }] } }, overrides: [] },
+      },
+      {
+        id: 14,
+        title: "File Descriptors",
+        type: "gauge",
+        gridPos: { h: 4, w: 8, x: 16, y: 28 },
+        datasource: PROM_DS,
+        targets: [
+          { expr: `minio_node_file_descriptor_open_total / minio_node_file_descriptor_limit_total`, refId: "A" },
+        ],
+        fieldConfig: {
+          defaults: {
+            unit: "percentunit", min: 0, max: 1,
+            thresholds: { steps: [{ color: "green", value: 0 }, { color: "yellow", value: 0.75 }, { color: "red", value: 0.9 }] },
+          },
+          overrides: [],
+        },
       },
     ],
     schemaVersion: 39,

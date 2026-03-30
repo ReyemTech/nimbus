@@ -138,6 +138,7 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
         podMetricsEndpoints: [
           { port: "minio-port", path: "/minio/v2/metrics/cluster", interval: "30s" },
           { port: "minio-port", path: "/minio/v2/metrics/node", interval: "30s" },
+          { port: "minio-port", path: "/minio/v2/metrics/bucket", interval: "60s" },
         ],
       },
     },
@@ -155,7 +156,8 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
         namespaceSelector: { matchNames: ["data"] },
         selector: { matchLabels: { "helm.neo4j.com/pod_category": "neo4j-instance" } },
         podMetricsEndpoints: [
-          { port: "tcp-http", path: "/metrics", interval: "30s" },
+          // Port 2004 (tcp-prometheus) — Enterprise only. Preconfigured for upgrade.
+          { port: "tcp-prometheus", path: "/metrics", interval: "30s" },
         ],
       },
     },

@@ -196,23 +196,30 @@ export function createObservabilityStack(
         data: {
           "neo4j-datasource.yaml": pulumi
             .all([pulumi.output(config.neo4jEndpoint), neo4jPassword])
-            .apply(([url, pw]) =>
-              JSON.stringify({
+            .apply(([endpoint, pw]) => {
+              // Convert bolt:// to neo4j:// scheme (Go driver v5+ requirement)
+              const url = endpoint.replace(/^bolt:\/\//, "neo4j://");
+              return JSON.stringify({
                 apiVersion: 1,
                 datasources: [
                   {
                     name: "Neo4j",
                     type: "kniepdennis-neo4j-datasource",
                     uid: "neo4j",
-                    url,
+                    // Plugin reads URL from jsonData, not top-level url
+                    url: url,
                     access: "proxy",
                     isDefault: false,
-                    jsonData: { username: "neo4j" },
+                    jsonData: {
+                      url,
+                      database: "neo4j",
+                      username: "neo4j",
+                    },
                     secureJsonData: { password: pw },
                   },
                 ],
-              })
-            ),
+              });
+            }),
         },
       },
       {

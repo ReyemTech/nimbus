@@ -171,11 +171,12 @@ function createDashboardConfigMap(
 export function lokiLogsDashboard(): Record<string, unknown> {
   return {
     uid: "loki-logs-explorer",
-    title: "Nimbus: Loki Logs Explorer",
+    title: "Nimbus /Loki Logs Explorer",
     tags: ["nimbus", "loki", "logs"],
     timezone: "browser",
     editable: true,
     time: { from: "now-1h", to: "now" },
+    refresh: "30s",
     templating: {
       list: [
         {
@@ -277,11 +278,12 @@ const PROM_DS = { type: "prometheus", uid: "prometheus" };
 function certManagerDashboard(): Record<string, unknown> {
   return {
     uid: "nimbus-cert-manager",
-    title: "Nimbus: Cert-Manager",
+    title: "Nimbus /Cert-Manager",
     tags: ["nimbus", "cert-manager"],
     timezone: "browser",
     editable: true,
     time: { from: "now-1h", to: "now" },
+    refresh: "30s",
     panels: [
       {
         id: 1,
@@ -393,11 +395,12 @@ function certManagerDashboard(): Record<string, unknown> {
 function redisDashboard(): Record<string, unknown> {
   return {
     uid: "nimbus-redis",
-    title: "Nimbus: Redis",
+    title: "Nimbus /Redis",
     tags: ["nimbus", "redis"],
     timezone: "browser",
     editable: true,
     time: { from: "now-1h", to: "now" },
+    refresh: "30s",
     panels: [
       {
         id: 1,
@@ -460,11 +463,12 @@ function redisDashboard(): Record<string, unknown> {
 function cnpgDashboard(): Record<string, unknown> {
   return {
     uid: "nimbus-cnpg",
-    title: "Nimbus: CNPG PostgreSQL",
+    title: "Nimbus /CNPG PostgreSQL",
     tags: ["nimbus", "cnpg", "postgresql"],
     timezone: "browser",
     editable: true,
     time: { from: "now-1h", to: "now" },
+    refresh: "30s",
     panels: [
       {
         id: 1,
@@ -580,11 +584,12 @@ function cnpgDashboard(): Record<string, unknown> {
 function traefikDashboard(): Record<string, unknown> {
   return {
     uid: "nimbus-traefik",
-    title: "Nimbus: Traefik Ingress",
+    title: "Nimbus /Traefik Ingress",
     tags: ["nimbus", "traefik"],
     timezone: "browser",
     editable: true,
     time: { from: "now-1h", to: "now" },
+    refresh: "30s",
     panels: [
       {
         id: 1,
@@ -700,11 +705,12 @@ function traefikDashboard(): Record<string, unknown> {
 function argocdDashboard(): Record<string, unknown> {
   return {
     uid: "nimbus-argocd",
-    title: "Nimbus: ArgoCD",
+    title: "Nimbus /ArgoCD",
     tags: ["nimbus", "argocd"],
     timezone: "browser",
     editable: true,
     time: { from: "now-1h", to: "now" },
+    refresh: "30s",
     panels: [
       {
         id: 1,
@@ -794,11 +800,12 @@ function argocdDashboard(): Record<string, unknown> {
 function mariadbDashboard(): Record<string, unknown> {
   return {
     uid: "nimbus-mariadb",
-    title: "Nimbus: MariaDB",
+    title: "Nimbus /MariaDB",
     tags: ["nimbus", "mariadb"],
     timezone: "browser",
     editable: true,
     time: { from: "now-1h", to: "now" },
+    refresh: "30s",
     panels: [
       {
         id: 1,

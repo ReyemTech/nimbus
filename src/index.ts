@@ -125,8 +125,9 @@ export type {
   IMinIOOperator,
   IMinIOBucket,
   IMinIOBucketConfig,
+  IMinIOIngressConfig,
 } from "./operator";
-export { createOperator, OPERATOR_TYPES } from "./operator";
+export { createOperator, createMinioIngress, OPERATOR_TYPES } from "./operator";
 
 // Queue
 export type { QueueEngine, QueueMode, QueueType, IQueueConfig, IQueue } from "./queue";

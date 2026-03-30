@@ -146,10 +146,20 @@ export interface IClusterInstance {
 export interface IMinIOBucketConfig {
   /** Bucket size in GB. Default: 10. */
   readonly sizeGb?: number;
-  /** Enable public access. Default: false. */
+  /** Enable public read access on the bucket. Default: false. */
   readonly public?: boolean;
   /** Namespaces to replicate the access credentials secret into. */
   readonly namespaces?: string[];
+}
+
+/** MinIO ingress configuration for external S3 API access. */
+export interface IMinIOIngressConfig {
+  /** Base domain (e.g., "reyem.ca"). */
+  readonly domain: string;
+  /** Subdomain prefix for the S3 API. Default: "s3". */
+  readonly subdomain?: string;
+  /** TLS secret name. If omitted, derived from domain. */
+  readonly tlsSecretName?: string;
 }
 
 /** A MinIO bucket with endpoint, credentials, and namespace secrets. */
@@ -169,6 +179,8 @@ export interface IMinIOBucket {
 
 /** A MinIO operator instance with createBucket(). */
 export interface IMinIOOperator extends Omit<IOperator, "createCluster"> {
+  /** S3 API endpoint URL (internal cluster URL). */
+  readonly endpoint: pulumi.Output<string>;
   /** Create a bucket on the MinIO deployment and replicate credentials to target namespaces. */
   createBucket(name: string, config?: IMinIOBucketConfig): IMinIOBucket;
 }

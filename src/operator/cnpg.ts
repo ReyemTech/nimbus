@@ -69,7 +69,7 @@ function createSingleCnpgDatabaseInstance(
         password: generatedPassword,
       },
     },
-    { provider, dependsOn: [cluster] }
+    { provider, dependsOn: [cluster], ignoreChanges: ["data", "stringData"] }
   );
 
   // Job: create database and user via psql against the CNPG superuser
@@ -146,6 +146,16 @@ function createSingleCnpgDatabaseInstance(
     { provider, dependsOn: [cluster, userSecret] }
   );
 
+  // Read password back from the stored secret (stable across deploys)
+  const storedSecret = k8s.core.v1.Secret.get(
+    `${clusterName}-${dbName}-user-secret-read`,
+    pulumi.interpolate`${DATA_NAMESPACE}/${userSecretName}`,
+    { provider, dependsOn: [userSecret] }
+  );
+  const stablePassword = storedSecret.data.apply((d) =>
+    Buffer.from(d?.["password"] ?? "", "base64").toString()
+  );
+
   // Replicate connection secrets with per-user credentials to target namespaces
   const secrets: Record<string, pulumi.Output<string>> = {};
   const dbHost = endpoint;
@@ -171,10 +181,10 @@ function createSingleCnpgDatabaseInstance(
           host: dbHost,
           port: dbPort.apply((p) => String(p)),
           username,
-          password: generatedPassword,
+          password: stablePassword,
           database: dbName,
           uri: pulumi
-            .all([dbHost, dbPort, generatedPassword])
+            .all([dbHost, dbPort, stablePassword])
             .apply(
               ([h, p, pw]) => `postgresql://${username}:${pw}@${h}:${p}/${dbName}?sslmode=require`
             ),

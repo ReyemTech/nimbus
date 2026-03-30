@@ -85,7 +85,7 @@ function createSingleMariadbDatabaseInstance(
         password: generatedPassword,
       },
     },
-    { provider, dependsOn: [mariadb] }
+    { provider, dependsOn: [mariadb], ignoreChanges: ["data", "stringData"] }
   );
 
   // User CRD — creates a user referencing the password Secret
@@ -142,7 +142,17 @@ function createSingleMariadbDatabaseInstance(
     { provider, dependsOn: [database, user] }
   );
 
-  // 4. Replicate connection secrets with per-user credentials to target namespaces
+  // 4. Read password back from the stored secret (stable across deploys)
+  const storedSecret = k8s.core.v1.Secret.get(
+    `${clusterName}-${dbName}-password-read`,
+    pulumi.interpolate`${DATA_NAMESPACE}/${userSecretName}`,
+    { provider, dependsOn: [passwordSecret] }
+  );
+  const stablePassword = storedSecret.data.apply((d) =>
+    Buffer.from(d?.["password"] ?? "", "base64").toString()
+  );
+
+  // Replicate connection secrets with per-user credentials to target namespaces
   const secrets: Record<string, pulumi.Output<string>> = {};
   const dbHost = endpoint;
   const dbPort = port;
@@ -167,10 +177,10 @@ function createSingleMariadbDatabaseInstance(
           host: dbHost,
           port: dbPort.apply((p) => String(p)),
           username,
-          password: generatedPassword,
+          password: stablePassword,
           database: dbName,
           uri: pulumi
-            .all([dbHost, dbPort, generatedPassword])
+            .all([dbHost, dbPort, stablePassword])
             .apply(([h, p, pw]) => `mysql://${username}:${pw}@${h}:${p}/${dbName}`),
         },
       },

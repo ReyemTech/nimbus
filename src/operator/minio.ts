@@ -10,6 +10,7 @@
  * @module operator/minio
  */
 
+import * as crypto from "node:crypto";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { ensureNamespace } from "../utils/ensure-namespace";
@@ -18,6 +19,7 @@ import type {
   IMinIOOperator,
   IMinIOBucket,
   IMinIOBucketConfig,
+  IMinIOIngressConfig,
 } from "./interfaces";
 import { resolveStorageTier } from "../types/storage-tiers";
 
@@ -53,7 +55,7 @@ export function createMinioOperator(
   const releaseName = helmRelease.status.apply((s) => s?.name ?? "minio-operator");
   const rootSecretName = releaseName;
 
-  // MinIO service endpoint within the cluster
+  // MinIO S3 API endpoint within the cluster
   const endpoint = releaseName.apply(
     (rn) => `http://${rn}.${namespace}.svc.cluster.local:${MINIO_SERVICE_PORT}`
   );
@@ -62,14 +64,66 @@ export function createMinioOperator(
     name: "minio",
     type: "minio",
     helmRelease,
+    endpoint,
 
     createBucket(bucketName: string, bucketConfig?: IMinIOBucketConfig): IMinIOBucket {
       const targetNamespaces = bucketConfig?.namespaces ?? [];
 
+      // Generate per-bucket credentials (20-char access key, 40-char secret)
+      const bucketAccessKey = pulumi.secret(
+        `nimbus-${bucketName}-${crypto.randomBytes(6).toString("hex")}`
+      );
+      const bucketSecretKey = pulumi.secret(
+        crypto.randomBytes(30).toString("base64url")
+      );
+
+      // Store per-bucket credentials in a Secret in the data namespace
+      // (the Job reads these to create the MinIO user)
+      const credentialSecretName = `minio-${bucketName}-credentials`;
+      const credentialSecret = new k8s.core.v1.Secret(
+        `minio-${bucketName}-creds`,
+        {
+          metadata: {
+            name: credentialSecretName,
+            namespace,
+            labels: {
+              "app.kubernetes.io/managed-by": "nimbus",
+              "nimbus/bucket": bucketName,
+            },
+          },
+          stringData: {
+            accessKey: bucketAccessKey,
+            secretKey: bucketSecretKey,
+          },
+        },
+        {
+          provider,
+          dependsOn: [helmRelease],
+          // Credentials are generated once; ignore changes on subsequent runs
+          // so crypto.randomBytes doesn't cause secret replacement every deploy.
+          ignoreChanges: ["data", "stringData"],
+        }
+      );
+
+      // IAM policy JSON granting full access to this bucket only
+      const policyJson = JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: ["s3:*"],
+            Resource: [
+              `arn:aws:s3:::${bucketName}`,
+              `arn:aws:s3:::${bucketName}/*`,
+            ],
+          },
+        ],
+      });
+
       // -----------------------------------------------------------------------
-      // Job: create the bucket using mc (MinIO Client)
+      // Job: create bucket, IAM user, policy, and attach policy to user
       // -----------------------------------------------------------------------
-      const jobName = `minio-create-bucket-${bucketName}`;
+      const jobName = `minio-init-bucket-${bucketName}`;
       const bucketJob = new k8s.batch.v1.Job(
         jobName,
         {
@@ -98,11 +152,20 @@ export function createMinioOperator(
                       "sh",
                       "-c",
                       [
+                        // 1. Configure mc alias with root credentials
                         "mc alias set nimbus $MINIO_ENDPOINT $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD",
+                        // 2. Create bucket
                         `mc mb --ignore-existing nimbus/${bucketName}`,
+                        // 3. Set public access if requested
                         bucketConfig?.public
                           ? `mc anonymous set download nimbus/${bucketName}`
                           : "",
+                        // 4. Create IAM policy scoped to this bucket
+                        `echo '${policyJson}' | mc admin policy create nimbus ${bucketName}-policy /dev/stdin`,
+                        // 5. Create per-bucket user with generated credentials
+                        `mc admin user add nimbus "$BUCKET_ACCESS_KEY" "$BUCKET_SECRET_KEY"`,
+                        // 6. Attach the bucket policy to the user
+                        `mc admin policy attach nimbus ${bucketName}-policy --user "$BUCKET_ACCESS_KEY"`,
                       ]
                         .filter(Boolean)
                         .join(" && "),
@@ -124,6 +187,18 @@ export function createMinioOperator(
                           secretKeyRef: { name: rootSecretName, key: "rootPassword" },
                         },
                       },
+                      {
+                        name: "BUCKET_ACCESS_KEY",
+                        valueFrom: {
+                          secretKeyRef: { name: credentialSecretName, key: "accessKey" },
+                        },
+                      },
+                      {
+                        name: "BUCKET_SECRET_KEY",
+                        valueFrom: {
+                          secretKeyRef: { name: credentialSecretName, key: "secretKey" },
+                        },
+                      },
                     ],
                   },
                 ],
@@ -131,28 +206,26 @@ export function createMinioOperator(
             },
           },
         },
-        { provider, dependsOn: [helmRelease] }
+        { provider, dependsOn: [helmRelease, credentialSecret] }
       );
 
       // -----------------------------------------------------------------------
-      // Credentials: read root credentials from the Helm-created secret and
-      // replicate a per-bucket secret into each target namespace.
+      // Read credentials back from the source secret (ignoreChanges ensures
+      // the source secret is stable; reading from it keeps replicas in sync).
       // -----------------------------------------------------------------------
-      const nsResource = ensureNamespace(namespace, provider);
-
-      const rootSecret = k8s.core.v1.Secret.get(
-        `minio-root-secret-${bucketName}`,
-        pulumi.interpolate`${namespace}/${rootSecretName}`,
-        { provider, dependsOn: [helmRelease, nsResource] }
+      const storedCreds = k8s.core.v1.Secret.get(
+        `minio-${bucketName}-creds-read`,
+        pulumi.interpolate`${namespace}/${credentialSecretName}`,
+        { provider, dependsOn: [credentialSecret] }
+      );
+      const stableAccessKey = storedCreds.data.apply((d) =>
+        Buffer.from(d?.["accessKey"] ?? "", "base64").toString()
+      );
+      const stableSecretKey = storedCreds.data.apply((d) =>
+        Buffer.from(d?.["secretKey"] ?? "", "base64").toString()
       );
 
-      const accessKeyId = rootSecret.data.apply((data) =>
-        Buffer.from(data?.["rootUser"] ?? "", "base64").toString()
-      );
-      const secretAccessKey = rootSecret.data.apply((data) =>
-        Buffer.from(data?.["rootPassword"] ?? "", "base64").toString()
-      );
-
+      // Replicate per-bucket credentials to target namespaces
       const secrets: Record<string, pulumi.Output<string>> = {};
 
       for (const targetNs of targetNamespaces) {
@@ -173,11 +246,11 @@ export function createMinioOperator(
             stringData: {
               endpoint,
               bucket: bucketName,
-              accessKeyId,
-              secretAccessKey,
+              accessKeyId: stableAccessKey,
+              secretAccessKey: stableSecretKey,
             },
           },
-          { provider, dependsOn: [helmRelease, targetNsResource, bucketJob] }
+          { provider, dependsOn: [bucketJob, targetNsResource] }
         );
 
         secrets[targetNs] = pulumi.output(secretName);
@@ -187,12 +260,76 @@ export function createMinioOperator(
         name: bucketName,
         endpoint,
         bucketName: pulumi.output(bucketName),
-        credentials: { accessKeyId, secretAccessKey },
+        credentials: { accessKeyId: stableAccessKey, secretAccessKey: stableSecretKey },
         secrets,
         nativeResource: bucketJob,
       };
     },
   };
+}
+
+/**
+ * Create a Traefik Ingress for MinIO S3 API external access.
+ *
+ * @example
+ * ```typescript
+ * createMinioIngress(minio, {
+ *   domain: "reyem.ca",
+ *   subdomain: "s3",
+ * }, provider);
+ * // → https://s3.reyem.ca routes to MinIO S3 API
+ * ```
+ */
+export function createMinioIngress(
+  minio: IMinIOOperator,
+  ingressConfig: IMinIOIngressConfig,
+  provider: k8s.Provider
+): k8s.networking.v1.Ingress {
+  const subdomain = ingressConfig.subdomain ?? "s3";
+  const host = `${subdomain}.${ingressConfig.domain}`;
+  const certName = ingressConfig.domain.replace(/\./g, "-");
+  const tlsSecretName = ingressConfig.tlsSecretName ?? `${certName}-wildcard-tls`;
+
+  // Derive the service name from the Helm release
+  const serviceName = minio.helmRelease.status.apply((s) => s?.name ?? "minio-operator");
+
+  return new k8s.networking.v1.Ingress(
+    "minio-s3-ingress",
+    {
+      metadata: {
+        name: "minio-s3",
+        namespace: DATA_NAMESPACE,
+        labels: { "app.kubernetes.io/managed-by": "nimbus" },
+        annotations: {
+          "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+        },
+      },
+      spec: {
+        ingressClassName: "traefik",
+        tls: [{ secretName: tlsSecretName, hosts: [host] }],
+        rules: [
+          {
+            host,
+            http: {
+              paths: [
+                {
+                  path: "/",
+                  pathType: "Prefix",
+                  backend: {
+                    service: {
+                      name: serviceName,
+                      port: { number: MINIO_SERVICE_PORT },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+    { provider, dependsOn: [minio.helmRelease] }
+  );
 }
 
 /**

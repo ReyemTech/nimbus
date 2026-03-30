@@ -36,8 +36,10 @@ export type {
   IMinIOOperator,
   IMinIOBucket,
   IMinIOBucketConfig,
+  IMinIOIngressConfig,
 } from "./interfaces";
 export { OPERATOR_TYPES } from "./interfaces";
+export { createMinioIngress } from "./minio";
 
 const DATA_NAMESPACE = "data";
 

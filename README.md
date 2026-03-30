@@ -50,20 +50,24 @@ Or start from scratch:
 import { createNetwork, createCluster, createPlatformStack } from "@reyemtech/nimbus";
 import type { INetwork, ICluster } from "@reyemtech/nimbus";
 
-const network = await createNetwork("prod", {
+const network = (await createNetwork("prod", {
   cloud: "aws",
   cidr: "10.0.0.0/16",
   natStrategy: "fck-nat",
-}) as INetwork;
+})) as INetwork;
 
-const cluster = await createCluster("prod", {
-  cloud: "aws",
-  nodePools: [
-    { name: "system", instanceType: "t4g.small", minNodes: 2, maxNodes: 3 },
-    { name: "workers", instanceType: "c6a.large", minNodes: 1, maxNodes: 10, spot: true },
-  ],
-  providerOptions: { aws: { autoMode: true } },
-}, network) as ICluster;
+const cluster = (await createCluster(
+  "prod",
+  {
+    cloud: "aws",
+    nodePools: [
+      { name: "system", instanceType: "t4g.small", minNodes: 2, maxNodes: 3 },
+      { name: "workers", instanceType: "c6a.large", minNodes: 1, maxNodes: 10, spot: true },
+    ],
+    providerOptions: { aws: { autoMode: true } },
+  },
+  network
+)) as ICluster;
 
 createPlatformStack("prod", { cluster, domain: "example.com" });
 ```
@@ -80,14 +84,14 @@ nimbus check                     # Show which providers are installed
 
 ### Templates
 
-| Template | Description |
-|----------|-------------|
-| `empty` | Blank scaffold with TODO placeholders |
-| `minimal-aws` | State backend + Secrets Manager (no cluster) |
-| `minimal-azure` | State backend + Key Vault (no cluster) |
-| `aws` | Full stack: VPC + EKS + Route 53 + Secrets + Platform |
-| `azure` | Full stack: VNet + AKS + Azure DNS + Key Vault + Platform |
-| `multi-cloud` | AWS + Azure active-active with Global Load Balancer |
+| Template        | Description                                               |
+| --------------- | --------------------------------------------------------- |
+| `empty`         | Blank scaffold with TODO placeholders                     |
+| `minimal-aws`   | State backend + Secrets Manager (no cluster)              |
+| `minimal-azure` | State backend + Key Vault (no cluster)                    |
+| `aws`           | Full stack: VPC + EKS + Route 53 + Secrets + Platform     |
+| `azure`         | Full stack: VNet + AKS + Azure DNS + Key Vault + Platform |
+| `multi-cloud`   | AWS + Azure active-active with Global Load Balancer       |
 
 ### Day-to-Day Operations
 
@@ -125,15 +129,15 @@ pulumi stack output           # View stack outputs
 
 ### Module Status
 
-| Module | AWS | Azure | GCP |
-|--------|-----|-------|-----|
-| **Network** | VPC + fck-nat/managed NAT | VNet + NAT Gateway | Planned |
-| **Cluster** | EKS + Auto Mode | AKS + virtual nodes | Planned |
-| **DNS** | Route 53 | Azure DNS | Planned |
-| **Secrets** | Secrets Manager | Key Vault | Planned |
-| **State** | S3 + DynamoDB locking + replication | Blob + GRS | Planned |
-| **Platform** | Helm (provider-agnostic) | Helm (provider-agnostic) | Helm (provider-agnostic) |
-| **Global LB** | Route 53 health-checked routing | Planned | — |
+| Module        | AWS                                 | Azure                    | GCP                      |
+| ------------- | ----------------------------------- | ------------------------ | ------------------------ |
+| **Network**   | VPC + fck-nat/managed NAT           | VNet + NAT Gateway       | Planned                  |
+| **Cluster**   | EKS + Auto Mode                     | AKS + virtual nodes      | Planned                  |
+| **DNS**       | Route 53                            | Azure DNS                | Planned                  |
+| **Secrets**   | Secrets Manager                     | Key Vault                | Planned                  |
+| **State**     | S3 + DynamoDB locking + replication | Blob + GRS               | Planned                  |
+| **Platform**  | Helm (provider-agnostic)            | Helm (provider-agnostic) | Helm (provider-agnostic) |
+| **Global LB** | Route 53 health-checked routing     | Planned                  | —                        |
 
 ## Documentation
 

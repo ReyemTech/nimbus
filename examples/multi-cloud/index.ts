@@ -60,7 +60,7 @@ const clusters = createCluster(
     ],
     providerOptions,
   },
-  networks,
+  networks
 ) as ICluster[];
 
 // 3. DNS — Route 53 hosted zone

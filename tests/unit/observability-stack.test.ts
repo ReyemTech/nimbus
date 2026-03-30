@@ -33,6 +33,7 @@ vi.mock("@pulumi/kubernetes", () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockNamespace = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(name: string, args: any, _opts?: any) {
@@ -43,6 +44,7 @@ vi.mock("@pulumi/kubernetes", () => {
   return {
     helm: { v3: { Release: mockRelease } },
     core: { v1: { Namespace: mockNamespace } },
+    // eslint-disable-next-line @typescript-eslint/no-extraneous-class
     Provider: class {},
   };
 });
@@ -87,8 +89,11 @@ describe("observability stack — kube-prometheus-stack", () => {
 
     const release = createdReleases.find((r) => r.name.includes("kube-prometheus-stack"));
     expect(release).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.chart).toBe("kube-prometheus-stack");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.namespace).toBe("observability");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.values.prometheus.enabled).toBe(true);
   });
 
@@ -102,6 +107,7 @@ describe("observability stack — kube-prometheus-stack", () => {
 
     const release = createdReleases.find((r) => r.name.includes("kube-prometheus-stack"));
     expect(release).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const grafanaValues = release!.args.values.grafana;
     expect(grafanaValues.enabled).toBe(true);
     expect(grafanaValues.sidecar.dashboards.enabled).toBe(true);
@@ -119,6 +125,7 @@ describe("observability stack — kube-prometheus-stack", () => {
 
     const release = createdReleases.find((r) => r.name.includes("kube-prometheus-stack"));
     expect(release).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.values.prometheus.ingress.hosts).toEqual(["metrics.example.com"]);
   });
 });
@@ -134,11 +141,17 @@ describe("observability stack — loki", () => {
 
     const release = createdReleases.find((r) => r.name.includes("loki"));
     expect(release).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.chart).toBe("loki");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.values.deploymentMode).toBe("SingleBinary");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.values.singleBinary.replicas).toBe(1);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.values.loki.storage.type).toBe("filesystem");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.values.gateway.enabled).toBe(false);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.values.chunksCache.enabled).toBe(false);
   });
 });
@@ -154,7 +167,9 @@ describe("observability stack — alloy", () => {
 
     const release = createdReleases.find((r) => r.name.includes("alloy"));
     expect(release).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.chart).toBe("alloy");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.namespace).toBe("observability");
   });
 });

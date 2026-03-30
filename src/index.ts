@@ -92,7 +92,17 @@ export type {
 export { DATABASE_ENGINES, DATABASE_MODES, DATABASE_OPERATORS } from "./database";
 
 // Cache
-export { type CacheEngine, type CacheMode, type CacheArchitecture, type ICacheConfig, type ICache, createCache, CACHE_ENGINES, CACHE_MODES, CACHE_ARCHITECTURES } from "./cache";
+export {
+  type CacheEngine,
+  type CacheMode,
+  type CacheArchitecture,
+  type ICacheConfig,
+  type ICache,
+  createCache,
+  CACHE_ENGINES,
+  CACHE_MODES,
+  CACHE_ARCHITECTURES,
+} from "./cache";
 
 // Object Storage
 export type { ILifecycleRule, ICorsRule, IObjectStorageConfig, IObjectStorage } from "./storage";

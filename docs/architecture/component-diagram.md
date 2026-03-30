@@ -209,28 +209,28 @@ The root `src/index.ts` only re-exports **types** and **factory functions** — 
 
 ## Cloud Provider Implementation Matrix
 
-| Component | AWS | Azure | GCP | In-Cluster |
-|-----------|-----|-------|-----|------------|
-| **Cluster** | EKS (+ Auto Mode) | AKS (+ ACI) | GKE | — |
-| **Network** | VPC + subnets | VNet + subnets | VPC + subnets | — |
-| **DNS** | Route 53 | Azure DNS | Cloud DNS | — |
-| **Secrets** | Secrets Manager | Key Vault | Secret Manager | Vault |
-| **Database** | RDS/Aurora | Azure Database | Cloud SQL | PXC, CNPG, MariaDB Op |
-| **Cache** | ElastiCache | Azure Cache | Memorystore | Redis Helm |
-| **Storage** | S3 | Blob Storage | GCS | — |
-| **Queue** | SQS | Service Bus | Pub/Sub | NATS, RabbitMQ |
-| **Global LB** | Route 53 health checks | Traffic Manager | — | — |
+| Component     | AWS                    | Azure           | GCP            | In-Cluster            |
+| ------------- | ---------------------- | --------------- | -------------- | --------------------- |
+| **Cluster**   | EKS (+ Auto Mode)      | AKS (+ ACI)     | GKE            | —                     |
+| **Network**   | VPC + subnets          | VNet + subnets  | VPC + subnets  | —                     |
+| **DNS**       | Route 53               | Azure DNS       | Cloud DNS      | —                     |
+| **Secrets**   | Secrets Manager        | Key Vault       | Secret Manager | Vault                 |
+| **Database**  | RDS/Aurora             | Azure Database  | Cloud SQL      | PXC, CNPG, MariaDB Op |
+| **Cache**     | ElastiCache            | Azure Cache     | Memorystore    | Redis Helm            |
+| **Storage**   | S3                     | Blob Storage    | GCS            | —                     |
+| **Queue**     | SQS                    | Service Bus     | Pub/Sub        | NATS, RabbitMQ        |
+| **Global LB** | Route 53 health checks | Traffic Manager | —              | —                     |
 
 ### Phase Implementation Order
 
-| Phase | Components | REY Issues |
-|-------|-----------|------------|
-| 1 - Foundation | types/, config/ | REY-85 |
-| 2 - AWS | cluster/aws, network/aws, dns/aws, secrets/aws | REY-86 |
-| 3 - Azure | cluster/azure, network/azure, dns/azure, secrets/azure | REY-87 |
-| 4 - Platform | platform/ (all components) | REY-88 |
-| 5 - Multi-cloud | global-lb/, cidr-utils, multi-cloud factories | REY-89 |
-| 6 - Extended | database/, cache/, storage/, queue/, state/, backup/ | REY-93-106 |
+| Phase           | Components                                             | REY Issues |
+| --------------- | ------------------------------------------------------ | ---------- |
+| 1 - Foundation  | types/, config/                                        | REY-85     |
+| 2 - AWS         | cluster/aws, network/aws, dns/aws, secrets/aws         | REY-86     |
+| 3 - Azure       | cluster/azure, network/azure, dns/azure, secrets/azure | REY-87     |
+| 4 - Platform    | platform/ (all components)                             | REY-88     |
+| 5 - Multi-cloud | global-lb/, cidr-utils, multi-cloud factories          | REY-89     |
+| 6 - Extended    | database/, cache/, storage/, queue/, state/, backup/   | REY-93-106 |
 
 ---
 
@@ -298,7 +298,9 @@ function assertNever(x: never): never {
 4. **Built-in default** (`DEFAULT_REGIONS`, etc.)
 
 ```typescript
-function resolveCloudTarget(cloud: CloudArg): ResolvedCloudTarget | ReadonlyArray<ResolvedCloudTarget> {
+function resolveCloudTarget(
+  cloud: CloudArg
+): ResolvedCloudTarget | ReadonlyArray<ResolvedCloudTarget> {
   // 1. If string → look up config file for region, fallback to DEFAULT_REGIONS
   // 2. If CloudTarget → use region if present, fallback to DEFAULT_REGIONS
   // 3. If array → resolve each element recursively

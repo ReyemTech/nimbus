@@ -12,13 +12,13 @@ All factory functions are **async** and use dynamic imports internally — the p
 
 Creates a VPC (AWS) or VNet (Azure) with subnets and NAT.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `string` | Resource name prefix |
-| `config.cloud` | `CloudArg` | `"aws"`, `"azure"`, or `["aws", "azure"]` for multi-cloud |
-| `config.cidr` | `string` | CIDR block (auto-offset for multi-cloud) |
-| `config.natStrategy` | `NatStrategy` | `"managed"`, `"fck-nat"`, or `"none"` |
-| `config.providerOptions` | `IProviderOptions` | Provider-specific options (see below) |
+| Parameter                | Type               | Description                                               |
+| ------------------------ | ------------------ | --------------------------------------------------------- |
+| `name`                   | `string`           | Resource name prefix                                      |
+| `config.cloud`           | `CloudArg`         | `"aws"`, `"azure"`, or `["aws", "azure"]` for multi-cloud |
+| `config.cidr`            | `string`           | CIDR block (auto-offset for multi-cloud)                  |
+| `config.natStrategy`     | `NatStrategy`      | `"managed"`, `"fck-nat"`, or `"none"`                     |
+| `config.providerOptions` | `IProviderOptions` | Provider-specific options (see below)                     |
 
 Returns: `Promise<INetwork>` (single cloud) or `Promise<INetwork[]>` (multi-cloud)
 
@@ -26,12 +26,12 @@ Returns: `Promise<INetwork>` (single cloud) or `Promise<INetwork[]>` (multi-clou
 
 Creates an EKS (AWS) or AKS (Azure) cluster.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `config.nodePools` | `INodePool[]` | Node pool definitions |
-| `config.version` | `string` | Kubernetes version |
-| `config.providerOptions` | `IProviderOptions` | Provider-specific options |
-| `networks` | `INetwork \| INetwork[]` | Network(s) — auto-matched by provider for multi-cloud |
+| Parameter                | Type                     | Description                                           |
+| ------------------------ | ------------------------ | ----------------------------------------------------- |
+| `config.nodePools`       | `INodePool[]`            | Node pool definitions                                 |
+| `config.version`         | `string`                 | Kubernetes version                                    |
+| `config.providerOptions` | `IProviderOptions`       | Provider-specific options                             |
+| `networks`               | `INetwork \| INetwork[]` | Network(s) — auto-matched by provider for multi-cloud |
 
 Returns: `Promise<ICluster>` (single cloud) or `Promise<ICluster[]>` (multi-cloud)
 
@@ -46,7 +46,7 @@ Returns: `Promise<IDns>` (single cloud) or `Promise<IDns[]>` (multi-cloud)
 Creates an AWS Secrets Manager or Azure Key Vault store.
 
 ```typescript
-const secrets = await createSecrets("prod", { cloud: "aws" }) as ISecrets;
+const secrets = (await createSecrets("prod", { cloud: "aws" })) as ISecrets;
 secrets.putSecret("database", { host: "db.example.com", password: dbPassword });
 const pw = secrets.getSecretRef({ path: "database", key: "password" });
 ```
@@ -57,12 +57,12 @@ Returns: `Promise<ISecrets>` (single cloud) or `Promise<ISecrets[]>` (multi-clou
 
 Creates an S3 bucket (AWS) or Azure Storage Account for Pulumi state with BCDR features.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `config.versioning` | `boolean` | Enable bucket/container versioning. Default: `true` |
-| `config.encryption` | `boolean` | Enable server-side encryption. Default: `true` |
-| `config.locking` | `IStateLockConfig` | State locking config (DynamoDB on AWS). Default: enabled |
-| `config.replication` | `IReplicationConfig` | Cross-region replication. Default: disabled |
+| Parameter            | Type                 | Description                                              |
+| -------------------- | -------------------- | -------------------------------------------------------- |
+| `config.versioning`  | `boolean`            | Enable bucket/container versioning. Default: `true`      |
+| `config.encryption`  | `boolean`            | Enable server-side encryption. Default: `true`           |
+| `config.locking`     | `IStateLockConfig`   | State locking config (DynamoDB on AWS). Default: enabled |
+| `config.replication` | `IReplicationConfig` | Cross-region replication. Default: disabled              |
 
 Returns: `Promise<IStateBackend>` (single cloud) or `Promise<IStateBackend[]>` (multi-cloud)
 
@@ -74,24 +74,24 @@ Returns: `Promise<IStateBackend>` (single cloud) or `Promise<IStateBackend[]>` (
 
 Deploys Helm-based platform components to one or more clusters.
 
-| Component | Default | Chart |
-|-----------|---------|-------|
-| Traefik | Enabled | `traefik/traefik` v34.3.0 |
-| cert-manager | Enabled | `jetstack/cert-manager` v1.17.2 |
-| External DNS | If configured | `kubernetes-sigs/external-dns` v1.16.1 |
-| ArgoCD | Disabled | `argoproj/argo-cd` v7.8.26 |
-| Vault | Disabled | `hashicorp/vault` v0.29.1 |
-| External Secrets | Disabled | `external-secrets/external-secrets` v0.14.4 |
+| Component        | Default       | Chart                                       |
+| ---------------- | ------------- | ------------------------------------------- |
+| Traefik          | Enabled       | `traefik/traefik` v34.3.0                   |
+| cert-manager     | Enabled       | `jetstack/cert-manager` v1.17.2             |
+| External DNS     | If configured | `kubernetes-sigs/external-dns` v1.16.1      |
+| ArgoCD           | Disabled      | `argoproj/argo-cd` v7.8.26                  |
+| Vault            | Disabled      | `hashicorp/vault` v0.29.1                   |
+| External Secrets | Disabled      | `external-secrets/external-secrets` v0.14.4 |
 
 ### `createGlobalLoadBalancer(name, config)`
 
 Routes traffic across clusters using DNS-based health checks.
 
-| Strategy | Behavior |
-|----------|----------|
-| `active-active` | Weighted routing — equal traffic to all healthy clusters |
-| `active-passive` | Failover — primary cluster, secondary on failure |
-| `geo` | Geolocation — route by client continent |
+| Strategy         | Behavior                                                 |
+| ---------------- | -------------------------------------------------------- |
+| `active-active`  | Weighted routing — equal traffic to all healthy clusters |
+| `active-passive` | Failover — primary cluster, secondary on failure         |
+| `geo`            | Geolocation — route by client continent                  |
 
 ## Provider Options
 
@@ -151,6 +151,7 @@ import { createAzureNetwork, createAksCluster } from "@reyemtech/nimbus/azure";
 ```
 
 Available functions:
+
 - `createAwsNetwork(name, config, options?)` / `createAzureNetwork(name, config, options)`
 - `createEksCluster(name, config, network, options?)` / `createAksCluster(name, config, network, options)`
 - `createRoute53Dns(name, config)` / `createAzureDns(name, config, options)`

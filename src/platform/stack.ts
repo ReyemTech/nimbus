@@ -108,44 +108,50 @@ function deployToCluster(
       const awsRegion = dnsConfig.awsRegion ?? "us-east-1";
       const awsOpts = dnsConfig.awsProvider ? { provider: dnsConfig.awsProvider } : {};
 
-      const iamUser = new aws.iam.User(`${name}-external-dns-user`, {
-        name: `${name}-external-dns`,
-        path: "/nimbus/",
-      }, awsOpts);
+      const iamUser = new aws.iam.User(
+        `${name}-external-dns-user`,
+        {
+          name: `${name}-external-dns`,
+          path: "/nimbus/",
+        },
+        awsOpts
+      );
 
-      new aws.iam.UserPolicy(`${name}-external-dns-policy`, {
-        user: iamUser.name,
-        policy: JSON.stringify({
-          Version: "2012-10-17",
-          Statement: [
-            {
-              Effect: "Allow",
-              Action: [
-                "route53:ChangeResourceRecordSets",
-                "route53:ListResourceRecordSets",
-              ],
-              Resource: "arn:aws:route53:::hostedzone/*",
-            },
-            {
-              Effect: "Allow",
-              Action: ["route53:GetChange"],
-              Resource: "arn:aws:route53:::change/*",
-            },
-            {
-              Effect: "Allow",
-              Action: [
-                "route53:ListHostedZones",
-                "route53:ListHostedZonesByName",
-              ],
-              Resource: "*",
-            },
-          ],
-        }),
-      }, awsOpts);
+      new aws.iam.UserPolicy(
+        `${name}-external-dns-policy`,
+        {
+          user: iamUser.name,
+          policy: JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [
+              {
+                Effect: "Allow",
+                Action: ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"],
+                Resource: "arn:aws:route53:::hostedzone/*",
+              },
+              {
+                Effect: "Allow",
+                Action: ["route53:GetChange"],
+                Resource: "arn:aws:route53:::change/*",
+              },
+              {
+                Effect: "Allow",
+                Action: ["route53:ListHostedZones", "route53:ListHostedZonesByName"],
+                Resource: "*",
+              },
+            ],
+          }),
+        },
+        awsOpts
+      );
 
-      const accessKey = new aws.iam.AccessKey(`${name}-external-dns-key`, {
-        user: iamUser.name,
-      }, awsOpts);
+      const accessKey = new aws.iam.AccessKey(
+        `${name}-external-dns-key`,
+        {
+          user: iamUser.name,
+        },
+        awsOpts
+      );
 
       // Secret for external-dns namespace
       new k8s.core.v1.Secret(
@@ -171,9 +177,7 @@ function deployToCluster(
         },
         {
           provider,
-          dependsOn: [components["cert-manager"]].filter(
-            Boolean
-          ) as k8s.helm.v3.Release[],
+          dependsOn: [components["cert-manager"]].filter(Boolean) as k8s.helm.v3.Release[],
         }
       );
 
@@ -225,9 +229,7 @@ function deployToCluster(
         },
         {
           provider,
-          dependsOn: [components["cert-manager"]].filter(
-            Boolean
-          ) as k8s.helm.v3.Release[],
+          dependsOn: [components["cert-manager"]].filter(Boolean) as k8s.helm.v3.Release[],
         }
       );
     } else {
@@ -267,9 +269,7 @@ function deployToCluster(
       },
       {
         provider,
-        dependsOn: [components["cert-manager"]].filter(
-          Boolean
-        ) as k8s.helm.v3.Release[],
+        dependsOn: [components["cert-manager"]].filter(Boolean) as k8s.helm.v3.Release[],
       }
     );
   }
@@ -344,9 +344,7 @@ function deployToCluster(
     );
 
     // ForwardAuth middleware pointing to OAuth2 proxy
-    const oauth2SvcName = components["oauth2-proxy"].status.apply(
-      (s) => s?.name ?? "oauth2-proxy"
-    );
+    const oauth2SvcName = components["oauth2-proxy"].status.apply((s) => s?.name ?? "oauth2-proxy");
     new k8s.apiextensions.CustomResource(
       `${name}-forwardauth-middleware`,
       {
@@ -357,10 +355,7 @@ function deployToCluster(
           forwardAuth: {
             address: pulumi.interpolate`http://${oauth2SvcName}.traefik.svc.cluster.local:4180/oauth2/auth`,
             trustForwardHeader: true,
-            authResponseHeaders: [
-              "X-Auth-Request-User",
-              "X-Auth-Request-Email",
-            ],
+            authResponseHeaders: ["X-Auth-Request-User", "X-Auth-Request-Email"],
           },
         },
       },
@@ -380,12 +375,8 @@ function deployToCluster(
             {
               match: `Host(\`traefik.${config.domain}\`) && (PathPrefix(\`/dashboard\`) || PathPrefix(\`/api\`))`,
               kind: "Rule",
-              middlewares: [
-                { name: "oauth2-forward-auth" },
-              ],
-              services: [
-                { name: "api@internal", kind: "TraefikService" },
-              ],
+              middlewares: [{ name: "oauth2-forward-auth" }],
+              services: [{ name: "api@internal", kind: "TraefikService" }],
             },
           ],
         },
@@ -439,9 +430,7 @@ function deployToCluster(
                         username,
                         password,
                         email,
-                        auth: Buffer.from(`${username}:${password}`).toString(
-                          "base64"
-                        ),
+                        auth: Buffer.from(`${username}:${password}`).toString("base64"),
                       },
                     },
                   })
@@ -456,11 +445,7 @@ function deployToCluster(
 
   // 13. Descheduler — pod rebalancing for spot instances
   if (config.descheduler?.enabled) {
-    components["descheduler"] = deployDescheduler(
-      name,
-      config.descheduler,
-      provider
-    );
+    components["descheduler"] = deployDescheduler(name, config.descheduler, provider);
   }
 
   // 14. ClusterSecretStore — connects ESO to Vault
@@ -647,10 +632,12 @@ function deployArgocd(
             ingressClassName: "traefik",
             hostname: `argocd.${domain}`,
             tls: true,
-            extraTls: [{
-              secretName: `${domain.replace(/\./g, "-")}-wildcard-tls`,
-              hosts: [`argocd.${domain}`],
-            }],
+            extraTls: [
+              {
+                secretName: `${domain.replace(/\./g, "-")}-wildcard-tls`,
+                hosts: [`argocd.${domain}`],
+              },
+            ],
             annotations: {
               "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
             },
@@ -747,11 +734,9 @@ function deployOAuth2Proxy(
 ): k8s.helm.v3.Release {
   // Generate a deterministic cookie secret from the stack name via SHA-256.
   // In production, override via config.values.config.cookieSecret.
-  const cookieSecret = pulumi
-    .output(name)
-    .apply((n) => {
-      return createHash("sha256").update(`${n}-oauth2-proxy-cookie`).digest("base64").slice(0, 32);
-    });
+  const cookieSecret = pulumi.output(name).apply((n) => {
+    return createHash("sha256").update(`${n}-oauth2-proxy-cookie`).digest("base64").slice(0, 32);
+  });
 
   return new k8s.helm.v3.Release(
     `${name}-oauth2-proxy`,
@@ -771,7 +756,7 @@ function deployOAuth2Proxy(
           provider: config.provider,
           "email-domain": "*",
           "cookie-secure": "true",
-          "upstream": "static://202",
+          upstream: "static://202",
           "reverse-proxy": "true",
           "set-xauthrequest": "true",
           "cookie-domain": `.${domain}`,

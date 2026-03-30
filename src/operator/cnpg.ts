@@ -11,7 +11,13 @@
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { ensureNamespace } from "../utils/ensure-namespace";
-import type { IBackupDefaults, IOperatorClusterConfig, IClusterInstance, IOperatorDatabaseConfig, IDatabaseInstance } from "./interfaces";
+import type {
+  IBackupDefaults,
+  IOperatorClusterConfig,
+  IClusterInstance,
+  IOperatorDatabaseConfig,
+  IDatabaseInstance,
+} from "./interfaces";
 
 const DATA_NAMESPACE = "data";
 const DEFAULT_PG_VERSION = "17";
@@ -48,8 +54,8 @@ function createSingleCnpgDatabaseInstance(
     const username = dbConfig.owner ?? dbName;
     const dbHost = endpoint;
     const dbPort = port;
-    const dbPassword = clusterSecret.data.apply(
-      (data) => Buffer.from(data?.["password"] ?? "", "base64").toString()
+    const dbPassword = clusterSecret.data.apply((data) =>
+      Buffer.from(data?.["password"] ?? "", "base64").toString()
     );
 
     new k8s.core.v1.Secret(
@@ -70,9 +76,11 @@ function createSingleCnpgDatabaseInstance(
           username,
           password: dbPassword,
           database: dbName,
-          uri: pulumi.all([dbHost, dbPort, dbPassword]).apply(
-            ([h, p, pw]) => `postgresql://${username}:${pw}@${h}:${p}/${dbName}?sslmode=require`
-          ),
+          uri: pulumi
+            .all([dbHost, dbPort, dbPassword])
+            .apply(
+              ([h, p, pw]) => `postgresql://${username}:${pw}@${h}:${p}/${dbName}?sslmode=require`
+            ),
         },
       },
       { provider, dependsOn: [cluster, nsResource] }
@@ -237,13 +245,32 @@ function createSingleCnpgCluster(
         const envResult: Record<string, IDatabaseInstance> = {};
         for (const [env, envOverrides] of Object.entries(dbConfig.environments)) {
           const { environments: _, ...baseConfig } = dbConfig;
-          const mergedConfig: Omit<IOperatorDatabaseConfig, "environments"> = { ...baseConfig, ...envOverrides };
-          envResult[env] = createSingleCnpgDatabaseInstance(`${name}`, `${dbName}-${env}`, mergedConfig, endpoint, port, cluster, provider);
+          const mergedConfig: Omit<IOperatorDatabaseConfig, "environments"> = {
+            ...baseConfig,
+            ...envOverrides,
+          };
+          envResult[env] = createSingleCnpgDatabaseInstance(
+            `${name}`,
+            `${dbName}-${env}`,
+            mergedConfig,
+            endpoint,
+            port,
+            cluster,
+            provider
+          );
         }
         result = envResult;
       } else {
         const { environments: _, ...cleanConfig } = dbConfig;
-        result = createSingleCnpgDatabaseInstance(name, dbName, cleanConfig, endpoint, port, cluster, provider);
+        result = createSingleCnpgDatabaseInstance(
+          name,
+          dbName,
+          cleanConfig,
+          endpoint,
+          port,
+          cluster,
+          provider
+        );
       }
       // Runtime: environments → Record, otherwise → IDatabaseInstance.
       // Overload signatures on IClusterInstance narrow the type for callers.
@@ -271,8 +298,17 @@ export function createCnpgDatabase(
     const result: Record<string, IClusterInstance> = {};
     for (const [env, envOverrides] of Object.entries(config.environments)) {
       const { environments: _, ...baseConfig } = config;
-      const mergedConfig: Omit<IOperatorClusterConfig, "environments"> = { ...baseConfig, ...envOverrides };
-      result[env] = createSingleCnpgCluster(`${name}-${env}`, mergedConfig, backupDefaults, provider, operatorRelease);
+      const mergedConfig: Omit<IOperatorClusterConfig, "environments"> = {
+        ...baseConfig,
+        ...envOverrides,
+      };
+      result[env] = createSingleCnpgCluster(
+        `${name}-${env}`,
+        mergedConfig,
+        backupDefaults,
+        provider,
+        operatorRelease
+      );
     }
     return result;
   }

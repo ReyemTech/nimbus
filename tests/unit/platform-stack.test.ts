@@ -42,6 +42,7 @@ vi.mock("@pulumi/aws", () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockUserPolicy = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(name: string, args: any, _opts?: any) {
@@ -81,6 +82,7 @@ vi.mock("@pulumi/kubernetes", () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockCustomResource = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(name: string, args: any, _opts?: any) {
@@ -88,6 +90,7 @@ vi.mock("@pulumi/kubernetes", () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockSecret = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(name: string, args: any, _opts?: any) {
@@ -95,6 +98,7 @@ vi.mock("@pulumi/kubernetes", () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockIngress = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(name: string, args: any, _opts?: any) {
@@ -107,6 +111,7 @@ vi.mock("@pulumi/kubernetes", () => {
     apiextensions: { CustomResource: mockCustomResource },
     core: { v1: { Secret: mockSecret } },
     networking: { v1: { Ingress: mockIngress } },
+    // eslint-disable-next-line @typescript-eslint/no-extraneous-class
     Provider: class {},
   };
 });
@@ -117,6 +122,8 @@ vi.mock("@pulumi/pulumi", () => ({
   all: (vals: unknown[]) => ({
     apply: (fn: (...args: unknown[]) => unknown) => mockOutput(fn(vals)),
   }),
+  interpolate: (strings: TemplateStringsArray, ...values: unknown[]) =>
+    mockOutput(strings.reduce((acc, str, i) => acc + str + (values[i] ?? ""), "")),
 }));
 
 import { createPlatformStack } from "../../src/platform/stack";
@@ -158,7 +165,9 @@ describe("platform stack — descheduler", () => {
 
     const deschedulerRelease = createdReleases.find((r) => r.name.includes("descheduler"));
     expect(deschedulerRelease).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(deschedulerRelease!.args.chart).toBe("descheduler");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(deschedulerRelease!.args.namespace).toBe("kube-system");
   });
 
@@ -173,7 +182,10 @@ describe("platform stack — descheduler", () => {
     });
 
     const deschedulerRelease = createdReleases.find((r) => r.name.includes("descheduler"));
-    const strategies = (deschedulerRelease!.args.values as Record<string, unknown>)["deschedulerPolicy"] as Record<string, unknown>;
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const strategies = (deschedulerRelease!.args.values as Record<string, unknown>)[
+      "deschedulerPolicy"
+    ] as Record<string, unknown>;
     const strategyMap = strategies["strategies"] as Record<string, unknown>;
     expect(strategyMap).toHaveProperty("RemoveDuplicates");
     expect(strategyMap).toHaveProperty("LowNodeUtilization");
@@ -225,7 +237,9 @@ describe("platform stack — oauth2 proxy", () => {
 
     const oauth2Release = createdReleases.find((r) => r.name.includes("oauth2-proxy"));
     expect(oauth2Release).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(oauth2Release!.args.chart).toBe("oauth2-proxy");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(oauth2Release!.args.namespace).toBe("traefik");
   });
 
@@ -256,9 +270,7 @@ describe("platform stack — oauth2 proxy", () => {
       },
     });
 
-    const dashboardRoute = createdCustomResources.find(
-      (r) => r.args.kind === "IngressRoute"
-    );
+    const dashboardRoute = createdCustomResources.find((r) => r.args.kind === "IngressRoute");
     expect(dashboardRoute).toBeDefined();
 
     const forwardAuth = createdCustomResources.find(
@@ -308,11 +320,11 @@ describe("platform stack — wildcard cert and TLSStore", () => {
       domain: "reyem.tech",
     });
 
-    const wildcardCert = createdCustomResources.find(
-      (r) => r.args.kind === "Certificate"
-    );
+    const wildcardCert = createdCustomResources.find((r) => r.args.kind === "Certificate");
     expect(wildcardCert).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(wildcardCert!.args.spec.dnsNames).toEqual(["reyem.tech", "*.reyem.tech"]);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(wildcardCert!.args.spec.secretName).toBe("reyem-tech-wildcard-tls");
   });
 
@@ -325,6 +337,7 @@ describe("platform stack — wildcard cert and TLSStore", () => {
 
     const tlsStore = createdCustomResources.find((r) => r.args.kind === "TLSStore");
     expect(tlsStore).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(tlsStore!.args.spec.defaultCertificate.secretName).toBe("reyem-tech-wildcard-tls");
   });
 });
@@ -343,6 +356,7 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
     });
 
     expect(createdIamUsers).toHaveLength(1);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(createdIamUsers[0]!.args.path).toBe("/nimbus/");
     expect(createdIamPolicies).toHaveLength(1);
     expect(createdIamAccessKeys).toHaveLength(1);
@@ -353,14 +367,10 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
     );
     expect(route53Secrets).toHaveLength(2);
 
-    const ednsSecret = route53Secrets.find(
-      (s) => s.args.metadata?.namespace === "external-dns"
-    );
+    const ednsSecret = route53Secrets.find((s) => s.args.metadata?.namespace === "external-dns");
     expect(ednsSecret).toBeDefined();
 
-    const cmSecret = route53Secrets.find(
-      (s) => s.args.metadata?.namespace === "cert-manager"
-    );
+    const cmSecret = route53Secrets.find((s) => s.args.metadata?.namespace === "cert-manager");
     expect(cmSecret).toBeDefined();
   });
 
@@ -379,6 +389,7 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
       (r) => r.args.kind === "ClusterIssuer" && r.args.metadata?.name === "letsencrypt-dns"
     );
     expect(issuer).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(issuer!.args.spec.acme.solvers[0].dns01.route53.region).toBe("us-east-1");
   });
 
@@ -396,7 +407,10 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
 
     const ednsRelease = createdReleases.find((r) => r.name.includes("external-dns"));
     expect(ednsRelease).toBeDefined();
-    const env = (ednsRelease!.args.values as Record<string, unknown>)["env"] as Array<Record<string, unknown>>;
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const env = (ednsRelease!.args.values as Record<string, unknown>)["env"] as Array<
+      Record<string, unknown>
+    >;
     expect(env).toHaveLength(3);
     expect(env.map((e) => e["name"])).toEqual([
       "AWS_ACCESS_KEY_ID",
@@ -442,6 +456,7 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
     const issuer = createdCustomResources.find(
       (r) => r.args.kind === "ClusterIssuer" && r.args.metadata?.name === "letsencrypt-dns"
     );
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(issuer!.args.spec.acme.solvers[0].dns01.route53.region).toBe("us-east-1");
   });
 });
@@ -457,10 +472,9 @@ describe("platform stack — ClusterSecretStore", () => {
       externalSecrets: { enabled: true },
     });
 
-    const css = createdCustomResources.find(
-      (r) => r.args.kind === "ClusterSecretStore"
-    );
+    const css = createdCustomResources.find((r) => r.args.kind === "ClusterSecretStore");
     expect(css).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(css!.args.spec.provider.vault.server).toBe("https://vault.reyem.tech");
   });
 
@@ -473,9 +487,7 @@ describe("platform stack — ClusterSecretStore", () => {
       externalSecrets: { enabled: true },
     });
 
-    const css = createdCustomResources.find(
-      (r) => r.args.kind === "ClusterSecretStore"
-    );
+    const css = createdCustomResources.find((r) => r.args.kind === "ClusterSecretStore");
     expect(css).toBeUndefined();
   });
 });

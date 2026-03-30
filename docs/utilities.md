@@ -27,10 +27,13 @@ buildCidrMap(["aws", "azure"], { aws: "10.0.0.0/16" });
 import { validateMultiCloud, validateResourceName, isFeatureSupported } from "@reyemtech/nimbus";
 
 // Validate multi-cloud config (checks duplicates + naming)
-validateMultiCloud([
-  { provider: "aws", region: "us-east-1" },
-  { provider: "azure", region: "canadacentral" },
-], "my-cluster"); // { valid: true, errors: [], warnings: [] }
+validateMultiCloud(
+  [
+    { provider: "aws", region: "us-east-1" },
+    { provider: "azure", region: "canadacentral" },
+  ],
+  "my-cluster"
+); // { valid: true, errors: [], warnings: [] }
 
 // Check feature availability
 isFeatureSupported("fck-nat", "aws"); // true
@@ -51,7 +54,7 @@ normalizeTags({ "Cost Center": "R&D" }, "gcp"); // { "cost-center": "r-d" }
 // Merge required tags (environment, client, costCenter, managedBy)
 mergeWithRequiredTags(
   { environment: "prod", client: "acme", costCenter: "eng" },
-  { custom: "value" },
+  { custom: "value" }
 ); // { environment: "prod", client: "acme", costCenter: "eng", managedBy: "nimbus", custom: "value" }
 ```
 
@@ -59,12 +62,12 @@ mergeWithRequiredTags(
 
 All errors extend `AnyCloudError` with typed error codes:
 
-| Error | Code | When |
-|-------|------|------|
-| `CloudValidationError` | `CLOUD_VALIDATION` | Invalid provider or target |
-| `CidrError` | `CIDR_OVERLAP` / `CIDR_INVALID` | CIDR conflicts or malformed |
-| `UnsupportedFeatureError` | `UNSUPPORTED_FEATURE` | Feature not available on provider |
-| `ConfigError` | `CONFIG_MISSING` / `CONFIG_INVALID` | Missing or invalid configuration |
+| Error                     | Code                                | When                              |
+| ------------------------- | ----------------------------------- | --------------------------------- |
+| `CloudValidationError`    | `CLOUD_VALIDATION`                  | Invalid provider or target        |
+| `CidrError`               | `CIDR_OVERLAP` / `CIDR_INVALID`     | CIDR conflicts or malformed       |
+| `UnsupportedFeatureError` | `UNSUPPORTED_FEATURE`               | Feature not available on provider |
+| `ConfigError`             | `CONFIG_MISSING` / `CONFIG_INVALID` | Missing or invalid configuration  |
 
 Missing provider SDKs produce a clear error with install instructions:
 

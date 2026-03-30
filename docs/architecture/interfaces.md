@@ -108,6 +108,7 @@ interface ICluster {
 ```
 
 **Audit-informed decisions:**
+
 - `autoMode` for EKS Auto Mode (DoNotCarry pattern)
 - `virtualNodes` for AKS ACI connector (MetrixGroup pattern)
 - `spot` per-pool (ReyemTech = all spot, DoNotCarry = Auto Mode mixed)
@@ -151,14 +152,12 @@ interface INetwork {
   readonly natGatewayId?: pulumi.Output<string>;
 
   /** Escape hatch */
-  readonly nativeResource:
-    | aws.ec2.Vpc
-    | azure.network.VirtualNetwork
-    | gcp.compute.Network;
+  readonly nativeResource: aws.ec2.Vpc | azure.network.VirtualNetwork | gcp.compute.Network;
 }
 ```
 
 **Audit-informed decisions:**
+
 - `NatStrategy` with `"fck-nat"` option — DoNotCarry pays $101/mo for NAT Gateway
 - Network may be optional (ReyemTech on Rackspace has no custom networking)
 - CIDR auto-offset for multi-cloud (avoid overlaps for peering/mesh)
@@ -199,14 +198,12 @@ interface IDns {
   addRecord(record: IDnsRecord): void;
 
   /** Escape hatch */
-  readonly nativeResource:
-    | aws.route53.Zone
-    | azure.dns.Zone
-    | gcp.dns.ManagedZone;
+  readonly nativeResource: aws.route53.Zone | azure.dns.Zone | gcp.dns.ManagedZone;
 }
 ```
 
 **Audit-informed decisions:**
+
 - ReyemTech: Route 53 (reyem.tech), auth via IAM credentials
 - DoNotCarry: Route 53 (donotcarry.com, donotcarry.tech), auth via Pod Identity
 - MetrixGroup: Azure DNS Zone (metrixgroup.com), auth via Managed Identity
@@ -255,6 +252,7 @@ interface ISecrets {
 ```
 
 **Audit-informed decisions:**
+
 - ReyemTech + DoNotCarry: Vault (in-cluster) + External Secrets Operator
 - MetrixGroup: Azure Key Vault + Secrets Store CSI Driver
 - Support both patterns: Vault + ESO (default) or cloud-native + CSI
@@ -275,7 +273,7 @@ interface IReplicationConfig {
 
 /** State locking configuration */
 interface IStateLockConfig {
-  readonly enabled?: boolean;       // Default: true
+  readonly enabled?: boolean; // Default: true
   readonly dynamoDbTableName?: string; // AWS only, auto-generated if not provided
 }
 
@@ -283,8 +281,8 @@ interface IStateLockConfig {
 interface IStateBackendConfig {
   readonly cloud: CloudArg;
   readonly backendType?: StateBackendType;
-  readonly versioning?: boolean;    // Default: true
-  readonly encryption?: boolean;    // Default: true
+  readonly versioning?: boolean; // Default: true
+  readonly encryption?: boolean; // Default: true
   readonly locking?: IStateLockConfig;
   readonly replication?: IReplicationConfig;
   readonly tags?: Readonly<Record<string, string>>;
@@ -312,6 +310,7 @@ interface IStateBackend {
 ```
 
 **Implementation notes:**
+
 - **AWS:** S3 BucketV2 + PublicAccessBlock + BucketVersioningV2 + SSE (AES256 or KMS via `stateKmsKeyArn`) + DynamoDB table (PAY_PER_REQUEST, `LockID` hash key) + optional cross-region replication (replica bucket + IAM role/policy + BucketReplicationConfig)
 - **Azure:** StorageAccount (StorageV2, HTTPS-only, TLS 1.2, no public blob) + BlobContainer ("pulumistate") + BlobServiceProperties with versioning. SKU: `Standard_GRS` if replication enabled, `Standard_LRS` otherwise. Locking uses Azure blob leases natively (no separate table needed).
 
@@ -373,6 +372,7 @@ interface IDatabase {
 ```
 
 **Audit-informed decisions:**
+
 - ReyemTech: PXC Operator (3-node Galera, MySQL 8.4, PITR to S3)
 - DoNotCarry: Aurora MySQL (db.t3.medium, 2 instances) + MariaDB Galera Operator
 - MetrixGroup: Per-app PostgreSQL Helm charts + MongoDB Helm
@@ -424,6 +424,7 @@ interface ICache {
 ```
 
 **Audit-informed decisions:**
+
 - ReyemTech: Bitnami Redis (standalone + 2 replicas, 5 Gi persistence)
 - DoNotCarry: Redis (1 master + 3 replicas)
 - MetrixGroup: Redis (ArgoCD only, 8 Gi)
@@ -467,10 +468,7 @@ interface IObjectStorage {
   readonly endpoint: pulumi.Output<string>;
 
   /** Escape hatch */
-  readonly nativeResource:
-    | aws.s3.BucketV2
-    | azure.storage.BlobContainer
-    | gcp.storage.Bucket;
+  readonly nativeResource: aws.s3.BucketV2 | azure.storage.BlobContainer | gcp.storage.Bucket;
 }
 ```
 
@@ -560,6 +558,7 @@ interface IPlatformStack {
 ```
 
 **Audit-informed decisions:**
+
 - Traefik is universal across all 3 environments — default enabled
 - ArgoCD is universal — default enabled
 - cert-manager + External DNS universal — default enabled
@@ -599,10 +598,12 @@ interface IGlobalLoadBalancer {
   readonly name: string;
   readonly strategy: RoutingStrategy;
   readonly endpoint: pulumi.Output<string>;
-  readonly healthStatus: pulumi.Output<ReadonlyArray<{
-    readonly cluster: string;
-    readonly healthy: boolean;
-  }>>;
+  readonly healthStatus: pulumi.Output<
+    ReadonlyArray<{
+      readonly cluster: string;
+      readonly healthy: boolean;
+    }>
+  >;
 }
 ```
 
@@ -632,7 +633,7 @@ interface IAwsProviderOptions {
 }
 
 interface IAzureProviderOptions {
-  readonly resourceGroupName: string;  // Required for all Azure resources
+  readonly resourceGroupName: string; // Required for all Azure resources
   readonly subnetCount?: number;
   readonly azureCni?: boolean;
   readonly virtualNodes?: boolean;
@@ -770,25 +771,29 @@ interface IRequiredTags {
 import { createCluster, createNetwork, createDns, createPlatformStack } from "@reyemtech/nimbus";
 import type { INetwork, ICluster, IDns } from "@reyemtech/nimbus";
 
-const network = await createNetwork("prod", {
+const network = (await createNetwork("prod", {
   cloud: "aws",
   cidr: "10.0.0.0/16",
   natStrategy: "fck-nat",
-}) as INetwork;
+})) as INetwork;
 
-const cluster = await createCluster("prod", {
-  cloud: "aws",
-  nodePools: [
-    { name: "system", instanceType: "t3.medium", minNodes: 2, maxNodes: 4 },
-    { name: "workers", instanceType: "c6a.large", minNodes: 2, maxNodes: 8, spot: true },
-  ],
-  providerOptions: { aws: { autoMode: true } },
-}, network) as ICluster;
+const cluster = (await createCluster(
+  "prod",
+  {
+    cloud: "aws",
+    nodePools: [
+      { name: "system", instanceType: "t3.medium", minNodes: 2, maxNodes: 4 },
+      { name: "workers", instanceType: "c6a.large", minNodes: 2, maxNodes: 8, spot: true },
+    ],
+    providerOptions: { aws: { autoMode: true } },
+  },
+  network
+)) as ICluster;
 
-const dns = await createDns("prod", {
+const dns = (await createDns("prod", {
   cloud: "aws",
   zoneName: "reyem.tech",
-}) as IDns;
+})) as IDns;
 
 const platform = createPlatformStack("prod", {
   cluster,
@@ -807,18 +812,18 @@ import { createStateBackend, createDns, createSecrets } from "@reyemtech/nimbus"
 import type { IStateBackend, IDns, ISecrets } from "@reyemtech/nimbus";
 
 // State backend — just S3 + DynamoDB, no cluster needed
-const state = await createStateBackend("prod", {
+const state = (await createStateBackend("prod", {
   cloud: "aws",
   versioning: true,
   encryption: true,
   locking: { enabled: true },
-}) as IStateBackend;
+})) as IStateBackend;
 
 // DNS zone — standalone
-const dns = await createDns("prod", { cloud: "aws", zoneName: "example.com" }) as IDns;
+const dns = (await createDns("prod", { cloud: "aws", zoneName: "example.com" })) as IDns;
 
 // Secrets store — standalone
-const secrets = await createSecrets("prod", { cloud: "aws" }) as ISecrets;
+const secrets = (await createSecrets("prod", { cloud: "aws" })) as ISecrets;
 ```
 
 ### Multi-Cloud (BCDR)
@@ -826,26 +831,30 @@ const secrets = await createSecrets("prod", { cloud: "aws" }) as ISecrets;
 ```typescript
 import type { INetwork, ICluster } from "@reyemtech/nimbus";
 
-const networks = await createNetwork("prod", {
+const networks = (await createNetwork("prod", {
   cloud: ["aws", "azure"],
   cidr: "10.0.0.0/16",
   providerOptions: { azure: { resourceGroupName: "rg-prod" } },
-}) as INetwork[];
+})) as INetwork[];
 
-const clusters = await createCluster("prod", {
-  cloud: [
-    { provider: "aws", region: "us-east-1" },
-    { provider: "azure", region: "canadacentral" },
-  ],
-  nodePools: [
-    { name: "system", instanceType: "auto", minNodes: 2, maxNodes: 4 },
-    { name: "workers", instanceType: "auto", minNodes: 2, maxNodes: 8, spot: true },
-  ],
-  providerOptions: {
-    aws: { autoMode: true },
-    azure: { resourceGroupName: "rg-prod" },
+const clusters = (await createCluster(
+  "prod",
+  {
+    cloud: [
+      { provider: "aws", region: "us-east-1" },
+      { provider: "azure", region: "canadacentral" },
+    ],
+    nodePools: [
+      { name: "system", instanceType: "auto", minNodes: 2, maxNodes: 4 },
+      { name: "workers", instanceType: "auto", minNodes: 2, maxNodes: 8, spot: true },
+    ],
+    providerOptions: {
+      aws: { autoMode: true },
+      azure: { resourceGroupName: "rg-prod" },
+    },
   },
-}, networks) as ICluster[];
+  networks
+)) as ICluster[];
 
 const glb = createGlobalLoadBalancer("prod", {
   strategy: "active-active",

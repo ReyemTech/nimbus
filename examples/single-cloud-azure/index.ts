@@ -66,7 +66,7 @@ const cluster = createCluster(
     tags: { environment: "production", client: "acme" },
     providerOptions: azureOptions,
   },
-  network,
+  network
 ) as ICluster;
 
 // 3. DNS — Azure DNS Zone

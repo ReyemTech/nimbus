@@ -51,11 +51,7 @@ const REDIS_PORT = 6379;
  * @param provider - Kubernetes provider to deploy into
  * @returns Deployed cache resource
  */
-export function createCache(
-  name: string,
-  config: ICacheConfig,
-  provider: k8s.Provider
-): ICache {
+export function createCache(name: string, config: ICacheConfig, provider: k8s.Provider): ICache {
   // Resolve to a single cloud target (take the first when multi-cloud array is given)
   const resolved = resolveCloudTarget(config.cloud);
   const cloud: ResolvedCloudTarget = Array.isArray(resolved) ? resolved[0] : resolved;
@@ -127,9 +123,7 @@ export function createCache(
       : `${helmReleaseName}-redis-master.${CACHE_NAMESPACE}.svc.cluster.local`
   );
 
-  const port = pulumi.output(
-    architecture === "replication" ? SENTINEL_PORT : REDIS_PORT
-  );
+  const port = pulumi.output(architecture === "replication" ? SENTINEL_PORT : REDIS_PORT);
 
   // Bitnami creates a secret named `{releaseName}-redis` with key `redis-password`
   const secretRef = {

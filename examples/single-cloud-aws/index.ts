@@ -50,7 +50,7 @@ const cluster = createCluster(
     tags: { environment: "production", client: "acme" },
     providerOptions: { aws: { autoMode: true } },
   },
-  network,
+  network
 ) as ICluster;
 
 // 3. DNS — Route 53 hosted zone

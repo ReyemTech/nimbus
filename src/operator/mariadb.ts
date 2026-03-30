@@ -11,7 +11,13 @@
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { ensureNamespace } from "../utils/ensure-namespace";
-import type { IBackupDefaults, IOperatorClusterConfig, IClusterInstance, IOperatorDatabaseConfig, IDatabaseInstance } from "./interfaces";
+import type {
+  IBackupDefaults,
+  IOperatorClusterConfig,
+  IClusterInstance,
+  IOperatorDatabaseConfig,
+  IDatabaseInstance,
+} from "./interfaces";
 
 const DATA_NAMESPACE = "data";
 const DEFAULT_MARIADB_VERSION = "11.7";
@@ -40,8 +46,8 @@ function createSingleMariadbDatabaseInstance(
     { provider, dependsOn: [mariadb] }
   );
 
-  const rootPassword = rootSecret.data.apply(
-    (data) => Buffer.from(data?.["password"] ?? "", "base64").toString()
+  const rootPassword = rootSecret.data.apply((data) =>
+    Buffer.from(data?.["password"] ?? "", "base64").toString()
   );
 
   const username = dbConfig.owner ?? dbName;
@@ -70,9 +76,9 @@ function createSingleMariadbDatabaseInstance(
           username,
           password: rootPassword,
           database: dbName,
-          uri: pulumi.all([dbHost, dbPort, rootPassword]).apply(
-            ([h, p, pw]) => `mysql://${username}:${pw}@${h}:${p}/${dbName}`
-          ),
+          uri: pulumi
+            .all([dbHost, dbPort, rootPassword])
+            .apply(([h, p, pw]) => `mysql://${username}:${pw}@${h}:${p}/${dbName}`),
         },
       },
       { provider, dependsOn: [mariadb, nsResource] }
@@ -239,13 +245,32 @@ function createSingleMariadbCluster(
         const envResult: Record<string, IDatabaseInstance> = {};
         for (const [env, envOverrides] of Object.entries(dbConfig.environments)) {
           const { environments: _, ...baseConfig } = dbConfig;
-          const mergedConfig: Omit<IOperatorDatabaseConfig, "environments"> = { ...baseConfig, ...envOverrides };
-          envResult[env] = createSingleMariadbDatabaseInstance(`${name}`, `${dbName}-${env}`, mergedConfig, endpoint, port, mariadb, provider);
+          const mergedConfig: Omit<IOperatorDatabaseConfig, "environments"> = {
+            ...baseConfig,
+            ...envOverrides,
+          };
+          envResult[env] = createSingleMariadbDatabaseInstance(
+            `${name}`,
+            `${dbName}-${env}`,
+            mergedConfig,
+            endpoint,
+            port,
+            mariadb,
+            provider
+          );
         }
         result = envResult;
       } else {
         const { environments: _, ...cleanConfig } = dbConfig;
-        result = createSingleMariadbDatabaseInstance(name, dbName, cleanConfig, endpoint, port, mariadb, provider);
+        result = createSingleMariadbDatabaseInstance(
+          name,
+          dbName,
+          cleanConfig,
+          endpoint,
+          port,
+          mariadb,
+          provider
+        );
       }
       // Runtime: environments → Record, otherwise → IDatabaseInstance.
       // Overload signatures on IClusterInstance narrow the type for callers.
@@ -273,8 +298,17 @@ export function createMariadbDatabase(
     const result: Record<string, IClusterInstance> = {};
     for (const [env, envOverrides] of Object.entries(config.environments)) {
       const { environments: _, ...baseConfig } = config;
-      const mergedConfig: Omit<IOperatorClusterConfig, "environments"> = { ...baseConfig, ...envOverrides };
-      result[env] = createSingleMariadbCluster(`${name}-${env}`, mergedConfig, backupDefaults, provider, operatorRelease);
+      const mergedConfig: Omit<IOperatorClusterConfig, "environments"> = {
+        ...baseConfig,
+        ...envOverrides,
+      };
+      result[env] = createSingleMariadbCluster(
+        `${name}-${env}`,
+        mergedConfig,
+        backupDefaults,
+        provider,
+        operatorRelease
+      );
     }
     return result;
   }

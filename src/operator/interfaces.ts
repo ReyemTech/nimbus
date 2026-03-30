@@ -131,7 +131,10 @@ export interface IClusterInstance {
    */
   createDatabase(name: string, config: IOperatorDatabaseConfig): IDatabaseInstance;
   /** Overload: when environments is provided, returns a Record keyed by environment name. */
-  createDatabase(name: string, config: IOperatorDatabaseConfig & Required<Pick<IOperatorDatabaseConfig, "environments">>): Record<string, IDatabaseInstance>;
+  createDatabase(
+    name: string,
+    config: IOperatorDatabaseConfig & Required<Pick<IOperatorDatabaseConfig, "environments">>
+  ): Record<string, IDatabaseInstance>;
 }
 
 /** Deployed database operator instance. */
@@ -151,5 +154,8 @@ export interface IOperator {
    */
   createCluster(name: string, config?: IOperatorClusterConfig): IClusterInstance;
   /** Overload: when environments is provided, returns a Record keyed by environment name. */
-  createCluster(name: string, config: IOperatorClusterConfig & Required<Pick<IOperatorClusterConfig, "environments">>): Record<string, IClusterInstance>;
+  createCluster(
+    name: string,
+    config: IOperatorClusterConfig & Required<Pick<IOperatorClusterConfig, "environments">>
+  ): Record<string, IClusterInstance>;
 }

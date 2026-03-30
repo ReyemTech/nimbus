@@ -7,30 +7,29 @@ How to evolve a `@reyemtech/nimbus` deployment from single-cloud to multi-cloud 
 You have a standard single-cloud deployment using the factory functions:
 
 ```typescript
-import {
-  createNetwork,
-  createCluster,
-  createDns,
-  createPlatformStack,
-} from "@reyemtech/nimbus";
+import { createNetwork, createCluster, createDns, createPlatformStack } from "@reyemtech/nimbus";
 import type { INetwork, ICluster, IDns } from "@reyemtech/nimbus";
 
-const network = await createNetwork("prod", {
+const network = (await createNetwork("prod", {
   cloud: "aws",
   cidr: "10.0.0.0/16",
   natStrategy: "fck-nat",
-}) as INetwork;
+})) as INetwork;
 
-const cluster = await createCluster("prod", {
-  cloud: "aws",
-  nodePools: [
-    { name: "system", instanceType: "t4g.small", minNodes: 2, maxNodes: 3 },
-    { name: "workers", instanceType: "c6a.large", minNodes: 2, maxNodes: 8, spot: true },
-  ],
-  providerOptions: { aws: { autoMode: true } },
-}, network) as ICluster;
+const cluster = (await createCluster(
+  "prod",
+  {
+    cloud: "aws",
+    nodePools: [
+      { name: "system", instanceType: "t4g.small", minNodes: 2, maxNodes: 3 },
+      { name: "workers", instanceType: "c6a.large", minNodes: 2, maxNodes: 8, spot: true },
+    ],
+    providerOptions: { aws: { autoMode: true } },
+  },
+  network
+)) as ICluster;
 
-const dns = await createDns("prod", { cloud: "aws", zoneName: "example.com" }) as IDns;
+const dns = (await createDns("prod", { cloud: "aws", zoneName: "example.com" })) as IDns;
 
 createPlatformStack("prod", {
   cluster,
@@ -132,11 +131,11 @@ Route traffic across both clusters:
 
 ### Routing Strategies
 
-| Strategy | When to use |
-|----------|-------------|
-| `active-active` | Both clusters serve traffic (weighted equal). Best for redundancy + capacity. |
+| Strategy         | When to use                                                                   |
+| ---------------- | ----------------------------------------------------------------------------- |
+| `active-active`  | Both clusters serve traffic (weighted equal). Best for redundancy + capacity. |
 | `active-passive` | Primary cluster handles all traffic; Azure is standby. Best for cost savings. |
-| `geo` | Route by client geography. Best for latency-sensitive apps. |
+| `geo`            | Route by client geography. Best for latency-sensitive apps.                   |
 
 Start with `active-passive` if you want BCDR without doubling costs, then switch to `active-active` when ready.
 
@@ -148,18 +147,24 @@ Add validation to catch misconfigurations early:
 import { validateMultiCloud, assertValidMultiCloud } from "@reyemtech/nimbus";
 
 // Check for duplicate targets, naming issues
-const result = validateMultiCloud([
-  { provider: "aws", region: "us-east-1" },
-  { provider: "azure", region: "canadacentral" },
-], "prod");
+const result = validateMultiCloud(
+  [
+    { provider: "aws", region: "us-east-1" },
+    { provider: "azure", region: "canadacentral" },
+  ],
+  "prod"
+);
 
 console.log(result.warnings); // e.g., naming restrictions per provider
 
 // Or throw on errors
-assertValidMultiCloud([
-  { provider: "aws", region: "us-east-1" },
-  { provider: "azure", region: "canadacentral" },
-], "prod");
+assertValidMultiCloud(
+  [
+    { provider: "aws", region: "us-east-1" },
+    { provider: "azure", region: "canadacentral" },
+  ],
+  "prod"
+);
 ```
 
 ## Rollback

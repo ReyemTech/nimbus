@@ -13,7 +13,13 @@ import { assertNever } from "../types";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import { createCnpgDatabase } from "./cnpg";
 import { createMariadbDatabase } from "./mariadb";
-import type { IOperator, IOperatorConfig, IOperatorClusterConfig, IClusterInstance, OperatorType } from "./interfaces";
+import type {
+  IOperator,
+  IOperatorConfig,
+  IOperatorClusterConfig,
+  IClusterInstance,
+  OperatorType,
+} from "./interfaces";
 
 export type {
   OperatorType,

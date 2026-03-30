@@ -133,7 +133,12 @@ export function createObservabilityStack(
           ),
         },
       },
-      { provider, dependsOn: [components["loki"], components["kube-prometheus-stack"]].filter(Boolean) as k8s.helm.v3.Release[] }
+      {
+        provider,
+        dependsOn: [components["loki"], components["kube-prometheus-stack"]].filter(
+          Boolean
+        ) as k8s.helm.v3.Release[],
+      }
     );
 
     // Loki logs explorer dashboard
@@ -149,7 +154,10 @@ export function createObservabilityStack(
           "loki-logs.json": JSON.stringify(lokiLogsDashboard()),
         },
       },
-      { provider, dependsOn: [components["kube-prometheus-stack"]].filter(Boolean) as k8s.helm.v3.Release[] }
+      {
+        provider,
+        dependsOn: [components["kube-prometheus-stack"]].filter(Boolean) as k8s.helm.v3.Release[],
+      }
     );
   }
 
@@ -345,7 +353,8 @@ function deployAlloy(
   provider: k8s.Provider,
   lokiEndpoint: pulumi.Output<string>
 ): k8s.helm.v3.Release {
-  const alloyConfig = lokiEndpoint.apply((endpoint) => `
+  const alloyConfig = lokiEndpoint.apply(
+    (endpoint) => `
 logging {
   level  = "info"
   format = "logfmt"
@@ -390,7 +399,8 @@ loki.write "default" {
     url = "${endpoint}"
   }
 }
-`);
+`
+  );
 
   return new k8s.helm.v3.Release(
     `${name}-alloy`,
@@ -436,7 +446,7 @@ function lokiLogsDashboard(): Record<string, unknown> {
           name: "pod",
           type: "query",
           datasource: { type: "loki", uid: "loki" },
-          query: { label: "pod", refId: "A", stream: "{namespace=~\"$namespace\"}", type: 1 },
+          query: { label: "pod", refId: "A", stream: '{namespace=~"$namespace"}', type: 1 },
           refresh: 2,
           sort: 1,
           includeAll: true,
@@ -446,7 +456,12 @@ function lokiLogsDashboard(): Record<string, unknown> {
           name: "container",
           type: "query",
           datasource: { type: "loki", uid: "loki" },
-          query: { label: "container", refId: "A", stream: "{namespace=~\"$namespace\", pod=~\"$pod\"}", type: 1 },
+          query: {
+            label: "container",
+            refId: "A",
+            stream: '{namespace=~"$namespace", pod=~"$pod"}',
+            type: 1,
+          },
           refresh: 2,
           sort: 1,
           includeAll: true,
@@ -468,7 +483,7 @@ function lokiLogsDashboard(): Record<string, unknown> {
         datasource: { type: "loki", uid: "loki" },
         targets: [
           {
-            expr: "sum(count_over_time({namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |~ \"$search\" [1m])) by (namespace)",
+            expr: 'sum(count_over_time({namespace=~"$namespace", pod=~"$pod", container=~"$container"} |~ "$search" [1m])) by (namespace)',
             refId: "A",
             legendFormat: "{{namespace}}",
           },
@@ -488,7 +503,7 @@ function lokiLogsDashboard(): Record<string, unknown> {
         datasource: { type: "loki", uid: "loki" },
         targets: [
           {
-            expr: "{namespace=~\"$namespace\", pod=~\"$pod\", container=~\"$container\"} |~ \"$search\"",
+            expr: '{namespace=~"$namespace", pod=~"$pod", container=~"$container"} |~ "$search"',
             refId: "A",
           },
         ],

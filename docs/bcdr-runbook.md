@@ -4,9 +4,9 @@ Business Continuity and Disaster Recovery procedures for multi-cloud deployments
 
 ## Recovery Objectives
 
-| Metric | Target | Notes |
-|--------|--------|-------|
-| **RTO** (Recovery Time Objective) | 15 min (active-active) / 4 hr (single-cloud) | GLB auto-failover vs manual Pulumi redeploy |
+| Metric                             | Target                                       | Notes                                                               |
+| ---------------------------------- | -------------------------------------------- | ------------------------------------------------------------------- |
+| **RTO** (Recovery Time Objective)  | 15 min (active-active) / 4 hr (single-cloud) | GLB auto-failover vs manual Pulumi redeploy                         |
 | **RPO** (Recovery Point Objective) | 0 (stateless) / per-database backup schedule | Application layer is stateless; data layer depends on backup config |
 
 ## Scenario 1: Single Cloud Failure (Active-Active)
@@ -14,16 +14,19 @@ Business Continuity and Disaster Recovery procedures for multi-cloud deployments
 **Trigger:** AWS or Azure region goes down, GLB health checks fail.
 
 **Automatic response:**
+
 1. Route 53 health checks detect unhealthy cluster (3 consecutive failures, ~90 seconds)
 2. DNS routing removes unhealthy cluster from rotation
 3. All traffic routes to remaining healthy cluster
 
 **Manual steps (if needed):**
+
 1. Verify failover via `dig app.example.com` — should resolve to healthy cluster only
 2. Monitor healthy cluster capacity: `kubectl top nodes`
 3. Scale up if needed: adjust `maxNodes` in config, `pulumi up`
 
 **Recovery:**
+
 1. Wait for cloud provider to resolve the issue
 2. Health checks automatically restore the recovered cluster to rotation
 3. Verify: `dig app.example.com` shows both endpoints
@@ -33,6 +36,7 @@ Business Continuity and Disaster Recovery procedures for multi-cloud deployments
 **Trigger:** Need to rebuild entire infrastructure from scratch.
 
 **Steps:**
+
 ```bash
 # 1. Ensure Pulumi state is accessible
 pulumi login  # or pulumi login s3://your-state-bucket
@@ -57,6 +61,7 @@ curl -I https://app.example.com/health
 **Trigger:** Moving from one cloud to another (e.g., AWS → Azure).
 
 **Steps:**
+
 1. Add new cloud to your Pulumi program (see [Migration Guide](migration-guide.md))
 2. `pulumi up` — provisions new cloud resources alongside existing
 3. Add GLB with `active-passive` strategy (new cloud = secondary)
@@ -70,6 +75,7 @@ curl -I https://app.example.com/health
 **Trigger:** Kubernetes cluster is corrupted but cloud infrastructure is intact.
 
 **Steps:**
+
 ```bash
 # 1. Destroy just the cluster (preserves network, DNS, secrets)
 pulumi destroy --target 'urn:pulumi:prod::app::aws:eks/cluster:Cluster::prod-cluster'
@@ -86,6 +92,7 @@ pulumi up
 **Trigger:** Need to peer VPCs that have overlapping CIDRs.
 
 **Steps:**
+
 ```typescript
 import { buildCidrMap, validateNoOverlaps } from "@reyemtech/nimbus";
 
@@ -101,11 +108,11 @@ const cidrs = buildCidrMap(["aws", "azure", "gcp"]);
 
 ## Contacts
 
-| Role | Contact | Responsibility |
-|------|---------|----------------|
+| Role           | Contact           | Responsibility                                   |
+| -------------- | ----------------- | ------------------------------------------------ |
 | Infrastructure | Mario Meyer (CTO) | Pulumi deployments, cloud access, cluster issues |
-| Application | Lewis Ning | Application-layer incidents, ArgoCD |
-| Communications | Sean Williams | Client notification if outage affects SLA |
+| Application    | Lewis Ning        | Application-layer incidents, ArgoCD              |
+| Communications | Sean Williams     | Client notification if outage affects SLA        |
 
 ## Pulumi State Management
 
@@ -120,35 +127,35 @@ import { createStateBackend } from "@reyemtech/nimbus";
 import type { IStateBackend } from "@reyemtech/nimbus";
 
 // AWS: S3 + DynamoDB locking + cross-region replication
-const state = await createStateBackend("prod", {
+const state = (await createStateBackend("prod", {
   cloud: "aws",
   versioning: true,
   encryption: true,
   locking: { enabled: true },
   replication: { enabled: true, destinationRegion: "us-west-2" },
-}) as IStateBackend;
+})) as IStateBackend;
 
 // Azure: StorageAccount (HTTPS, TLS 1.2) + GRS geo-replication
-const azureState = await createStateBackend("prod", {
+const azureState = (await createStateBackend("prod", {
   cloud: "azure",
   versioning: true,
-  replication: { enabled: true },  // Uses Standard_GRS SKU
+  replication: { enabled: true }, // Uses Standard_GRS SKU
   providerOptions: { azure: { resourceGroupName: "rg-state" } },
-}) as IStateBackend;
+})) as IStateBackend;
 
 // Use the backend URL with Pulumi
 // state.backendUrl => "s3://prod-state-xxxxx"
 // azureState.backendUrl => "azblob://pulumistate"
 ```
 
-| Feature | AWS | Azure |
-|---------|-----|-------|
-| **Storage** | S3 BucketV2 | StorageAccount (StorageV2) |
-| **Versioning** | BucketVersioningV2 | BlobServiceProperties |
-| **Encryption** | SSE (AES256 or KMS) | HTTPS-only, TLS 1.2 |
-| **Locking** | DynamoDB (PAY_PER_REQUEST) | Azure blob leases (native) |
-| **Replication** | Cross-region replication (IAM + replica bucket) | Standard_GRS SKU |
-| **Public access** | Always blocked (PublicAccessBlock) | Always blocked |
+| Feature           | AWS                                             | Azure                      |
+| ----------------- | ----------------------------------------------- | -------------------------- |
+| **Storage**       | S3 BucketV2                                     | StorageAccount (StorageV2) |
+| **Versioning**    | BucketVersioningV2                              | BlobServiceProperties      |
+| **Encryption**    | SSE (AES256 or KMS)                             | HTTPS-only, TLS 1.2        |
+| **Locking**       | DynamoDB (PAY_PER_REQUEST)                      | Azure blob leases (native) |
+| **Replication**   | Cross-region replication (IAM + replica bucket) | Standard_GRS SKU           |
+| **Public access** | Always blocked (PublicAccessBlock)              | Always blocked             |
 
 ### State Recovery
 

@@ -171,10 +171,7 @@ export function createBackupTarget(name: string, config: IBackupTargetConfig): I
             Statement: [
               {
                 Effect: "Allow",
-                Action: [
-                  "s3:GetReplicationConfiguration",
-                  "s3:ListBucket",
-                ],
+                Action: ["s3:GetReplicationConfiguration", "s3:ListBucket"],
                 Resource: srcArn,
               },
               {
@@ -188,11 +185,7 @@ export function createBackupTarget(name: string, config: IBackupTargetConfig): I
               },
               {
                 Effect: "Allow",
-                Action: [
-                  "s3:ReplicateObject",
-                  "s3:ReplicateDelete",
-                  "s3:ReplicateTags",
-                ],
+                Action: ["s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags"],
                 Resource: `${dstArn}/*`,
               },
             ],

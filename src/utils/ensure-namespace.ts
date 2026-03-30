@@ -6,20 +6,13 @@ const createdNamespaces = new Map<string, k8s.core.v1.Namespace>();
  * Ensure a Kubernetes namespace exists. Creates it if it doesn't.
  * Idempotent — returns the same Namespace resource for repeated calls.
  */
-export function ensureNamespace(
-  name: string,
-  provider: k8s.Provider
-): k8s.core.v1.Namespace {
+export function ensureNamespace(name: string, provider: k8s.Provider): k8s.core.v1.Namespace {
   const key = `${name}`;
   const existing = createdNamespaces.get(key);
   if (existing) {
     return existing;
   }
-  const ns = new k8s.core.v1.Namespace(
-    `ensure-ns-${name}`,
-    { metadata: { name } },
-    { provider }
-  );
+  const ns = new k8s.core.v1.Namespace(`ensure-ns-${name}`, { metadata: { name } }, { provider });
   createdNamespaces.set(key, ns);
   return ns;
 }

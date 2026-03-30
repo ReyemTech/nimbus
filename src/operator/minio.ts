@@ -1,6 +1,7 @@
 /**
- * MinIO backend — deploys MinIO via Bitnami Helm chart and provisions
- * buckets via Kubernetes Jobs using the MinIO Client (mc).
+ * MinIO backend — deploys MinIO via the official MinIO Helm chart
+ * (charts.min.io) and provisions buckets via Kubernetes Jobs using
+ * the MinIO Client (mc).
  *
  * Each bucket gets dedicated credentials replicated as K8s Secrets into
  * the specified target namespaces. The Job pattern works with Pulumi's
@@ -18,14 +19,16 @@ import type {
   IMinIOBucket,
   IMinIOBucketConfig,
 } from "./interfaces";
+import { resolveStorageTier } from "../types/storage-tiers";
 
 const DATA_NAMESPACE = "data";
 const DEFAULT_STORAGE_GB = 20;
 const MINIO_SERVICE_PORT = 9000;
 
 /**
- * Deploy MinIO using the Bitnami Helm chart and return an IMinIOOperator
- * with a createBucket() method for provisioning object storage buckets.
+ * Deploy MinIO using the official MinIO Helm chart and return an
+ * IMinIOOperator with a createBucket() method for provisioning
+ * object storage buckets.
  *
  * @example
  * ```typescript
@@ -44,12 +47,15 @@ export function createMinioOperator(
   const provider = config.cluster.provider;
   const namespace = config.namespace ?? DATA_NAMESPACE;
 
-  // Root credentials secret name (created by the Bitnami chart)
-  const rootSecretName = "minio";
+  // Root credentials secret name — the official MinIO chart names the
+  // secret after the Helm release. Pulumi appends a hash suffix to the
+  // release name, so we derive the actual name from the release status.
+  const releaseName = helmRelease.status.apply((s) => s?.name ?? "minio-operator");
+  const rootSecretName = releaseName;
 
   // MinIO service endpoint within the cluster
-  const endpoint = pulumi.output(
-    `http://minio.${namespace}.svc.cluster.local:${MINIO_SERVICE_PORT}`
+  const endpoint = releaseName.apply(
+    (rn) => `http://${rn}.${namespace}.svc.cluster.local:${MINIO_SERVICE_PORT}`
   );
 
   return {
@@ -104,15 +110,18 @@ export function createMinioOperator(
                     env: [
                       {
                         name: "MINIO_ENDPOINT",
-                        value: `http://minio.${namespace}.svc.cluster.local:${MINIO_SERVICE_PORT}`,
+                        value: endpoint,
                       },
-                    ],
-                    envFrom: [
                       {
-                        secretRef: {
-                          // Bitnami chart creates a secret named "minio"
-                          // with MINIO_ROOT_USER and MINIO_ROOT_PASSWORD keys
-                          name: rootSecretName,
+                        name: "MINIO_ROOT_USER",
+                        valueFrom: {
+                          secretKeyRef: { name: rootSecretName, key: "rootUser" },
+                        },
+                      },
+                      {
+                        name: "MINIO_ROOT_PASSWORD",
+                        valueFrom: {
+                          secretKeyRef: { name: rootSecretName, key: "rootPassword" },
                         },
                       },
                     ],
@@ -132,19 +141,16 @@ export function createMinioOperator(
       const nsResource = ensureNamespace(namespace, provider);
 
       const rootSecret = k8s.core.v1.Secret.get(
-        `minio-root-secret`,
+        `minio-root-secret-${bucketName}`,
         pulumi.interpolate`${namespace}/${rootSecretName}`,
         { provider, dependsOn: [helmRelease, nsResource] }
       );
 
       const accessKeyId = rootSecret.data.apply((data) =>
-        Buffer.from(data?.["root-user"] ?? data?.["MINIO_ROOT_USER"] ?? "", "base64").toString()
+        Buffer.from(data?.["rootUser"] ?? "", "base64").toString()
       );
       const secretAccessKey = rootSecret.data.apply((data) =>
-        Buffer.from(
-          data?.["root-password"] ?? data?.["MINIO_ROOT_PASSWORD"] ?? "",
-          "base64"
-        ).toString()
+        Buffer.from(data?.["rootPassword"] ?? "", "base64").toString()
       );
 
       const secrets: Record<string, pulumi.Output<string>> = {};
@@ -165,7 +171,7 @@ export function createMinioOperator(
               },
             },
             stringData: {
-              endpoint: `http://minio.${namespace}.svc.cluster.local:${MINIO_SERVICE_PORT}`,
+              endpoint,
               bucket: bucketName,
               accessKeyId,
               secretAccessKey,
@@ -190,24 +196,28 @@ export function createMinioOperator(
 }
 
 /**
- * Build the Bitnami MinIO Helm values from an IOperatorConfig.
+ * Build official MinIO Helm values from an IOperatorConfig.
  * Exposed so index.ts can pass them to the shared Helm release.
+ *
+ * Official chart reference: https://github.com/minio/minio/tree/master/helm/minio
  */
 export function buildMinioHelmValues(config: IOperatorConfig): Record<string, unknown> {
   const storageGb = DEFAULT_STORAGE_GB;
+  const storageClass = resolveStorageTier("standard", config.cluster.storageTiers);
 
   return {
     mode: "standalone",
+    replicas: 1,
     persistence: {
       enabled: true,
       size: `${storageGb}Gi`,
-      storageClass: "sata",
+      ...(storageClass ? { storageClass } : {}),
     },
     resources: {
       requests: { memory: "256Mi", cpu: "100m" },
     },
-    // Disable the object browser console to avoid image pull issues
-    disableWebUI: true,
+    // Official chart: console runs on port 9001, disable if not needed
+    consoleService: { enabled: false },
     // Merge caller-supplied overrides last
     ...(config.values ?? {}),
   };

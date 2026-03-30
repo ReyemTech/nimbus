@@ -8,9 +8,11 @@
  * @module operator/cnpg
  */
 
+import * as crypto from "node:crypto";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { ensureNamespace } from "../utils/ensure-namespace";
+import { resolveStorageTier, type StorageTierMap } from "../types/storage-tiers";
 import type {
   IBackupDefaults,
   IOperatorClusterConfig,
@@ -26,7 +28,12 @@ const DEFAULT_REPLICAS = 1;
 const DEFAULT_STORAGE_GB = 10;
 
 /**
- * Create a single database instance within a CNPG cluster (no environment awareness).
+ * Create a single database instance within a CNPG cluster.
+ *
+ * Creates a dedicated user with a random password, then runs a psql Job
+ * against the cluster's superuser to CREATE DATABASE + CREATE ROLE + GRANT.
+ * Connection secrets with the per-user credentials are replicated to target
+ * namespaces.
  */
 function createSingleCnpgDatabaseInstance(
   clusterName: string,
@@ -37,27 +44,116 @@ function createSingleCnpgDatabaseInstance(
   cluster: k8s.apiextensions.CustomResource,
   provider: k8s.Provider
 ): IDatabaseInstance {
+  const username = dbConfig.owner ?? dbName;
+  const clusterSecretName = `${clusterName}-superuser`;
+  const userSecretName = `${clusterName}-${dbName}-user`;
+
+  // Generate a random password for the database user (deterministic per Pulumi resource)
+  const generatedPassword = pulumi.secret(crypto.randomBytes(24).toString("base64url"));
+
+  // Store user credentials in a Secret in the data namespace
+  const userSecret = new k8s.core.v1.Secret(
+    `${clusterName}-${dbName}-user-secret`,
+    {
+      metadata: {
+        name: userSecretName,
+        namespace: DATA_NAMESPACE,
+        labels: {
+          "app.kubernetes.io/managed-by": "nimbus",
+          "nimbus/cluster": clusterName,
+          "nimbus/database": dbName,
+        },
+      },
+      stringData: {
+        username,
+        password: generatedPassword,
+      },
+    },
+    { provider, dependsOn: [cluster] }
+  );
+
+  // Job: create database and user via psql against the CNPG superuser
+  const jobName = `cnpg-init-db-${clusterName}-${dbName}`;
+  const initJob = new k8s.batch.v1.Job(
+    jobName,
+    {
+      metadata: {
+        name: jobName,
+        namespace: DATA_NAMESPACE,
+        labels: {
+          "app.kubernetes.io/managed-by": "nimbus",
+          "nimbus/cluster": clusterName,
+          "nimbus/database": dbName,
+        },
+      },
+      spec: {
+        ttlSecondsAfterFinished: 300,
+        backoffLimit: 5,
+        template: {
+          metadata: {
+            labels: { "nimbus/database": dbName },
+          },
+          spec: {
+            restartPolicy: "Never",
+            containers: [
+              {
+                name: "psql",
+                image: `ghcr.io/cloudnative-pg/postgresql:${DEFAULT_PG_VERSION}`,
+                command: [
+                  "sh",
+                  "-c",
+                  [
+                    // Create the role if it doesn't exist, then set password
+                    `psql -h "$PGHOST" -U postgres -d postgres -c "DO \\$\\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$DB_USER') THEN CREATE ROLE \\"$DB_USER\\" LOGIN; END IF; END \\$\\$;"`,
+                    `psql -h "$PGHOST" -U postgres -d postgres -c "ALTER ROLE \\"$DB_USER\\" PASSWORD '$DB_PASSWORD';"`,
+                    // Create the database if it doesn't exist
+                    `psql -h "$PGHOST" -U postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1 || psql -h "$PGHOST" -U postgres -d postgres -c "CREATE DATABASE \\"$DB_NAME\\" OWNER \\"$DB_USER\\";"`,
+                    // Grant all privileges
+                    `psql -h "$PGHOST" -U postgres -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \\"$DB_NAME\\" TO \\"$DB_USER\\";"`,
+                  ].join(" && "),
+                ],
+                env: [
+                  {
+                    name: "PGHOST",
+                    value: endpoint,
+                  },
+                  {
+                    // psql reads PGPASSWORD automatically for authentication
+                    name: "PGPASSWORD",
+                    valueFrom: {
+                      secretKeyRef: { name: clusterSecretName, key: "password" },
+                    },
+                  },
+                  {
+                    name: "PGSSLMODE",
+                    value: "require",
+                  },
+                  { name: "DB_NAME", value: dbName },
+                  { name: "DB_USER", value: username },
+                  {
+                    name: "DB_PASSWORD",
+                    valueFrom: {
+                      secretKeyRef: { name: userSecretName, key: "password" },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+    { provider, dependsOn: [cluster, userSecret] }
+  );
+
+  // Replicate connection secrets with per-user credentials to target namespaces
   const secrets: Record<string, pulumi.Output<string>> = {};
-  const clusterSecretName = `${clusterName}-app`;
+  const dbHost = endpoint;
+  const dbPort = port;
 
   for (const targetNs of dbConfig.namespaces) {
     const nsResource = ensureNamespace(targetNs, provider);
     const secretName = `${clusterName}-${dbName}-pg`;
-
-    // Read credentials from the CNPG-generated cluster secret and
-    // replicate to target namespace with the specific database name
-    const clusterSecret = k8s.core.v1.Secret.get(
-      `${clusterName}-${dbName}-src-${targetNs}`,
-      pulumi.interpolate`${DATA_NAMESPACE}/${clusterSecretName}`,
-      { provider, dependsOn: [cluster] }
-    );
-
-    const username = dbConfig.owner ?? dbName;
-    const dbHost = endpoint;
-    const dbPort = port;
-    const dbPassword = clusterSecret.data.apply((data) =>
-      Buffer.from(data?.["password"] ?? "", "base64").toString()
-    );
 
     new k8s.core.v1.Secret(
       `${clusterName}-${dbName}-secret-${targetNs}`,
@@ -75,16 +171,16 @@ function createSingleCnpgDatabaseInstance(
           host: dbHost,
           port: dbPort.apply((p) => String(p)),
           username,
-          password: dbPassword,
+          password: generatedPassword,
           database: dbName,
           uri: pulumi
-            .all([dbHost, dbPort, dbPassword])
+            .all([dbHost, dbPort, generatedPassword])
             .apply(
               ([h, p, pw]) => `postgresql://${username}:${pw}@${h}:${p}/${dbName}?sslmode=require`
             ),
         },
       },
-      { provider, dependsOn: [cluster, nsResource] }
+      { provider, dependsOn: [initJob, nsResource] }
     );
 
     secrets[targetNs] = pulumi.output(secretName);
@@ -97,7 +193,7 @@ function createSingleCnpgDatabaseInstance(
     port,
     database: pulumi.output(dbName),
     secrets,
-    nativeResource: cluster,
+    nativeResource: initJob,
   };
 }
 
@@ -109,7 +205,8 @@ function createSingleCnpgCluster(
   config: Omit<IOperatorClusterConfig, "environments"> | undefined,
   backupDefaults: IBackupDefaults | undefined,
   provider: k8s.Provider,
-  operatorRelease: k8s.helm.v3.Release
+  operatorRelease: k8s.helm.v3.Release,
+  storageTiers?: StorageTierMap
 ): IClusterInstance {
   const namespace = ensureNamespace(DATA_NAMESPACE, provider);
   const version = config?.version ?? DEFAULT_PG_VERSION;
@@ -149,11 +246,18 @@ function createSingleCnpgCluster(
   const clusterSpec: Record<string, unknown> = {
     instances: replicas,
     imageName: `ghcr.io/cloudnative-pg/postgresql:${version}`,
+    // Enable superuser access so createDatabase() Jobs can CREATE DATABASE/ROLE
+    enableSuperuserAccess: true,
     postgresql: {
       parameters: config?.parameters ?? {},
     },
     storage: {
       size: `${storageGb}Gi`,
+      // Only set storageClass if explicitly requested — CNPG uses the cluster
+      // default (ssd) which is correct for the performance tier.
+      ...(config?.storageTier && resolveStorageTier(config.storageTier, storageTiers)
+        ? { storageClass: resolveStorageTier(config.storageTier, storageTiers) }
+        : {}),
     },
   };
 
@@ -296,7 +400,8 @@ export function createCnpgDatabase(
   config: IOperatorClusterConfig | undefined,
   backupDefaults: IBackupDefaults | undefined,
   provider: k8s.Provider,
-  operatorRelease: k8s.helm.v3.Release
+  operatorRelease: k8s.helm.v3.Release,
+  storageTiers?: StorageTierMap
 ): IClusterInstance | Record<string, IClusterInstance> {
   if (config?.environments) {
     const result: Record<string, IClusterInstance> = {};
@@ -311,7 +416,8 @@ export function createCnpgDatabase(
         mergedConfig,
         backupDefaults,
         provider,
-        operatorRelease
+        operatorRelease,
+        storageTiers
       );
     }
     return result;
@@ -319,8 +425,8 @@ export function createCnpgDatabase(
 
   if (config) {
     const { environments: _, ...cleanConfig } = config;
-    return createSingleCnpgCluster(name, cleanConfig, backupDefaults, provider, operatorRelease);
+    return createSingleCnpgCluster(name, cleanConfig, backupDefaults, provider, operatorRelease, storageTiers);
   }
 
-  return createSingleCnpgCluster(name, config, backupDefaults, provider, operatorRelease);
+  return createSingleCnpgCluster(name, config, backupDefaults, provider, operatorRelease, storageTiers);
 }

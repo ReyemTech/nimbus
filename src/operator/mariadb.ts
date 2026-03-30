@@ -8,9 +8,11 @@
  * @module operator/mariadb
  */
 
+import * as crypto from "node:crypto";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { ensureNamespace } from "../utils/ensure-namespace";
+import { resolveStorageTier, type StorageTierMap } from "../types/storage-tiers";
 import type {
   IBackupDefaults,
   IOperatorClusterConfig,
@@ -26,7 +28,8 @@ const DEFAULT_REPLICAS = 1;
 const DEFAULT_STORAGE_GB = 10;
 
 /**
- * Create a single database instance within a MariaDB cluster (no environment awareness).
+ * Create a single database instance within a MariaDB cluster using
+ * operator CRDs (Database, User, Grant) for proper lifecycle management.
  */
 function createSingleMariadbDatabaseInstance(
   clusterName: string,
@@ -37,21 +40,110 @@ function createSingleMariadbDatabaseInstance(
   mariadb: k8s.apiextensions.CustomResource,
   provider: k8s.Provider
 ): IDatabaseInstance {
-  const secrets: Record<string, pulumi.Output<string>> = {};
-  const rootSecretName = `${clusterName}-root`;
+  const username = dbConfig.owner ?? dbName;
+  const userSecretName = `${clusterName}-${dbName}-user`;
 
-  // Read root password from the operator-generated secret
-  const rootSecret = k8s.core.v1.Secret.get(
-    `${clusterName}-${dbName}-root-src`,
-    pulumi.interpolate`${DATA_NAMESPACE}/${rootSecretName}`,
+  // 1. Database CRD — creates the database on the MariaDB instance
+  const database = new k8s.apiextensions.CustomResource(
+    `${clusterName}-${dbName}-database`,
+    {
+      apiVersion: "k8s.mariadb.com/v1alpha1",
+      kind: "Database",
+      metadata: {
+        name: `${clusterName}-${dbName}`,
+        namespace: DATA_NAMESPACE,
+        labels: {
+          "app.kubernetes.io/managed-by": "nimbus",
+          "nimbus/cluster": clusterName,
+          "nimbus/database": dbName,
+        },
+      },
+      spec: {
+        mariaDbRef: { name: clusterName },
+        characterSet: "utf8mb4",
+        collate: "utf8mb4_unicode_ci",
+      },
+    },
     { provider, dependsOn: [mariadb] }
   );
 
-  const rootPassword = rootSecret.data.apply((data) =>
-    Buffer.from(data?.["password"] ?? "", "base64").toString()
+  // 2. Generate a password and store it in a Secret for the User CRD to reference
+  const generatedPassword = pulumi.secret(crypto.randomBytes(24).toString("base64url"));
+  const passwordSecret = new k8s.core.v1.Secret(
+    `${clusterName}-${dbName}-password-secret`,
+    {
+      metadata: {
+        name: userSecretName,
+        namespace: DATA_NAMESPACE,
+        labels: {
+          "app.kubernetes.io/managed-by": "nimbus",
+          "nimbus/cluster": clusterName,
+          "nimbus/database": dbName,
+        },
+      },
+      stringData: {
+        password: generatedPassword,
+      },
+    },
+    { provider, dependsOn: [mariadb] }
   );
 
-  const username = dbConfig.owner ?? dbName;
+  // User CRD — creates a user referencing the password Secret
+  const user = new k8s.apiextensions.CustomResource(
+    `${clusterName}-${dbName}-user`,
+    {
+      apiVersion: "k8s.mariadb.com/v1alpha1",
+      kind: "User",
+      metadata: {
+        name: `${clusterName}-${dbName}`,
+        namespace: DATA_NAMESPACE,
+        labels: {
+          "app.kubernetes.io/managed-by": "nimbus",
+          "nimbus/cluster": clusterName,
+          "nimbus/database": dbName,
+        },
+      },
+      spec: {
+        mariaDbRef: { name: clusterName },
+        passwordSecretKeyRef: {
+          name: userSecretName,
+          key: "password",
+        },
+        maxUserConnections: 100,
+      },
+    },
+    { provider, dependsOn: [mariadb, passwordSecret] }
+  );
+
+  // 3. Grant CRD — grants ALL PRIVILEGES on the database to the user
+  const grant = new k8s.apiextensions.CustomResource(
+    `${clusterName}-${dbName}-grant`,
+    {
+      apiVersion: "k8s.mariadb.com/v1alpha1",
+      kind: "Grant",
+      metadata: {
+        name: `${clusterName}-${dbName}`,
+        namespace: DATA_NAMESPACE,
+        labels: {
+          "app.kubernetes.io/managed-by": "nimbus",
+          "nimbus/cluster": clusterName,
+          "nimbus/database": dbName,
+        },
+      },
+      spec: {
+        mariaDbRef: { name: clusterName },
+        privileges: ["ALL PRIVILEGES"],
+        database: `${clusterName}-${dbName}`,
+        table: "*",
+        username: `${clusterName}-${dbName}`,
+        grantOption: true,
+      },
+    },
+    { provider, dependsOn: [database, user] }
+  );
+
+  // 4. Replicate connection secrets with per-user credentials to target namespaces
+  const secrets: Record<string, pulumi.Output<string>> = {};
   const dbHost = endpoint;
   const dbPort = port;
 
@@ -75,14 +167,14 @@ function createSingleMariadbDatabaseInstance(
           host: dbHost,
           port: dbPort.apply((p) => String(p)),
           username,
-          password: rootPassword,
+          password: generatedPassword,
           database: dbName,
           uri: pulumi
-            .all([dbHost, dbPort, rootPassword])
+            .all([dbHost, dbPort, generatedPassword])
             .apply(([h, p, pw]) => `mysql://${username}:${pw}@${h}:${p}/${dbName}`),
         },
       },
-      { provider, dependsOn: [mariadb, nsResource] }
+      { provider, dependsOn: [grant, nsResource] }
     );
 
     secrets[targetNs] = pulumi.output(secretName);
@@ -95,7 +187,7 @@ function createSingleMariadbDatabaseInstance(
     port,
     database: pulumi.output(dbName),
     secrets,
-    nativeResource: mariadb,
+    nativeResource: database,
   };
 }
 
@@ -107,7 +199,8 @@ function createSingleMariadbCluster(
   config: Omit<IOperatorClusterConfig, "environments"> | undefined,
   backupDefaults: IBackupDefaults | undefined,
   provider: k8s.Provider,
-  operatorRelease: k8s.helm.v3.Release
+  operatorRelease: k8s.helm.v3.Release,
+  storageTiers?: StorageTierMap
 ): IClusterInstance {
   const namespace = ensureNamespace(DATA_NAMESPACE, provider);
   const replicas = config?.replicas ?? DEFAULT_REPLICAS;
@@ -134,6 +227,11 @@ function createSingleMariadbCluster(
     port: 3306,
     storage: {
       size: `${storageGb}Gi`,
+      // Note: MariaDB operator's admission webhook marks storageClassName as
+      // immutable after creation. Only set it if explicitly requested via storageTier.
+      ...(config?.storageTier && resolveStorageTier(config.storageTier, storageTiers)
+        ? { storageClassName: resolveStorageTier(config.storageTier, storageTiers) }
+        : {}),
     },
   };
 
@@ -302,7 +400,8 @@ export function createMariadbDatabase(
   config: IOperatorClusterConfig | undefined,
   backupDefaults: IBackupDefaults | undefined,
   provider: k8s.Provider,
-  operatorRelease: k8s.helm.v3.Release
+  operatorRelease: k8s.helm.v3.Release,
+  storageTiers?: StorageTierMap
 ): IClusterInstance | Record<string, IClusterInstance> {
   if (config?.environments) {
     const result: Record<string, IClusterInstance> = {};
@@ -317,7 +416,8 @@ export function createMariadbDatabase(
         mergedConfig,
         backupDefaults,
         provider,
-        operatorRelease
+        operatorRelease,
+        storageTiers
       );
     }
     return result;
@@ -325,8 +425,8 @@ export function createMariadbDatabase(
 
   if (config) {
     const { environments: _, ...cleanConfig } = config;
-    return createSingleMariadbCluster(name, cleanConfig, backupDefaults, provider, operatorRelease);
+    return createSingleMariadbCluster(name, cleanConfig, backupDefaults, provider, operatorRelease, storageTiers);
   }
 
-  return createSingleMariadbCluster(name, config, backupDefaults, provider, operatorRelease);
+  return createSingleMariadbCluster(name, config, backupDefaults, provider, operatorRelease, storageTiers);
 }

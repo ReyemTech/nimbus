@@ -12,6 +12,7 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { resolveCloudTarget } from "../types";
 import type { ResolvedCloudTarget } from "../types";
+import { resolveStorageTier, type StorageTierMap } from "../types/storage-tiers";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import type { ICacheConfig, ICache } from "./interfaces";
 
@@ -51,7 +52,7 @@ const REDIS_PORT = 6379;
  * @param provider - Kubernetes provider to deploy into
  * @returns Deployed cache resource
  */
-export function createCache(name: string, config: ICacheConfig, provider: k8s.Provider): ICache {
+export function createCache(name: string, config: ICacheConfig, provider: k8s.Provider, storageTiers?: StorageTierMap): ICache {
   // Resolve to a single cloud target (take the first when multi-cloud array is given)
   const resolved = resolveCloudTarget(config.cloud);
   const cloud: ResolvedCloudTarget = Array.isArray(resolved) ? resolved[0] : resolved;
@@ -61,6 +62,8 @@ export function createCache(name: string, config: ICacheConfig, provider: k8s.Pr
 
   // Ensure the data namespace exists
   const ns = ensureNamespace(CACHE_NAMESPACE, provider);
+
+  const storageClass = resolveStorageTier(config.storageTier ?? "performance", storageTiers);
 
   // Build Helm values based on architecture
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,6 +76,7 @@ export function createCache(name: string, config: ICacheConfig, provider: k8s.Pr
       persistence: {
         enabled: true,
         size: `${storageGb}Gi`,
+        ...(storageClass ? { storageClass } : {}),
       },
     },
   };
@@ -86,6 +90,7 @@ export function createCache(name: string, config: ICacheConfig, provider: k8s.Pr
       persistence: {
         enabled: true,
         size: `${storageGb}Gi`,
+        ...(storageClass ? { storageClass } : {}),
       },
     };
   }

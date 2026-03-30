@@ -17,6 +17,7 @@ import type {
   IPrometheusConfig,
 } from "./interfaces";
 import { createDashboards, lokiLogsDashboard } from "./dashboards/index";
+import { resolveStorageTier } from "../types/storage-tiers";
 
 /**
  * Default Helm chart versions. Used only when the consumer doesn't pass `version`.
@@ -81,13 +82,14 @@ export function createObservabilityStack(
       config.prometheus,
       config.grafana,
       config.alertmanager,
-      provider
+      provider,
+      cluster.storageTiers
     );
   }
 
   // 3. Loki (log aggregation)
   if (config.loki?.enabled) {
-    components["loki"] = deployLoki(name, namespace, config.loki, provider);
+    components["loki"] = deployLoki(name, namespace, config.loki, provider, cluster.storageTiers);
   }
 
   // 4. Alloy (log/metric collector)
@@ -182,7 +184,8 @@ function deployKubePrometheusStack(
   prometheus: IPrometheusConfig | undefined,
   grafana: IGrafanaConfig | undefined,
   alertmanager: IAlertmanagerConfig | undefined,
-  provider: k8s.Provider
+  provider: k8s.Provider,
+  storageTiers?: import("../types/storage-tiers").StorageTierMap
 ): k8s.helm.v3.Release {
   const certName = domain.replace(/\./g, "-");
   const tlsSecretName = `${certName}-wildcard-tls`;
@@ -193,6 +196,10 @@ function deployKubePrometheusStack(
   };
   if (prometheus?.enabled) {
     const promSubdomain = prometheus.subdomain ?? "prometheus";
+    const promStorageClass = resolveStorageTier(
+      prometheus.storageTier ?? "standard",
+      storageTiers
+    );
     prometheusValues["prometheusSpec"] = {
       serviceMonitorSelectorNilUsesHelmValues: false,
       podMonitorSelectorNilUsesHelmValues: false,
@@ -200,6 +207,9 @@ function deployKubePrometheusStack(
       storageSpec: {
         volumeClaimTemplate: {
           spec: {
+            // Note: storageClassName can only be set on initial creation.
+            // Changing it on an existing StatefulSet requires manual PVC migration.
+            ...(promStorageClass ? { storageClassName: promStorageClass } : {}),
             resources: {
               requests: {
                 storage: `${prometheus.storageGb ?? 20}Gi`,
@@ -297,7 +307,8 @@ function deployLoki(
   name: string,
   namespace: string,
   config: ILokiConfig,
-  provider: k8s.Provider
+  provider: k8s.Provider,
+  storageTiers?: import("../types/storage-tiers").StorageTierMap
 ): k8s.helm.v3.Release {
   const mode = config.mode ?? "single-binary";
   const storageGb = config.storageGb ?? 10;
@@ -336,9 +347,14 @@ function deployLoki(
     lokiValues["backend"] = { replicas: 0 };
     lokiValues["read"] = { replicas: 0 };
     lokiValues["write"] = { replicas: 0 };
+    const lokiStorageClass = resolveStorageTier(
+      config.storageTier ?? "standard",
+      storageTiers
+    );
     lokiValues["singleBinary"]["persistence"] = {
       enabled: true,
       size: `${storageGb}Gi`,
+      ...(lokiStorageClass ? { storageClass: lokiStorageClass } : {}),
     };
   }
 

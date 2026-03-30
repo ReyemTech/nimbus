@@ -9,6 +9,7 @@
 
 import type * as pulumi from "@pulumi/pulumi";
 import type { CloudArg, ResolvedCloudTarget } from "../types";
+import type { StorageTier } from "../types/storage-tiers";
 import type { ISecretRef } from "../secrets";
 
 /** Supported cache engines. */
@@ -77,6 +78,8 @@ export interface ICacheConfig {
   readonly instanceClass?: string;
   /** Persistent storage size in GB (for Helm-based). */
   readonly storageGb?: number;
+  /** Storage performance tier mapped to cluster storage class. */
+  readonly storageTier?: StorageTier;
   /** Enable Prometheus metrics exporter. */
   readonly metrics?: boolean;
   /** Resource tags applied to the cache and child resources. */

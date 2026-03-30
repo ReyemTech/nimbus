@@ -70,7 +70,7 @@ const OPERATOR_CHARTS: Record<OperatorType, OperatorChartInfo & { crds?: Operato
     },
   },
   minio: {
-    repo: "https://charts.bitnami.com/bitnami",
+    repo: "https://charts.min.io",
     chart: "minio",
     defaultNamespace: DATA_NAMESPACE,
   },
@@ -171,12 +171,13 @@ export function createOperator(
     helmRelease,
     createCluster(name: string, clusterConfig?: IOperatorClusterConfig) {
       let result: IClusterInstance | Record<string, IClusterInstance>;
+      const tierMap = config.cluster.storageTiers;
       switch (type) {
         case "cloudnative-pg":
-          result = createCnpgDatabase(name, clusterConfig, config.backup, provider, helmRelease);
+          result = createCnpgDatabase(name, clusterConfig, config.backup, provider, helmRelease, tierMap);
           break;
         case "mariadb-operator":
-          result = createMariadbDatabase(name, clusterConfig, config.backup, provider, helmRelease);
+          result = createMariadbDatabase(name, clusterConfig, config.backup, provider, helmRelease, tierMap);
           break;
         default:
           return assertNever(type);

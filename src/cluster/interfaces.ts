@@ -11,6 +11,7 @@
 import type * as pulumi from "@pulumi/pulumi";
 import type * as k8s from "@pulumi/kubernetes";
 import type { CloudArg, ResolvedCloudTarget } from "../types";
+import type { StorageTierMap } from "../types/storage-tiers";
 
 /** Kubernetes node taint. */
 export interface INodeTaint {
@@ -123,6 +124,12 @@ export interface ICluster {
 
   /** Pulumi K8s provider for deploying workloads to this cluster. */
   readonly provider: k8s.Provider;
+
+  /**
+   * Mapping from storage tiers to provider-specific storage class names.
+   * When set, modules use resolveStorageTier() to select the correct class.
+   */
+  readonly storageTiers?: StorageTierMap;
 }
 
 /** AWS-specific cluster extensions for EKS. */

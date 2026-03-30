@@ -20,6 +20,7 @@ import type {
   IPlatformStackConfig,
   IVaultConfig,
 } from "./interfaces";
+import { createHash } from "crypto";
 import { assertNever } from "../types";
 import { ensureNamespace } from "../utils/ensure-namespace";
 
@@ -749,7 +750,6 @@ function deployOAuth2Proxy(
   const cookieSecret = pulumi
     .output(name)
     .apply((n) => {
-      const { createHash } = require("crypto") as typeof import("crypto");
       return createHash("sha256").update(`${n}-oauth2-proxy-cookie`).digest("base64").slice(0, 32);
     });
 

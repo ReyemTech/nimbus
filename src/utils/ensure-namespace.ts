@@ -11,8 +11,9 @@ export function ensureNamespace(
   provider: k8s.Provider
 ): k8s.core.v1.Namespace {
   const key = `${name}`;
-  if (createdNamespaces.has(key)) {
-    return createdNamespaces.get(key)!;
+  const existing = createdNamespaces.get(key);
+  if (existing) {
+    return existing;
   }
   const ns = new k8s.core.v1.Namespace(
     `ensure-ns-${name}`,

@@ -199,7 +199,7 @@ export function createOperator(
         case "neo4j":
           // Neo4j Helm chart deploys the instance directly (no CRD operator).
           // The helmRelease IS the Neo4j deployment; createCluster wraps it.
-          result = createNeo4jCluster(name, clusterConfig as any, provider, helmRelease, tierMap);
+          result = createNeo4jCluster(name, clusterConfig as any, config.backup, provider, helmRelease, tierMap);
           break;
         default:
           return assertNever(type);

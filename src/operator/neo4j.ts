@@ -1,7 +1,11 @@
 /**
  * Neo4j backend — deploys Neo4j via the official Helm chart
- * (helm.neo4j.com/neo4j) and provisions databases/users via
- * Kubernetes Jobs using cypher-shell.
+ * (helm.neo4j.com/neo4j) with full operator-level lifecycle management:
+ *
+ * - Scheduled S3 backups via CronJob (neo4j-admin database dump + aws s3 cp)
+ * - Prometheus metrics via ServiceMonitor
+ * - User provisioning via cypher-shell Jobs
+ * - Connection secret replication to target namespaces
  *
  * Neo4j Community supports a single user database. Enterprise
  * supports multiple databases. User provisioning works on both.
@@ -15,6 +19,7 @@ import * as pulumi from "@pulumi/pulumi";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import { resolveStorageTier, type StorageTierMap } from "../types/storage-tiers";
 import type {
+  IBackupDefaults,
   IOperatorDatabaseConfig,
   IDatabaseInstance,
   IClusterInstance,
@@ -23,8 +28,9 @@ import type {
 const DATA_NAMESPACE = "data";
 const NEO4J_BOLT_PORT = 7687;
 const NEO4J_HTTP_PORT = 7474;
+const NEO4J_METRICS_PORT = 2004;
 
-/** Neo4j-specific cluster config extending the base operator cluster config. */
+/** Neo4j-specific cluster config. */
 export interface INeo4jClusterConfig {
   /** Neo4j password for the built-in neo4j user. Auto-generated if omitted. */
   readonly password?: pulumi.Input<string>;
@@ -39,6 +45,8 @@ export interface INeo4jClusterConfig {
   };
   /** Enable APOC plugin. Default: true. */
   readonly apoc?: boolean;
+  /** Enable Prometheus metrics endpoint. Default: true. */
+  readonly metrics?: boolean;
   /** Additional neo4j.conf settings. */
   readonly config?: Record<string, string>;
   /** Additional Helm values to merge. */
@@ -48,7 +56,7 @@ export interface INeo4jClusterConfig {
 /**
  * Build Neo4j Helm values from config.
  */
-export function buildNeo4jHelmValues(
+function buildNeo4jHelmValues(
   name: string,
   config: INeo4jClusterConfig | undefined,
   storageTiers?: StorageTierMap
@@ -57,6 +65,20 @@ export function buildNeo4jHelmValues(
   const cpu = config?.resources?.cpu ?? "1";
   const memory = config?.resources?.memory ?? "4Gi";
   const storageClass = resolveStorageTier(config?.storageTier ?? "performance", storageTiers);
+  const metricsEnabled = config?.metrics !== false;
+
+  const neo4jConfig: Record<string, string> = {
+    "server.memory.heap.initial_size": "2G",
+    "server.memory.pagecache.size": "1G",
+    ...(config?.config ?? {}),
+  };
+
+  // Enable Prometheus metrics endpoint
+  if (metricsEnabled) {
+    neo4jConfig["server.metrics.prometheus.enabled"] = "true";
+    neo4jConfig["server.metrics.prometheus.endpoint"] = `0.0.0.0:${NEO4J_METRICS_PORT}`;
+    neo4jConfig["server.metrics.filter"] = "*";
+  }
 
   const values: Record<string, unknown> = {
     neo4j: {
@@ -72,11 +94,9 @@ export function buildNeo4jHelmValues(
         },
       },
     },
-    config: {
-      "server.memory.heap.initial_size": "2G",
-      "server.memory.pagecache.size": "1G",
-      ...(config?.config ?? {}),
-    },
+    config: neo4jConfig,
+    // Default to ClusterIP (no public exposure)
+    services: { default: { type: "ClusterIP" } },
   };
 
   if (config?.apoc !== false) {
@@ -86,31 +106,32 @@ export function buildNeo4jHelmValues(
     };
   }
 
-  // Default to ClusterIP (no public exposure)
-  values["services"] = { default: { type: "ClusterIP" } };
-
   return { ...values, ...(config?.values ?? {}) };
 }
 
 /**
  * Create a Neo4j graph database cluster via the official Helm chart.
  *
- * Returns an IClusterInstance with createDatabase() for user provisioning
- * and connection secret replication to target namespaces.
+ * Provides full operator-level lifecycle: deployment, backup, monitoring,
+ * user provisioning, and connection secret replication.
  */
 export function createNeo4jCluster(
   name: string,
   config: INeo4jClusterConfig | undefined,
+  backupDefaults: IBackupDefaults | undefined,
   provider: k8s.Provider,
   operatorRelease: k8s.helm.v3.Release,
   storageTiers?: StorageTierMap
 ): IClusterInstance {
   const namespace = ensureNamespace(DATA_NAMESPACE, provider);
+  const metricsEnabled = config?.metrics !== false;
   const neo4jPassword = config?.password
     ? pulumi.output(config.password)
     : pulumi.secret(crypto.randomBytes(24).toString("base64url"));
 
-  // Store the neo4j admin password
+  // -------------------------------------------------------------------------
+  // 1. Admin credentials Secret
+  // -------------------------------------------------------------------------
   const passwordSecretName = `${name}-neo4j-auth`;
   const passwordSecret = new k8s.core.v1.Secret(
     `${name}-neo4j-auth`,
@@ -121,7 +142,6 @@ export function createNeo4jCluster(
         labels: { "app.kubernetes.io/managed-by": "nimbus" },
       },
       stringData: {
-        // Neo4j Helm chart expects NEO4J_AUTH in "neo4j/<password>" format
         NEO4J_AUTH: pulumi.interpolate`neo4j/${neo4jPassword}`,
         password: neo4jPassword,
       },
@@ -129,14 +149,14 @@ export function createNeo4jCluster(
     { provider, dependsOn: [namespace, operatorRelease], ignoreChanges: ["data", "stringData"] }
   );
 
+  // -------------------------------------------------------------------------
+  // 2. Helm deployment
+  // -------------------------------------------------------------------------
   const helmValues = buildNeo4jHelmValues(name, config, storageTiers);
-
-  // Set password in Helm values
   const neo4jValues = (helmValues as Record<string, Record<string, unknown>>)["neo4j"] ?? {};
   neo4jValues["password"] = neo4jPassword;
   (helmValues as Record<string, unknown>)["neo4j"] = neo4jValues;
 
-  // Deploy Neo4j via Helm
   const release = new k8s.helm.v3.Release(
     `${name}-neo4j`,
     {
@@ -149,17 +169,191 @@ export function createNeo4jCluster(
     { provider, dependsOn: [namespace, operatorRelease, passwordSecret] }
   );
 
-  // Neo4j service endpoint — Pulumi appends a hash suffix to the Helm release name.
-  // Derive the actual service name from the release status.
   const releaseName = release.status.apply((s) => s?.name ?? `${name}-neo4j`);
   const endpoint = releaseName.apply(
     (rn) => `${rn}.${DATA_NAMESPACE}.svc.cluster.local`
   );
   const port = pulumi.output(NEO4J_BOLT_PORT);
 
+  // -------------------------------------------------------------------------
+  // 3. Scheduled backups via CronJob (neo4j-admin dump → S3)
+  // -------------------------------------------------------------------------
+  if (backupDefaults) {
+    const backupSchedule = backupDefaults.schedule ?? "0 3 * * *";
+    const retentionDays = backupDefaults.retentionDays ?? 7;
+
+    // Backup S3 credentials Secret
+    const backupCredsName = `${name}-neo4j-backup-s3`;
+    new k8s.core.v1.Secret(
+      `${name}-neo4j-backup-creds`,
+      {
+        metadata: {
+          name: backupCredsName,
+          namespace: DATA_NAMESPACE,
+          labels: { "app.kubernetes.io/managed-by": "nimbus" },
+        },
+        stringData: {
+          AWS_ACCESS_KEY_ID: backupDefaults.target.credentials.accessKeyId,
+          AWS_SECRET_ACCESS_KEY: backupDefaults.target.credentials.secretAccessKey,
+          AWS_DEFAULT_REGION: backupDefaults.target.region,
+        },
+      },
+      { provider, dependsOn: [namespace] }
+    );
+
+    // CronJob: dump neo4j database → upload to S3
+    new k8s.batch.v1.CronJob(
+      `${name}-neo4j-backup`,
+      {
+        metadata: {
+          name: `${name}-neo4j-backup`,
+          namespace: DATA_NAMESPACE,
+          labels: { "app.kubernetes.io/managed-by": "nimbus" },
+        },
+        spec: {
+          schedule: backupSchedule,
+          concurrencyPolicy: "Forbid",
+          successfulJobsHistoryLimit: 3,
+          failedJobsHistoryLimit: 3,
+          jobTemplate: {
+            spec: {
+              ttlSecondsAfterFinished: 86400,
+              backoffLimit: 2,
+              template: {
+                metadata: {
+                  labels: {
+                    "app.kubernetes.io/managed-by": "nimbus",
+                    "nimbus/cluster": name,
+                    "nimbus/backup": "neo4j",
+                  },
+                },
+                spec: {
+                  restartPolicy: "Never",
+                  containers: [
+                    {
+                      name: "neo4j-backup",
+                      image: "neo4j:community",
+                      command: [
+                        "sh",
+                        "-c",
+                        [
+                          // Generate timestamped dump filename
+                          `TIMESTAMP=$(date +%Y%m%d-%H%M%S)`,
+                          `DUMP_FILE="/tmp/${name}-neo4j-\${TIMESTAMP}.dump"`,
+                          `S3_PATH="s3://$BACKUP_BUCKET/neo4j/${name}/\${TIMESTAMP}.dump"`,
+                          // Stop accepting new transactions and dump
+                          `neo4j-admin database dump neo4j --to-path=/tmp --overwrite-destination=true`,
+                          // Rename to timestamped name
+                          `mv /tmp/neo4j.dump "\${DUMP_FILE}"`,
+                          // Install AWS CLI (minimal)
+                          `apt-get update -qq && apt-get install -y -qq python3-pip > /dev/null 2>&1`,
+                          `pip3 install -q awscli`,
+                          // Upload to S3
+                          `aws s3 cp "\${DUMP_FILE}" "\${S3_PATH}"`,
+                          // Clean up old backups (retention)
+                          `aws s3 ls "s3://$BACKUP_BUCKET/neo4j/${name}/" | while read -r line; do`,
+                          `  file_date=$(echo "$line" | awk '{print $1}')`,
+                          `  file_name=$(echo "$line" | awk '{print $4}')`,
+                          `  if [ -n "$file_date" ] && [ -n "$file_name" ]; then`,
+                          `    days_old=$(( ($(date +%s) - $(date -d "$file_date" +%s 2>/dev/null || echo 0)) / 86400 ))`,
+                          `    if [ "$days_old" -gt "${retentionDays}" ]; then`,
+                          `      aws s3 rm "s3://$BACKUP_BUCKET/neo4j/${name}/$file_name"`,
+                          `    fi`,
+                          `  fi`,
+                          `done || true`,
+                          `echo "Backup complete: \${S3_PATH}"`,
+                        ].join("\n"),
+                      ],
+                      env: [
+                        {
+                          name: "BACKUP_BUCKET",
+                          value: backupDefaults.target.bucket,
+                        },
+                        {
+                          name: "NEO4J_ADMIN_PASSWORD",
+                          valueFrom: {
+                            secretKeyRef: { name: passwordSecretName, key: "password" },
+                          },
+                        },
+                      ],
+                      envFrom: [
+                        { secretRef: { name: backupCredsName } },
+                      ],
+                      volumeMounts: [
+                        {
+                          name: "data",
+                          mountPath: "/data",
+                          readOnly: true,
+                        },
+                      ],
+                    },
+                  ],
+                  // Mount the Neo4j data PVC for offline dump
+                  volumes: [
+                    {
+                      name: "data",
+                      persistentVolumeClaim: {
+                        claimName: releaseName.apply((rn) => `data-${rn}-0`),
+                        readOnly: true,
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+      { provider, dependsOn: [release] }
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // 4. Prometheus ServiceMonitor
+  // -------------------------------------------------------------------------
+  if (metricsEnabled) {
+    new k8s.apiextensions.CustomResource(
+      `${name}-neo4j-servicemonitor`,
+      {
+        apiVersion: "monitoring.coreos.com/v1",
+        kind: "ServiceMonitor",
+        metadata: {
+          name: `${name}-neo4j`,
+          namespace: DATA_NAMESPACE,
+          labels: {
+            "app.kubernetes.io/managed-by": "nimbus",
+            "release": "reyemtech-kube-prometheus-stack",
+          },
+        },
+        spec: {
+          selector: {
+            matchLabels: {
+              "app": name,
+            },
+          },
+          namespaceSelector: {
+            matchNames: [DATA_NAMESPACE],
+          },
+          endpoints: [
+            {
+              port: "metrics",
+              targetPort: NEO4J_METRICS_PORT,
+              interval: "30s",
+              path: "/metrics",
+            },
+          ],
+        },
+      },
+      { provider, dependsOn: [release] }
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // 5. Return IClusterInstance with createDatabase()
+  // -------------------------------------------------------------------------
   return {
     name,
-    engine: "postgresql" as const, // Closest match in the union type — graph DB
+    engine: "neo4j" as const,
     endpoint,
     port,
     nativeResource: release,
@@ -187,7 +381,7 @@ export function createNeo4jCluster(
         { provider, dependsOn: [release], ignoreChanges: ["data", "stringData"] }
       );
 
-      // Read stored password for stability
+      // Read stored password for stability across deploys
       const storedUserSecret = k8s.core.v1.Secret.get(
         `${name}-${dbName}-neo4j-user-read`,
         pulumi.interpolate`${DATA_NAMESPACE}/${userSecretName}`,
@@ -226,9 +420,8 @@ export function createNeo4jCluster(
                       "sh",
                       "-c",
                       [
-                        // Create user if not exists, set password
                         `cypher-shell -a "bolt://$NEO4J_HOST:${NEO4J_BOLT_PORT}" -u neo4j -p "$NEO4J_ADMIN_PASSWORD" "CREATE USER \\\`$DB_USER\\\` IF NOT EXISTS SET PLAINTEXT PASSWORD '$DB_PASSWORD' SET PASSWORD CHANGE NOT REQUIRED"`,
-                        // Grant access roles
+                        // GRANT ROLE is Enterprise-only; gracefully skip on Community
                         `cypher-shell -a "bolt://$NEO4J_HOST:${NEO4J_BOLT_PORT}" -u neo4j -p "$NEO4J_ADMIN_PASSWORD" "GRANT ROLE reader, editor TO \\\`$DB_USER\\\`" || true`,
                       ].join(" && "),
                     ],

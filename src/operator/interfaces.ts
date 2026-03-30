@@ -114,7 +114,7 @@ export interface IClusterInstance {
   /** Cluster name. */
   readonly name: string;
   /** Database engine type. */
-  readonly engine: "postgresql" | "mariadb";
+  readonly engine: "postgresql" | "mariadb" | "neo4j";
   /** Read-write endpoint for the cluster. */
   readonly endpoint: pulumi.Output<string>;
   /** Connection port. */

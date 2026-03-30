@@ -18,12 +18,13 @@ import type { StorageTier } from "../types/storage-tiers";
 export type EnvironmentOverrides<T> = Record<string, Partial<T>>;
 
 /** Supported Kubernetes database operators. */
-export type OperatorType = "cloudnative-pg" | "mariadb-operator" | "minio";
+export type OperatorType = "cloudnative-pg" | "mariadb-operator" | "minio" | "neo4j";
 
 /** Typed constant map for OperatorType string literals. */
 export const OPERATOR_TYPES = {
   CLOUDNATIVE_PG: "cloudnative-pg" as const,
   MARIADB_OPERATOR: "mariadb-operator" as const,
+  NEO4J: "neo4j" as const,
   MINIO: "minio" as const,
 } satisfies Record<string, OperatorType>;
 

@@ -13,7 +13,8 @@ import { assertNever } from "../types";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import { createCnpgDatabase } from "./cnpg";
 import { createMariadbDatabase } from "./mariadb";
-import { createMinioOperator, buildMinioHelmValues } from "./minio";
+import { createMinioOperator } from "./minio";
+import { createNeo4jCluster } from "./neo4j";
 import type {
   IOperator,
   IMinIOOperator,
@@ -40,6 +41,7 @@ export type {
 } from "./interfaces";
 export { OPERATOR_TYPES } from "./interfaces";
 export { createMinioIngress } from "./minio";
+export type { INeo4jClusterConfig } from "./neo4j";
 
 const DATA_NAMESPACE = "data";
 
@@ -72,8 +74,15 @@ const OPERATOR_CHARTS: Record<OperatorType, OperatorChartInfo & { crds?: Operato
     },
   },
   minio: {
-    repo: "https://charts.min.io",
-    chart: "minio",
+    repo: "https://operator.min.io",
+    chart: "operator",
+    defaultNamespace: "minio-operator",
+  },
+  neo4j: {
+    // Neo4j has no separate operator — the Helm chart deploys the instance directly.
+    // The operator release is a no-op; createCluster() deploys via its own Helm release.
+    repo: "https://helm.neo4j.com/neo4j",
+    chart: "neo4j",
     defaultNamespace: DATA_NAMESPACE,
   },
 };
@@ -110,7 +119,7 @@ const OPERATOR_CHARTS: Record<OperatorType, OperatorChartInfo & { crds?: Operato
  */
 export function createOperator(type: "minio", config: IOperatorConfig): IMinIOOperator;
 export function createOperator(
-  type: "cloudnative-pg" | "mariadb-operator",
+  type: "cloudnative-pg" | "mariadb-operator" | "neo4j",
   config: IOperatorConfig
 ): IOperator;
 export function createOperator(
@@ -145,22 +154,28 @@ export function createOperator(
     operatorDeps.push(crdsRelease);
   }
 
-  // For MinIO, merge computed Helm values; for others, use caller-supplied values directly.
-  const helmValues = type === "minio" ? buildMinioHelmValues(config) : (config.values ?? {});
+  // Neo4j has no separate operator — the Helm chart deploys the instance
+  // directly. Skip the operator install; createCluster() deploys via its own
+  // Helm release with instance-specific values.
+  const skipOperatorInstall = type === "neo4j";
 
-  // Deploy Helm release
-  const helmRelease = new k8s.helm.v3.Release(
-    `${type}-operator`,
-    {
-      chart: chartInfo.chart,
-      repositoryOpts: { repo: chartInfo.repo },
-      version: config.version,
-      namespace,
-      createNamespace: false,
-      values: helmValues,
-    },
-    { provider, dependsOn: [ns, ...operatorDeps] }
-  );
+  const helmValues = config.values ?? {};
+
+  // Deploy Helm release (operator chart)
+  const helmRelease = skipOperatorInstall
+    ? (ns as unknown as k8s.helm.v3.Release) // Placeholder — Neo4j deploys in createCluster()
+    : new k8s.helm.v3.Release(
+        `${type}-operator`,
+        {
+          chart: chartInfo.chart,
+          repositoryOpts: { repo: chartInfo.repo },
+          version: config.version,
+          namespace,
+          createNamespace: false,
+          values: helmValues,
+        },
+        { provider, dependsOn: [ns, ...operatorDeps] }
+      );
 
   // MinIO returns a different operator shape (createBucket instead of createCluster)
   if (type === "minio") {
@@ -180,6 +195,11 @@ export function createOperator(
           break;
         case "mariadb-operator":
           result = createMariadbDatabase(name, clusterConfig, config.backup, provider, helmRelease, tierMap);
+          break;
+        case "neo4j":
+          // Neo4j Helm chart deploys the instance directly (no CRD operator).
+          // The helmRelease IS the Neo4j deployment; createCluster wraps it.
+          result = createNeo4jCluster(name, clusterConfig as any, provider, helmRelease, tierMap);
           break;
         default:
           return assertNever(type);

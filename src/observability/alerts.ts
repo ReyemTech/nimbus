@@ -265,6 +265,21 @@ export function buildAlertmanagerConfig(
     });
   }
 
+  // Silenced routes — matched first, sent to null receiver.
+  // These are alerts that fire on managed K8s but aren't actionable.
+  const silencedRoutes = [
+    {
+      receiver: "null",
+      matchers: ['alertname=~"KubeControllerManagerDown|KubeSchedulerDown|KubeProxyDown"'],
+      continue: false,
+    },
+    {
+      receiver: "null",
+      matchers: ['alertname="TargetDown"', 'job=~".*neo4j-metrics.*"'],
+      continue: false,
+    },
+  ];
+
   return {
     config: {
       global: { resolve_timeout: "5m" },
@@ -274,7 +289,7 @@ export function buildAlertmanagerConfig(
         group_wait: "30s",
         group_interval: "5m",
         repeat_interval: "4h",
-        routes,
+        routes: [...silencedRoutes, ...routes],
       },
       receivers,
     },

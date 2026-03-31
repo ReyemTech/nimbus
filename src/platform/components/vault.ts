@@ -51,24 +51,9 @@ CA_CERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
 NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
 API="https://kubernetes.default.svc"
 
-k8s_get_secret() {
-  wget -qO- --ca-certificate="$CA_CERT" --header="Authorization: Bearer $SA_TOKEN" \\
-    "$API/api/v1/namespaces/$NAMESPACE/secrets/$1" 2>/dev/null || true
-}
-
-k8s_write_secret() {
-  local name="$1" data="$2"
-  local payload="{\\"apiVersion\\":\\"v1\\",\\"kind\\":\\"Secret\\",\\"metadata\\":{\\"name\\":\\"$name\\",\\"namespace\\":\\"$NAMESPACE\\"},\\"type\\":\\"Opaque\\",\\"stringData\\":$data}"
-  echo "$payload" > /tmp/secret.json
-  # Try create, fall back to update
-  wget -qO/dev/null --ca-certificate="$CA_CERT" --header="Authorization: Bearer $SA_TOKEN" \\
-    --header="Content-Type: application/json" --post-file=/tmp/secret.json \\
-    "$API/api/v1/namespaces/$NAMESPACE/secrets" 2>/dev/null || \\
-  wget -qO/dev/null --ca-certificate="$CA_CERT" --header="Authorization: Bearer $SA_TOKEN" \\
-    --header="Content-Type: application/json" --method=PUT --body-file=/tmp/secret.json \\
-    "$API/api/v1/namespaces/$NAMESPACE/secrets/$name" 2>/dev/null || true
-  rm -f /tmp/secret.json
-}
+# Token persistence — write to PVC so it survives pod restarts
+TOKEN_FILE="/vault/data/.bootstrap-token"
+RECOVERY_FILE="/vault/data/.bootstrap-recovery-keys"
 
 # --- Wait for Vault ---
 
@@ -101,9 +86,11 @@ if [ "$INITIALIZED" = "false" ]; then
     RECOVERY_KEYS=$(json_array "$INIT_OUTPUT" unseal_keys_b64)
   fi
 
-  # Store in K8s Secret
-  k8s_write_secret "vault-init-keys" "{\\"root-token\\":\\"$ROOT_TOKEN\\",\\"recovery-keys\\":\\"$RECOVERY_KEYS\\"}"
-  echo "Init keys stored in vault-init-keys secret"
+  # Store on PVC (survives pod restarts)
+  echo "$ROOT_TOKEN" > "$TOKEN_FILE"
+  echo "$RECOVERY_KEYS" > "$RECOVERY_FILE"
+  chmod 600 "$TOKEN_FILE" "$RECOVERY_FILE"
+  echo "Init keys stored on PVC"
 
   # Shamir: manually unseal (auto-unseal handles itself)
   if [ "$SEAL_TYPE" = "shamir" ]; then
@@ -118,17 +105,18 @@ if [ "$INITIALIZED" = "false" ]; then
 else
   echo "Vault already initialized (seal_type=$SEAL_TYPE, sealed=$SEALED)"
 
-  # Read root token from K8s Secret
-  SECRET_DATA=$(k8s_get_secret "vault-init-keys")
-  # K8s secrets are base64-encoded in .data
-  ROOT_TOKEN_B64=$(echo "$SECRET_DATA" | sed -n 's/.*"root-token"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' | head -1)
-  ROOT_TOKEN=$(echo "$ROOT_TOKEN_B64" | base64 -d 2>/dev/null || echo "$ROOT_TOKEN_B64")
+  # Read root token from PVC
+  if [ -f "$TOKEN_FILE" ]; then
+    ROOT_TOKEN=$(cat "$TOKEN_FILE")
+    echo "Root token loaded from PVC"
+  else
+    echo "WARNING: No token file found at $TOKEN_FILE"
+  fi
 
   # Shamir: unseal if sealed
-  if [ "$SEALED" = "true" ] && [ "$SEAL_TYPE" = "shamir" ]; then
+  if [ "$SEALED" = "true" ] && [ "$SEAL_TYPE" = "shamir" ] && [ -f "$RECOVERY_FILE" ]; then
     echo "Unsealing (Shamir)..."
-    RECOVERY_B64=$(echo "$SECRET_DATA" | sed -n 's/.*"recovery-keys"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' | head -1)
-    RECOVERY_KEYS=$(echo "$RECOVERY_B64" | base64 -d 2>/dev/null || echo "$RECOVERY_B64")
+    RECOVERY_KEYS=$(cat "$RECOVERY_FILE")
     for i in 1 2 3; do
       KEY=$(echo "$RECOVERY_KEYS" | cut -d',' -f$i)
       vault operator unseal "$KEY"
@@ -151,6 +139,12 @@ while [ $TRIES -lt 60 ]; do
   sleep 2
 done
 echo "Vault is unsealed"
+
+if [ -z "$VAULT_TOKEN" ]; then
+  echo "ERROR: No root token available. Cannot configure Vault."
+  echo "Create vault-init-keys secret manually with root-token field."
+  exec sleep infinity
+fi
 
 vault login "$VAULT_TOKEN" > /dev/null 2>&1
 
@@ -524,6 +518,7 @@ export function deployVault(
         env: [{ name: "VAULT_ADDR", value: "http://localhost:8200" }],
         volumeMounts: [
           { name: "bootstrap-script", mountPath: "/scripts" },
+          { name: "data", mountPath: "/vault/data" },
         ],
         resources: {
           requests: { cpu: "1m", memory: "64Mi" },

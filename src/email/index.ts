@@ -125,12 +125,12 @@ function createSesTransport(
   // IAM user for SES SMTP
   const user = new aws.iam.User(
     `${name}-ses-smtp-user`,
-    { name: `${name}-ses-smtp`, tags: { "managed-by": "nimbus" } },
+    { name: `${name}-ses-smtp`, path: "/nimbus/", tags: { "managed-by": "nimbus" } },
     providerOpts
   );
 
-  // Inline policy: ses:SendRawEmail
-  const domain = config.fromAddress.split("@")[1];
+  // Inline policy: ses:SendRawEmail on all identities in the account.
+  // SES requires permission on BOTH sender and recipient identity ARNs.
   new aws.iam.UserPolicy(
     `${name}-ses-smtp-policy`,
     {
@@ -142,7 +142,7 @@ function createSesTransport(
             {
               Effect: "Allow",
               Action: ["ses:SendRawEmail", "ses:SendEmail"],
-              Resource: `arn:aws:ses:${config.region}:*:identity/${domain}`,
+              Resource: "*",
             },
           ],
         })
@@ -166,9 +166,10 @@ function createSesTransport(
   // Optional: SES domain identity + DKIM (full mode)
   let dkimTokens: pulumi.Output<string[]> | undefined;
   if (config.mode === "full") {
+    const sesDomain = config.fromAddress.split("@")[1];
     const identity = new aws.ses.DomainIdentity(
       `${name}-ses-domain`,
-      { domain },
+      { domain: sesDomain },
       providerOpts
     );
     const dkim = new aws.ses.DomainDkim(

@@ -160,6 +160,21 @@ export {
   DNS_PROVIDERS,
 } from "./platform";
 
+// Access Gateway
+export {
+  type AccessGatewayProvider,
+  type IAccessDnsConfig,
+  type ITailscaleConfig,
+  type IWireGuardPeer,
+  type IWireGuardConfig,
+  type ITailscaleGatewayConfig,
+  type IWireGuardGatewayConfig,
+  type IAccessGatewayConfig,
+  type IAccessGateway,
+  createAccessGateway,
+  ACCESS_GATEWAY_PROVIDERS,
+} from "./access";
+
 // Global Load Balancer
 export {
   type RoutingStrategy,

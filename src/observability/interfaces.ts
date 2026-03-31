@@ -12,6 +12,7 @@ import type * as k8s from "@pulumi/kubernetes";
 import type { ICluster } from "../cluster";
 import type { StorageTier } from "../types/storage-tiers";
 import type { IEmailTransport } from "../email/interfaces";
+import type { IExposedService } from "../types";
 
 // ---------------------------------------------------------------------------
 // Alerting interfaces
@@ -47,6 +48,8 @@ export interface IAlertConfig {
 export interface IPrometheusConfig {
   /** Enable the Prometheus server. */
   readonly enabled: boolean;
+  /** Expose via access gateway (Tailscale). Default: true. */
+  readonly expose?: boolean;
   /** Data retention period. Default: "15d". */
   readonly retention?: string;
   /** Persistent volume size in GB. Default: 20. */
@@ -65,6 +68,8 @@ export interface IPrometheusConfig {
 export interface IGrafanaConfig {
   /** Enable Grafana. */
   readonly enabled: boolean;
+  /** Expose via access gateway (Tailscale). Default: true. */
+  readonly expose?: boolean;
   /** Dashboard persistence strategy. Default: "configmap". */
   readonly dashboardPersistence?: "configmap";
   /** Auto-configured datasources. Default: ["prometheus", "loki"]. */
@@ -111,6 +116,8 @@ export interface IAlloyConfig {
 export interface IAlertmanagerConfig {
   /** Enable Alertmanager. */
   readonly enabled: boolean;
+  /** Expose via access gateway (Tailscale). Default: true. */
+  readonly expose?: boolean;
   /** Ingress subdomain prefix. Default: "alertmanager". */
   readonly subdomain?: string;
   /** Helm chart version override. */
@@ -173,4 +180,6 @@ export interface IObservabilityStack {
   readonly cluster: ICluster;
   /** Map of component name to Helm release. */
   readonly components: Readonly<Record<string, k8s.helm.v3.Release>>;
+  /** Services available for access gateway exposure. */
+  readonly exposedServices: ReadonlyArray<IExposedService>;
 }

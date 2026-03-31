@@ -11,6 +11,7 @@
 import type * as pulumi from "@pulumi/pulumi";
 import type * as k8s from "@pulumi/kubernetes";
 import type { ICluster } from "../cluster";
+import type { IExposedService } from "../types";
 
 /** DNS provider for External DNS integration. */
 export type DnsProvider =
@@ -31,6 +32,8 @@ export const DNS_PROVIDERS = {
 export interface IPlatformComponentConfig {
   /** Enable or disable this component. Default: true for core components. */
   readonly enabled?: boolean;
+  /** Expose via access gateway (Tailscale). Default: true. */
+  readonly expose?: boolean;
   /** Helm chart version override. */
   readonly version?: string;
   /** Additional Helm values to merge with defaults. */
@@ -95,6 +98,8 @@ export interface IVaultConfig extends IPlatformComponentConfig {
   readonly storageSize?: string;
   /** Domain for Vault ingress (e.g., "vault.reyem.tech"). */
   readonly ingressHost?: string;
+  /** Expose via access gateway (Tailscale). Default: true. */
+  readonly expose?: boolean;
   /** Auto-unseal via cloud KMS. Creates KMS key + IAM + credentials. */
   readonly autoUnseal?: IAutoUnsealConfig;
   /** Deploy bootstrap sidecar (init, KV-v2, K8s auth, ESO policy/role). Default: true. */
@@ -174,4 +179,6 @@ export interface IPlatformStack {
   readonly cluster: ICluster;
   readonly components: Readonly<Record<string, k8s.helm.v3.Release>>;
   readonly traefikEndpoint: pulumi.Output<string>;
+  /** Services available for access gateway exposure. */
+  readonly exposedServices: ReadonlyArray<IExposedService>;
 }

@@ -69,6 +69,27 @@ export function deployTailscale(
     { provider, dependsOn: [helmRelease] }
   );
 
+  // Expose services via Tailscale — annotate K8s Services
+  if (config.tailscale.services) {
+    for (const svc of config.tailscale.services) {
+      new k8s.core.v1.ServicePatch(
+        `${name}-ts-expose-${svc.label}`,
+        {
+          metadata: {
+            name: pulumi.output(svc.name),
+            namespace: svc.namespace,
+            annotations: {
+              "pulumi.com/patchForce": "true",
+              "tailscale.com/expose": "true",
+              "tailscale.com/hostname": `${prefix}-${svc.label}`,
+            },
+          },
+        },
+        { provider, dependsOn: [helmRelease] }
+      );
+    }
+  }
+
   // Split DNS
   if (config.dns?.enabled) {
     const dns = deployAccessDns(name, prefix, config.dns, NAMESPACE, provider, [nsResource]);

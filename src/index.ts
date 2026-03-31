@@ -45,6 +45,7 @@ export {
 } from "./types";
 
 export { type StorageTier, type StorageTierMap, STORAGE_TIERS, resolveStorageTier } from "./types";
+export { type IExposedService } from "./types";
 
 // Cluster
 export type {

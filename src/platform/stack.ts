@@ -17,6 +17,7 @@ import type {
   IPlatformStack,
   IPlatformStackConfig,
 } from "./interfaces";
+import type { IExposedService } from "../types";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import {
   deployTraefik,
@@ -513,10 +514,34 @@ function deployToCluster(
       })
     : pulumi.output("pending");
 
+  // Collect exposed services
+  const exposedServices: IExposedService[] = [];
+
+  if (components["vault"] && config.vault?.expose !== false) {
+    const releaseName = components["vault"].status.apply((s) => s?.name ?? "");
+    exposedServices.push({
+      name: releaseName,
+      namespace: "vault",
+      port: 8200,
+      label: "vault",
+    });
+  }
+
+  if (components["argocd"] && config.argocd?.expose !== false) {
+    const releaseName = components["argocd"].status.apply((s) => s?.name ?? "");
+    exposedServices.push({
+      name: releaseName.apply((r) => `${r}-server`),
+      namespace: "argocd",
+      port: 80,
+      label: "argocd",
+    });
+  }
+
   return {
     name,
     cluster,
     components,
     traefikEndpoint,
+    exposedServices,
   };
 }

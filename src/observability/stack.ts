@@ -16,6 +16,7 @@ import type {
   IObservabilityStackConfig,
   IPrometheusConfig,
 } from "./interfaces";
+import type { IExposedService } from "../types";
 import { createDashboards, lokiLogsDashboard } from "./dashboards/index";
 import { resolveStorageTier } from "../types/storage-tiers";
 import { createGlobalAlertRules, buildAlertmanagerConfig } from "./alerts";
@@ -245,7 +246,43 @@ export function createObservabilityStack(
     });
   }
 
-  return { name, cluster, components };
+  // Collect exposed services — use Helm release name to derive K8s service names
+  const exposedServices: IExposedService[] = [];
+  const kpsRelease = components["kube-prometheus-stack"];
+
+  if (kpsRelease) {
+    const releaseName = kpsRelease.status.apply((s) => s?.name ?? "");
+
+    if (grafanaEnabled && config.grafana?.expose !== false) {
+      exposedServices.push({
+        name: releaseName.apply((r) => `${r}-grafana`),
+        namespace,
+        port: 80,
+        label: "grafana",
+      });
+    }
+
+    if (prometheusEnabled && config.prometheus?.expose !== false) {
+      // kube-prometheus-stack names the service <stackName>-kube-prometheus-prometheus
+      exposedServices.push({
+        name: `${name}-kube-prometheus-prometheus`,
+        namespace,
+        port: 9090,
+        label: "prometheus",
+      });
+    }
+
+    if (alertmanagerEnabled && config.alertmanager?.expose !== false) {
+      exposedServices.push({
+        name: `${name}-kube-prometheus-alertmanager`,
+        namespace,
+        port: 9093,
+        label: "alertmanager",
+      });
+    }
+  }
+
+  return { name, cluster, components, exposedServices };
 }
 
 function deployKubePrometheusStack(

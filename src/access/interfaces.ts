@@ -10,6 +10,7 @@
 import type * as pulumi from "@pulumi/pulumi";
 import type * as k8s from "@pulumi/kubernetes";
 import type { ICluster } from "../cluster";
+import type { IExposedService } from "../types";
 
 /** Access gateway provider type. */
 export type AccessGatewayProvider = "tailscale" | "wireguard";
@@ -36,8 +37,10 @@ export interface ITailscaleConfig {
   readonly oauthClientSecret: pulumi.Input<string>;
   /** Subnet routes to advertise to the tailnet (e.g., ["10.0.0.0/8"]). */
   readonly routes: ReadonlyArray<string>;
-  /** Tags for the operator node (e.g., ["tag:k8s"]). Default: ["tag:k8s"]. */
+  /** Tags for the operator node (e.g., ["tag:k8s-operator"]). Default: ["tag:k8s-operator"]. */
   readonly tags?: ReadonlyArray<string>;
+  /** Services to expose as Tailscale devices. Collect from module .exposedServices outputs. */
+  readonly services?: ReadonlyArray<IExposedService>;
   /** Tailscale Operator Helm chart version override. */
   readonly version?: string;
   /** Additional Helm values. */

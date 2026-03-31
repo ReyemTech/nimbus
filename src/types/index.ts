@@ -45,3 +45,5 @@ export {
   STORAGE_TIERS,
   resolveStorageTier,
 } from "./storage-tiers";
+
+export { type IExposedService } from "./exposed-service";

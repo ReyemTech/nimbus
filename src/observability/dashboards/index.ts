@@ -19,6 +19,7 @@ import { mariadbDashboard } from "./mariadb";
 import { neo4jDashboard } from "./neo4j";
 import { minioDashboard } from "./minio";
 import { argocdDashboard } from "./argocd";
+import { alertsDashboard } from "./alerts";
 export { lokiLogsDashboard } from "./loki";
 export { createCnpgClusterDashboard } from "./cnpg-cluster";
 export { createMariadbClusterDashboard } from "./mariadb-cluster";
@@ -188,4 +189,5 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
   createDashboardConfigMap(name, "mariadb", mariadbDashboard(), namespace, provider, dependsOn);
   createDashboardConfigMap(name, "neo4j", neo4jDashboard(), namespace, provider, dependsOn);
   createDashboardConfigMap(name, "minio", minioDashboard(), namespace, provider, dependsOn);
+  createDashboardConfigMap(name, "alerts", alertsDashboard(), namespace, provider, dependsOn);
 }

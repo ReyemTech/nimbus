@@ -24,21 +24,10 @@ export function deployTailscale(
 ): IAccessGateway {
   const provider = config.cluster.provider;
   const prefix = config.hostnamePrefix ?? name;
+  const tags = config.tailscale.tags ?? ["tag:k8s"];
   const nsResource = ensureNamespace(NAMESPACE, provider);
 
-  // Auth key secret — Tailscale Operator reads from this
-  const authSecret = new k8s.core.v1.Secret(
-    `${name}-tailscale-auth`,
-    {
-      metadata: { name: "tailscale-auth", namespace: NAMESPACE },
-      stringData: {
-        TS_AUTHKEY: config.tailscale.authKey,
-      },
-    },
-    { provider, dependsOn: [nsResource] }
-  );
-
-  // Tailscale Operator Helm chart
+  // Tailscale Operator Helm chart — uses OAuth client credentials
   const helmRelease = new k8s.helm.v3.Release(
     `${name}-tailscale-operator`,
     {
@@ -48,13 +37,19 @@ export function deployTailscale(
       namespace: NAMESPACE,
       createNamespace: false,
       values: {
-        operatorConfig: {
-          defaultTags: ["tag:k8s"],
+        oauth: {
+          clientId: config.tailscale.oauthClientId,
+          clientSecret: config.tailscale.oauthClientSecret,
         },
+        ...(tags.length > 0 && {
+          operatorConfig: {
+            defaultTags: tags,
+          },
+        }),
         ...config.tailscale.values,
       },
     },
-    { provider, dependsOn: [nsResource, authSecret] }
+    { provider, dependsOn: [nsResource] }
   );
 
   // Connector CRD — advertise subnet routes

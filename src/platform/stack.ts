@@ -14,19 +14,20 @@ import * as pulumi from "@pulumi/pulumi";
 import type { ICluster } from "../cluster";
 import { createPrometheusRule } from "../observability/alerts";
 import type {
-  IDeschedulerConfig,
-  IExternalDnsConfig,
-  IPlatformComponentConfig,
   IPlatformStack,
   IPlatformStackConfig,
-  IVaultConfig,
 } from "./interfaces";
-import { createHash } from "crypto";
-import { assertNever } from "../types";
 import { ensureNamespace } from "../utils/ensure-namespace";
-
-/** Number of Vault replicas in HA mode (Raft consensus requires odd count). */
-const VAULT_HA_REPLICAS = 3;
+import {
+  deployTraefik,
+  deployCertManager,
+  deployExternalDns,
+  deployArgocd,
+  deployVault,
+  deployExternalSecrets,
+  deployOAuth2Proxy,
+  deployDescheduler,
+} from "./components";
 
 /**
  * Default Helm chart versions. Used only when the consumer doesn't pass `version`.
@@ -92,7 +93,7 @@ function deployToCluster(
 
   // 1. Traefik (ingress controller) — enabled by default
   if (config.traefik?.enabled !== false) {
-    components["traefik"] = deployTraefik(name, config.traefik, provider, config.robotsBlock);
+    components["traefik"] = deployTraefik(name, config.traefik, provider, DEFAULT_VERSIONS.traefik, config.robotsBlock);
 
     // Traefik alert rules
     createPrometheusRule(`${name}-traefik-alerts`, "observability", [
@@ -120,7 +121,7 @@ function deployToCluster(
 
   // 2. cert-manager (TLS certificates) — enabled by default
   if (config.certManager?.enabled !== false) {
-    components["cert-manager"] = deployCertManager(name, config.certManager, provider);
+    components["cert-manager"] = deployCertManager(name, config.certManager, provider, DEFAULT_VERSIONS.certManager);
   }
 
   // 3. External DNS — enabled if configured
@@ -206,7 +207,7 @@ function deployToCluster(
       );
 
       // Deploy external-dns with env vars referencing the K8s secret
-      components["external-dns"] = deployExternalDns(name, dnsConfig, provider, [
+      components["external-dns"] = deployExternalDns(name, dnsConfig, provider, DEFAULT_VERSIONS.externalDns, [
         {
           name: "AWS_ACCESS_KEY_ID",
           valueFrom: {
@@ -257,23 +258,23 @@ function deployToCluster(
         }
       );
     } else {
-      components["external-dns"] = deployExternalDns(name, dnsConfig, provider);
+      components["external-dns"] = deployExternalDns(name, dnsConfig, provider, DEFAULT_VERSIONS.externalDns);
     }
   }
 
   // 4. ArgoCD (GitOps) — optional
   if (config.argocd?.enabled) {
-    components["argocd"] = deployArgocd(name, config.argocd, config.domain, provider);
+    components["argocd"] = deployArgocd(name, config.argocd, config.domain, provider, DEFAULT_VERSIONS.argocd);
   }
 
   // 5. Vault (secrets) — optional
   if (config.vault?.enabled) {
-    components["vault"] = deployVault(name, config.vault, config.domain, provider);
+    components["vault"] = deployVault(name, config.vault, config.domain, provider, DEFAULT_VERSIONS.vault);
   }
 
   // 6. External Secrets Operator — optional
   if (config.externalSecrets?.enabled) {
-    components["external-secrets"] = deployExternalSecrets(name, config.externalSecrets, provider);
+    components["external-secrets"] = deployExternalSecrets(name, config.externalSecrets, provider, DEFAULT_VERSIONS.externalSecrets);
   }
 
   // 7. Wildcard certificate — auto-created when cert-manager is enabled
@@ -321,7 +322,8 @@ function deployToCluster(
       name,
       config.oauth2Proxy,
       config.domain,
-      provider
+      provider,
+      DEFAULT_VERSIONS.oauth2Proxy
     );
   }
 
@@ -469,7 +471,7 @@ function deployToCluster(
 
   // 13. Descheduler — pod rebalancing for spot instances
   if (config.descheduler?.enabled) {
-    components["descheduler"] = deployDescheduler(name, config.descheduler, provider);
+    components["descheduler"] = deployDescheduler(name, config.descheduler, provider, DEFAULT_VERSIONS.descheduler);
   }
 
   // 14. ClusterSecretStore — connects ESO to Vault
@@ -517,322 +519,4 @@ function deployToCluster(
     components,
     traefikEndpoint,
   };
-}
-
-function deployTraefik(
-  name: string,
-  config: IPlatformComponentConfig | undefined,
-  provider: k8s.Provider,
-  robotsBlock?: boolean
-): k8s.helm.v3.Release {
-  return new k8s.helm.v3.Release(
-    `${name}-traefik`,
-    {
-      chart: "traefik",
-      repositoryOpts: { repo: "https://traefik.github.io/charts" },
-      version: config?.version ?? DEFAULT_VERSIONS.traefik,
-      namespace: "traefik",
-      createNamespace: true,
-      values: {
-        ingressClass: { enabled: true, isDefaultClass: true, name: "traefik" },
-        ingressRoute: {
-          dashboard: { enabled: false },
-        },
-        ports: {
-          metrics: { expose: { default: true } },
-          web: {
-            http: {
-              redirections: {
-                entryPoint: { to: "websecure", scheme: "https" },
-              },
-            },
-          },
-          ...(robotsBlock && {
-            websecure: {
-              http: { middlewares: ["traefik-robots-block@kubernetescrd"] },
-            },
-          }),
-        },
-        ...config?.values,
-      },
-    },
-    { provider }
-  );
-}
-
-function deployCertManager(
-  name: string,
-  config: IPlatformComponentConfig | undefined,
-  provider: k8s.Provider
-): k8s.helm.v3.Release {
-  return new k8s.helm.v3.Release(
-    `${name}-cert-manager`,
-    {
-      chart: "cert-manager",
-      repositoryOpts: { repo: "https://charts.jetstack.io" },
-      version: config?.version ?? DEFAULT_VERSIONS.certManager,
-      namespace: "cert-manager",
-      createNamespace: true,
-      values: {
-        crds: { enabled: true },
-        ...config?.values,
-      },
-    },
-    { provider }
-  );
-}
-
-function deployExternalDns(
-  name: string,
-  config: IExternalDnsConfig,
-  provider: k8s.Provider,
-  envOverrides?: ReadonlyArray<Record<string, unknown>>
-): k8s.helm.v3.Release {
-  const providerValues: Record<string, unknown> = {};
-
-  switch (config.dnsProvider) {
-    case "route53":
-      providerValues["provider"] = { name: "aws" };
-      break;
-    case "azure-dns":
-      providerValues["provider"] = { name: "azure" };
-      break;
-    case "cloud-dns":
-      providerValues["provider"] = { name: "google" };
-      break;
-    case "cloudflare":
-      providerValues["provider"] = { name: "cloudflare" };
-      break;
-    default:
-      assertNever(config.dnsProvider);
-  }
-
-  const values: Record<string, unknown> = {
-    ...providerValues,
-    domainFilters: config.domainFilters ?? [],
-    policy: "sync",
-    sources: ["ingress", "service", "traefik-proxy"],
-    ...config.values,
-  };
-
-  if (envOverrides) {
-    values["env"] = envOverrides;
-  }
-
-  return new k8s.helm.v3.Release(
-    `${name}-external-dns`,
-    {
-      chart: "external-dns",
-      repositoryOpts: { repo: "https://kubernetes-sigs.github.io/external-dns" },
-      version: config.version ?? DEFAULT_VERSIONS.externalDns,
-      namespace: "external-dns",
-      createNamespace: true,
-      values,
-    },
-    { provider }
-  );
-}
-
-function deployArgocd(
-  name: string,
-  config: IPlatformComponentConfig,
-  domain: string,
-  provider: k8s.Provider
-): k8s.helm.v3.Release {
-  return new k8s.helm.v3.Release(
-    `${name}-argocd`,
-    {
-      chart: "argo-cd",
-      repositoryOpts: { repo: "https://argoproj.github.io/argo-helm" },
-      version: config.version ?? DEFAULT_VERSIONS.argocd,
-      namespace: "argocd",
-      createNamespace: true,
-      values: {
-        configs: {
-          params: { "server.insecure": true },
-        },
-        server: {
-          ingress: {
-            enabled: true,
-            ingressClassName: "traefik",
-            hostname: `argocd.${domain}`,
-            tls: true,
-            extraTls: [
-              {
-                secretName: `${domain.replace(/\./g, "-")}-wildcard-tls`,
-                hosts: [`argocd.${domain}`],
-              },
-            ],
-            annotations: {
-              "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
-            },
-          },
-          metrics: { enabled: true, serviceMonitor: { enabled: true } },
-        },
-        controller: {
-          metrics: { enabled: true, serviceMonitor: { enabled: true } },
-        },
-        repoServer: {
-          metrics: { enabled: true, serviceMonitor: { enabled: true } },
-        },
-        ...config.values,
-      },
-    },
-    { provider }
-  );
-}
-
-function deployVault(
-  name: string,
-  config: IVaultConfig,
-  domain: string,
-  provider: k8s.Provider
-): k8s.helm.v3.Release {
-  const ha = config.ha ?? false;
-  const storageSize = config.storageSize ?? "5Gi";
-  const ingressHost = config.ingressHost ?? `vault.${domain}`;
-  const certName = domain.replace(/\./g, "-");
-
-  const serverValues: Record<string, unknown> = {
-    standalone: { enabled: !ha },
-    ha: ha
-      ? {
-          enabled: true,
-          replicas: VAULT_HA_REPLICAS,
-          raft: { enabled: true },
-        }
-      : { enabled: false },
-    dataStorage: { size: storageSize },
-    ingress: {
-      enabled: true,
-      ingressClassName: "traefik",
-      hosts: [{ host: ingressHost }],
-      annotations: {
-        "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
-      },
-      tls: [{ hosts: [ingressHost], secretName: `${certName}-wildcard-tls` }],
-    },
-  };
-
-  return new k8s.helm.v3.Release(
-    `${name}-vault`,
-    {
-      chart: "vault",
-      repositoryOpts: { repo: "https://helm.releases.hashicorp.com" },
-      version: config.version ?? DEFAULT_VERSIONS.vault,
-      namespace: "vault",
-      createNamespace: true,
-      values: {
-        server: serverValues,
-        injector: { enabled: true },
-        ...config.values,
-      },
-    },
-    { provider }
-  );
-}
-
-function deployExternalSecrets(
-  name: string,
-  config: IPlatformComponentConfig,
-  provider: k8s.Provider
-): k8s.helm.v3.Release {
-  return new k8s.helm.v3.Release(
-    `${name}-external-secrets`,
-    {
-      chart: "external-secrets",
-      repositoryOpts: { repo: "https://charts.external-secrets.io" },
-      version: config.version ?? DEFAULT_VERSIONS.externalSecrets,
-      namespace: "external-secrets",
-      createNamespace: true,
-      values: {
-        crds: { createClusterExternalSecret: true, createClusterSecretStore: true },
-        ...config.values,
-      },
-    },
-    { provider }
-  );
-}
-
-function deployOAuth2Proxy(
-  name: string,
-  config: IPlatformComponentConfig & {
-    readonly provider: "google" | "github" | "azure";
-    readonly clientId: pulumi.Input<string>;
-    readonly clientSecret: pulumi.Input<string>;
-  },
-  domain: string,
-  provider: k8s.Provider
-): k8s.helm.v3.Release {
-  // Generate a deterministic cookie secret from the stack name via SHA-256.
-  // In production, override via config.values.config.cookieSecret.
-  const cookieSecret = pulumi.output(name).apply((n) => {
-    return createHash("sha256").update(`${n}-oauth2-proxy-cookie`).digest("base64").slice(0, 32);
-  });
-
-  return new k8s.helm.v3.Release(
-    `${name}-oauth2-proxy`,
-    {
-      chart: "oauth2-proxy",
-      repositoryOpts: { repo: "https://oauth2-proxy.github.io/manifests" },
-      version: config.version ?? DEFAULT_VERSIONS.oauth2Proxy,
-      namespace: "traefik",
-      createNamespace: true,
-      values: {
-        config: {
-          clientID: config.clientId,
-          clientSecret: config.clientSecret,
-          cookieSecret,
-        },
-        extraArgs: {
-          provider: config.provider,
-          "email-domain": "*",
-          "cookie-secure": "true",
-          upstream: "static://202",
-          "reverse-proxy": "true",
-          "set-xauthrequest": "true",
-          "cookie-domain": `.${domain}`,
-          "whitelist-domain": `.${domain}`,
-        },
-        service: { portNumber: 4180 },
-        ...config.values,
-      },
-    },
-    { provider }
-  );
-}
-
-function deployDescheduler(
-  name: string,
-  config: IDeschedulerConfig,
-  provider: k8s.Provider
-): k8s.helm.v3.Release {
-  const strategies = config.strategies ?? [
-    "RemoveDuplicates",
-    "LowNodeUtilization",
-    "RemovePodsViolatingNodeAffinity",
-  ];
-
-  const strategyValues: Record<string, { enabled: boolean }> = {};
-  for (const strategy of strategies) {
-    strategyValues[strategy] = { enabled: true };
-  }
-
-  return new k8s.helm.v3.Release(
-    `${name}-descheduler`,
-    {
-      chart: "descheduler",
-      repositoryOpts: {
-        repo: "https://kubernetes-sigs.github.io/descheduler",
-      },
-      version: config.version ?? DEFAULT_VERSIONS.descheduler,
-      namespace: "kube-system",
-      createNamespace: false,
-      values: {
-        deschedulerPolicy: { strategies: strategyValues },
-        ...config.values,
-      },
-    },
-    { provider }
-  );
 }

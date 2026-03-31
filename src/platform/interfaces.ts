@@ -53,6 +53,40 @@ export interface IExternalDnsConfig extends IPlatformComponentConfig {
   readonly domainFilters?: ReadonlyArray<string>;
 }
 
+/** AWS KMS auto-unseal configuration. */
+export interface IAwsKmsUnsealConfig {
+  readonly provider: "awskms";
+  /** AWS region for the KMS key. */
+  readonly region: string;
+  /** Explicit AWS provider for KMS + IAM resources. */
+  readonly awsProvider: pulumi.ProviderResource;
+  /** Use an existing KMS key instead of creating one. */
+  readonly kmsKeyId?: pulumi.Input<string>;
+}
+
+/** Azure Key Vault auto-unseal configuration (not yet implemented). */
+export interface IAzureKeyVaultUnsealConfig {
+  readonly provider: "azurekeyvault";
+  readonly tenantId: pulumi.Input<string>;
+  readonly vaultName: pulumi.Input<string>;
+  readonly keyName: pulumi.Input<string>;
+}
+
+/** GCP Cloud KMS auto-unseal configuration (not yet implemented). */
+export interface IGcpCkmsUnsealConfig {
+  readonly provider: "gcpckms";
+  readonly project: pulumi.Input<string>;
+  readonly region: string;
+  readonly keyRing: pulumi.Input<string>;
+  readonly cryptoKey: pulumi.Input<string>;
+}
+
+/** Auto-unseal configuration — discriminated union on provider. */
+export type IAutoUnsealConfig =
+  | IAwsKmsUnsealConfig
+  | IAzureKeyVaultUnsealConfig
+  | IGcpCkmsUnsealConfig;
+
 /** Vault component configuration. */
 export interface IVaultConfig extends IPlatformComponentConfig {
   /** Enable HA mode. Default: false (single node). */
@@ -61,6 +95,10 @@ export interface IVaultConfig extends IPlatformComponentConfig {
   readonly storageSize?: string;
   /** Domain for Vault ingress (e.g., "vault.reyem.tech"). */
   readonly ingressHost?: string;
+  /** Auto-unseal via cloud KMS. Creates KMS key + IAM + credentials. */
+  readonly autoUnseal?: IAutoUnsealConfig;
+  /** Deploy bootstrap sidecar (init, KV-v2, K8s auth, ESO policy/role). Default: true. */
+  readonly bootstrap?: boolean;
 }
 
 /** Image pull secret configuration for private registries. */

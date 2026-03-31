@@ -273,11 +273,6 @@ export function buildAlertmanagerConfig(
       matchers: ['alertname=~"KubeControllerManagerDown|KubeSchedulerDown|KubeProxyDown"'],
       continue: false,
     },
-    {
-      receiver: "null",
-      matchers: ['alertname="TargetDown"', 'job=~".*neo4j-metrics.*"'],
-      continue: false,
-    },
   ];
 
   return {

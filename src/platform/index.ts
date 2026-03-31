@@ -9,6 +9,10 @@ export type {
   IPlatformComponentConfig,
   IExternalDnsConfig,
   IVaultConfig,
+  IAutoUnsealConfig,
+  IAwsKmsUnsealConfig,
+  IAzureKeyVaultUnsealConfig,
+  IGcpCkmsUnsealConfig,
   IPlatformStackConfig,
   IPlatformStack,
 } from "./interfaces";

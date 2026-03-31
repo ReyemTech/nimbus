@@ -146,25 +146,6 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
     { provider, dependsOn }
   );
 
-  // Neo4j (metrics on :2004/metrics in data namespace — Enterprise only, pre-configured for upgrade)
-  new k8s.apiextensions.CustomResource(
-    `${name}-pm-neo4j`,
-    {
-      apiVersion: "monitoring.coreos.com/v1",
-      kind: "PodMonitor",
-      metadata: { name: "neo4j-metrics", namespace, labels: { release: name } },
-      spec: {
-        namespaceSelector: { matchNames: ["data"] },
-        selector: { matchLabels: { "helm.neo4j.com/pod_category": "neo4j-instance" } },
-        podMetricsEndpoints: [
-          // Port 2004 (tcp-prometheus) — Enterprise only. Preconfigured for upgrade.
-          { port: "tcp-prometheus", path: "/metrics", interval: "30s" },
-        ],
-      },
-    },
-    { provider, dependsOn }
-  );
-
   // --- Dashboard ConfigMaps ---
 
   createDashboardConfigMap(

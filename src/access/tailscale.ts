@@ -11,6 +11,7 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type { ITailscaleGatewayConfig, IAccessGateway } from "./interfaces";
 import { deployAccessDns } from "./dns";
+import { deployAccessProxy } from "./proxy";
 import { TailscaleSplitDns } from "./tailscale-dns";
 import { ensureNamespace } from "../utils/ensure-namespace";
 
@@ -90,6 +91,13 @@ export function deployTailscale(
         { provider, dependsOn: [helmRelease] }
       );
     }
+  }
+
+  // Reverse proxy — port 80 access to all exposed services
+  if (config.tailscale.services && config.tailscale.services.length > 0 && config.dns?.enabled) {
+    const tld = config.dns.tld ?? "internal";
+    const dnsSuffix = `${prefix}.${tld}`;
+    deployAccessProxy(name, config.tailscale.services, dnsSuffix, NAMESPACE, provider, [nsResource]);
   }
 
   // Split DNS — deploy CoreDNS + configure Tailscale API

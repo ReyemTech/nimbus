@@ -30,7 +30,7 @@ function buildCorefile(prefix: string, tld: string): string {
   const prefixEsc = prefix.replace(/\./g, "\\.");
   const tldEsc = tld.replace(/\./g, "\\.");
   return `${zone}:53 {
-    rewrite name regex ([a-z0-9-]+)\\.${prefixEsc}\\.${tldEsc} {1}.access.svc.cluster.local answer auto
+    rewrite name regex ([a-z0-9-]+)\\.${prefixEsc}\\.${tldEsc} access-proxy.access.svc.cluster.local answer auto
     forward . /etc/resolv.conf
     cache 60
     errors

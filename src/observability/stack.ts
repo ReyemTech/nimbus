@@ -17,7 +17,6 @@ import type {
   IPrometheusConfig,
 } from "./interfaces";
 import type { IExposedService } from "../types";
-import { createServiceAlias } from "../utils/service-alias";
 import { createDashboards, lokiLogsDashboard } from "./dashboards/index";
 import { resolveStorageTier } from "../types/storage-tiers";
 import { createGlobalAlertRules, buildAlertmanagerConfig } from "./alerts";
@@ -256,19 +255,16 @@ export function createObservabilityStack(
 
     if (grafanaEnabled && config.grafana?.expose !== false) {
       const originalName = releaseName.apply((r) => `${r}-grafana`);
-      createServiceAlias(`${name}-alias-grafana`, "grafana", originalName, namespace, "access", provider, [kpsRelease]);
       exposedServices.push({ name: "grafana", originalName, namespace, port: 80, label: "grafana" });
     }
 
     if (prometheusEnabled && config.prometheus?.expose !== false) {
       const originalName = `${name}-kube-prometheus-prometheus`;
-      createServiceAlias(`${name}-alias-prometheus`, "prometheus", originalName, namespace, "access", provider, [kpsRelease]);
       exposedServices.push({ name: "prometheus", originalName, namespace, port: 9090, label: "prometheus" });
     }
 
     if (alertmanagerEnabled && config.alertmanager?.expose !== false) {
       const originalName = `${name}-kube-prometheus-alertmanager`;
-      createServiceAlias(`${name}-alias-alertmanager`, "alertmanager", originalName, namespace, "access", provider, [kpsRelease]);
       exposedServices.push({ name: "alertmanager", originalName, namespace, port: 9093, label: "alertmanager" });
     }
   }

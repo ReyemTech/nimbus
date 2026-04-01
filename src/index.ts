@@ -188,6 +188,25 @@ export {
   ACCESS_GATEWAY_PROVIDERS,
 } from "./access";
 
+// ArgoCD
+export {
+  type ArgoRepoType,
+  type IArgoRepoConfig,
+  type IArgoRepoRef,
+  type IArgoAppSource,
+  type IArgoSyncPolicy,
+  type IArgoProjectConfig,
+  type IArgoAppConfig,
+  type IArgoSecretsConfig,
+  type IArgoAppSecrets,
+  type IArgoCDConfig,
+  ArgoCD,
+  ArgoProject,
+  ArgoApp,
+  createArgoCD,
+  createAppSecrets,
+} from "./argocd";
+
 // Global Load Balancer
 export {
   type RoutingStrategy,

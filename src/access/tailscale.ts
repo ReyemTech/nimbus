@@ -11,6 +11,7 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type { ITailscaleGatewayConfig, IAccessGateway } from "./interfaces";
 import { deployAccessDns } from "./dns";
+import { TailscaleSplitDns } from "./tailscale-dns";
 import { ensureNamespace } from "../utils/ensure-namespace";
 
 const NAMESPACE = "access";
@@ -90,16 +91,20 @@ export function deployTailscale(
     }
   }
 
-  // Split DNS
+  // Split DNS — deploy CoreDNS + configure Tailscale API
   if (config.dns?.enabled) {
     const dns = deployAccessDns(name, prefix, config.dns, NAMESPACE, provider, [nsResource]);
-    dns.clusterIp.apply((ip) =>
-      pulumi.log.info(
-        `Access DNS deployed. Configure Tailscale split DNS:\n` +
-          `  Nameserver: ${ip}\n` +
-          `  Domain: ${dns.zone}`,
-        helmRelease
-      )
+
+    // Automatically configure Tailscale split DNS via API
+    new TailscaleSplitDns(
+      `${name}-tailscale-split-dns`,
+      {
+        oauthClientId: config.tailscale.oauthClientId,
+        oauthClientSecret: config.tailscale.oauthClientSecret,
+        domain: dns.zone,
+        nameservers: [dns.clusterIp],
+      },
+      { dependsOn: [helmRelease] }
     );
   }
 

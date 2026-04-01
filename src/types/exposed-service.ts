@@ -8,8 +8,10 @@ import type * as pulumi from "@pulumi/pulumi";
 
 /** A Kubernetes service that can be exposed to the access gateway. */
 export interface IExposedService {
-  /** K8s service name (may be an Output when derived from Helm release names). */
+  /** Clean alias name used for DNS (e.g., "grafana"). */
   readonly name: string | pulumi.Output<string>;
+  /** Original Helm-managed service name for Tailscale annotation. */
+  readonly originalName?: string | pulumi.Output<string>;
   /** K8s namespace. */
   readonly namespace: string;
   /** Primary port number. */

@@ -18,6 +18,7 @@ import type {
   IPlatformStackConfig,
 } from "./interfaces";
 import type { IExposedService } from "../types";
+import { createServiceAlias } from "../utils/service-alias";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import {
   deployTraefik,
@@ -518,23 +519,16 @@ function deployToCluster(
   const exposedServices: IExposedService[] = [];
 
   if (components["vault"] && config.vault?.expose !== false) {
-    const releaseName = components["vault"].status.apply((s) => s?.name ?? "");
-    exposedServices.push({
-      name: releaseName,
-      namespace: "vault",
-      port: 8200,
-      label: "vault",
-    });
+    const originalName = components["vault"].status.apply((s) => s?.name ?? "");
+    createServiceAlias(`${name}-alias-vault`, "vault", originalName, "vault", provider, [components["vault"]]);
+    exposedServices.push({ name: "vault", originalName, namespace: "vault", port: 8200, label: "vault" });
   }
 
   if (components["argocd"] && config.argocd?.expose !== false) {
-    const releaseName = components["argocd"].status.apply((s) => s?.name ?? "");
-    exposedServices.push({
-      name: releaseName.apply((r) => `${r}-server`),
-      namespace: "argocd",
-      port: 80,
-      label: "argocd",
-    });
+    const originalName = components["argocd"].status.apply((s) => s?.name ?? "");
+    const serverName = originalName.apply((r) => `${r}-server`);
+    createServiceAlias(`${name}-alias-argocd`, "argocd", serverName, "argocd", provider, [components["argocd"]]);
+    exposedServices.push({ name: "argocd", originalName: serverName, namespace: "argocd", port: 80, label: "argocd" });
   }
 
   return {

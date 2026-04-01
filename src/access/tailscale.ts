@@ -70,14 +70,15 @@ export function deployTailscale(
     { provider, dependsOn: [helmRelease] }
   );
 
-  // Expose services via Tailscale — annotate K8s Services
+  // Expose services via Tailscale — annotate original K8s Services (not aliases)
   if (config.tailscale.services) {
     for (const svc of config.tailscale.services) {
+      const targetName = svc.originalName ?? svc.name;
       new k8s.core.v1.ServicePatch(
         `${name}-ts-expose-${svc.label}`,
         {
           metadata: {
-            name: pulumi.output(svc.name),
+            name: pulumi.output(targetName),
             namespace: svc.namespace,
             annotations: {
               "pulumi.com/patchForce": "true",

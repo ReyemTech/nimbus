@@ -17,6 +17,7 @@ import type {
   IPrometheusConfig,
 } from "./interfaces";
 import type { IExposedService } from "../types";
+import { createServiceAlias } from "../utils/service-alias";
 import { createDashboards, lokiLogsDashboard } from "./dashboards/index";
 import { resolveStorageTier } from "../types/storage-tiers";
 import { createGlobalAlertRules, buildAlertmanagerConfig } from "./alerts";
@@ -254,31 +255,21 @@ export function createObservabilityStack(
     const releaseName = kpsRelease.status.apply((s) => s?.name ?? "");
 
     if (grafanaEnabled && config.grafana?.expose !== false) {
-      exposedServices.push({
-        name: releaseName.apply((r) => `${r}-grafana`),
-        namespace,
-        port: 80,
-        label: "grafana",
-      });
+      const originalName = releaseName.apply((r) => `${r}-grafana`);
+      createServiceAlias(`${name}-alias-grafana`, "grafana", originalName, namespace, provider, [kpsRelease]);
+      exposedServices.push({ name: "grafana", originalName, namespace, port: 80, label: "grafana" });
     }
 
     if (prometheusEnabled && config.prometheus?.expose !== false) {
-      // kube-prometheus-stack names the service <stackName>-kube-prometheus-prometheus
-      exposedServices.push({
-        name: `${name}-kube-prometheus-prometheus`,
-        namespace,
-        port: 9090,
-        label: "prometheus",
-      });
+      const originalName = `${name}-kube-prometheus-prometheus`;
+      createServiceAlias(`${name}-alias-prometheus`, "prometheus", originalName, namespace, provider, [kpsRelease]);
+      exposedServices.push({ name: "prometheus", originalName, namespace, port: 9090, label: "prometheus" });
     }
 
     if (alertmanagerEnabled && config.alertmanager?.expose !== false) {
-      exposedServices.push({
-        name: `${name}-kube-prometheus-alertmanager`,
-        namespace,
-        port: 9093,
-        label: "alertmanager",
-      });
+      const originalName = `${name}-kube-prometheus-alertmanager`;
+      createServiceAlias(`${name}-alias-alertmanager`, "alertmanager", originalName, namespace, provider, [kpsRelease]);
+      exposedServices.push({ name: "alertmanager", originalName, namespace, port: 9093, label: "alertmanager" });
     }
   }
 

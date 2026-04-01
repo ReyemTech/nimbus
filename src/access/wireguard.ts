@@ -100,7 +100,7 @@ export function deployWireGuard(
   // Split DNS
   let dnsClusterIp: pulumi.Output<string> | undefined;
   if (config.dns?.enabled) {
-    const dns = deployAccessDns(name, prefix, config.dns, NAMESPACE, k8sProvider, [nsResource]);
+    const dns = deployAccessDns(name, prefix, config.dns, NAMESPACE, k8sProvider, [], [nsResource]);
     dnsClusterIp = dns.clusterIp;
   }
 

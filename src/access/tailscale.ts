@@ -102,7 +102,7 @@ export function deployTailscale(
 
   // Split DNS — deploy CoreDNS + configure Tailscale API
   if (config.dns?.enabled) {
-    const dns = deployAccessDns(name, prefix, config.dns, NAMESPACE, provider, [nsResource]);
+    const dns = deployAccessDns(name, prefix, config.dns, NAMESPACE, provider, config.tailscale.services ?? [], [nsResource]);
 
     // Automatically configure Tailscale split DNS via API
     new TailscaleSplitDns(

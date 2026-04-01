@@ -1,8 +1,9 @@
 /**
  * Shared split DNS for access gateway providers.
  *
- * Deploys a CoreDNS instance that resolves
- * <service>.<namespace>.<prefix>.<tld> → cluster service IPs.
+ * Two resolution paths:
+ * - Web services (proxied): grafana.iad-1.internal → Nginx proxy (port 80)
+ * - Data services (direct): mariadb-main.data.iad-1.internal → ClusterIP (native port)
  *
  * @module access/dns
  */
@@ -10,6 +11,7 @@
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type { IAccessDnsConfig } from "./interfaces";
+import type { IExposedService } from "../types";
 
 /** CoreDNS deployment output. */
 export interface IAccessDns {
@@ -19,28 +21,49 @@ export interface IAccessDns {
 }
 
 /**
- * Build CoreDNS Corefile for the access gateway zone.
+ * Build CoreDNS Corefile with two resolution paths:
  *
- * Rewrites <svc>.<ns>.<prefix>.<tld> → <svc>.<ns>.svc.cluster.local
- * via the template plugin, then forwards to cluster DNS.
+ * 1. Per-service rewrites for proxied web services:
+ *    grafana.iad-1.internal → access-proxy.access.svc.cluster.local
+ *
+ * 2. Catch-all regex for direct access (with namespace):
+ *    mariadb-main.data.iad-1.internal → mariadb-main.data.svc.cluster.local
  */
-function buildCorefile(prefix: string, tld: string): string {
+function buildCorefile(
+  prefix: string,
+  tld: string,
+  proxiedServices: ReadonlyArray<IExposedService>
+): pulumi.Output<string> {
   const zone = `${prefix}.${tld}`;
-  // Escape dots for regex
   const prefixEsc = prefix.replace(/\./g, "\\.");
   const tldEsc = tld.replace(/\./g, "\\.");
-  return `${zone}:53 {
-    rewrite name regex ([a-z0-9-]+)\\.${prefixEsc}\\.${tldEsc} access-proxy.access.svc.cluster.local answer auto
+
+  // Build per-service rewrite rules for proxied services
+  const proxyRewrites = proxiedServices.map(
+    (svc) => `    rewrite name ${svc.label}.${prefix}.${tld} access-proxy.access.svc.cluster.local answer auto`
+  );
+
+  return pulumi.output(proxyRewrites).apply((rewrites) =>
+    `${zone}:53 {
+    # Proxied web services → Nginx reverse proxy (port 80)
+${rewrites.join("\n")}
+
+    # Direct access: <service>.<namespace>.iad-1.internal → <service>.<namespace>.svc.cluster.local
+    rewrite name regex ([a-z0-9-]+)\\.([a-z0-9-]+)\\.${prefixEsc}\\.${tldEsc} {1}.{2}.svc.cluster.local answer auto
+
     forward . /etc/resolv.conf
     cache 60
     errors
     log
 }
-`;
+`
+  );
 }
 
 /**
  * Deploy CoreDNS for access gateway split DNS.
+ *
+ * @param proxiedServices - Services routed through the Nginx proxy (web UIs)
  */
 export function deployAccessDns(
   name: string,
@@ -48,6 +71,7 @@ export function deployAccessDns(
   dnsConfig: IAccessDnsConfig,
   namespace: string,
   provider: k8s.Provider,
+  proxiedServices: ReadonlyArray<IExposedService>,
   dependsOn?: pulumi.Resource[]
 ): IAccessDns {
   const tld = dnsConfig.tld ?? "internal";
@@ -57,7 +81,7 @@ export function deployAccessDns(
     `${name}-access-dns-corefile`,
     {
       metadata: { name: "access-dns-corefile", namespace },
-      data: { Corefile: buildCorefile(prefix, tld) },
+      data: { Corefile: buildCorefile(prefix, tld, proxiedServices) },
     },
     { provider, dependsOn }
   );

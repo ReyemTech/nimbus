@@ -520,14 +520,14 @@ function deployToCluster(
 
   if (components["vault"] && config.vault?.expose !== false) {
     const originalName = components["vault"].status.apply((s) => s?.name ?? "");
-    createServiceAlias(`${name}-alias-vault`, "vault", originalName, "vault", provider, [components["vault"]]);
+    createServiceAlias(`${name}-alias-vault`, "vault", originalName, "vault", "access", provider, [components["vault"]]);
     exposedServices.push({ name: "vault", originalName, namespace: "vault", port: 8200, label: "vault" });
   }
 
   if (components["argocd"] && config.argocd?.expose !== false) {
     const originalName = components["argocd"].status.apply((s) => s?.name ?? "");
     const serverName = originalName.apply((r) => `${r}-server`);
-    createServiceAlias(`${name}-alias-argocd`, "argocd", serverName, "argocd", provider, [components["argocd"]]);
+    createServiceAlias(`${name}-alias-argocd`, "argocd", serverName, "argocd", "access", provider, [components["argocd"]]);
     exposedServices.push({ name: "argocd", originalName: serverName, namespace: "argocd", port: 80, label: "argocd" });
   }
 

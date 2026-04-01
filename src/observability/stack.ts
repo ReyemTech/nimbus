@@ -256,19 +256,19 @@ export function createObservabilityStack(
 
     if (grafanaEnabled && config.grafana?.expose !== false) {
       const originalName = releaseName.apply((r) => `${r}-grafana`);
-      createServiceAlias(`${name}-alias-grafana`, "grafana", originalName, namespace, provider, [kpsRelease]);
+      createServiceAlias(`${name}-alias-grafana`, "grafana", originalName, namespace, "access", provider, [kpsRelease]);
       exposedServices.push({ name: "grafana", originalName, namespace, port: 80, label: "grafana" });
     }
 
     if (prometheusEnabled && config.prometheus?.expose !== false) {
       const originalName = `${name}-kube-prometheus-prometheus`;
-      createServiceAlias(`${name}-alias-prometheus`, "prometheus", originalName, namespace, provider, [kpsRelease]);
+      createServiceAlias(`${name}-alias-prometheus`, "prometheus", originalName, namespace, "access", provider, [kpsRelease]);
       exposedServices.push({ name: "prometheus", originalName, namespace, port: 9090, label: "prometheus" });
     }
 
     if (alertmanagerEnabled && config.alertmanager?.expose !== false) {
       const originalName = `${name}-kube-prometheus-alertmanager`;
-      createServiceAlias(`${name}-alias-alertmanager`, "alertmanager", originalName, namespace, provider, [kpsRelease]);
+      createServiceAlias(`${name}-alias-alertmanager`, "alertmanager", originalName, namespace, "access", provider, [kpsRelease]);
       exposedServices.push({ name: "alertmanager", originalName, namespace, port: 9093, label: "alertmanager" });
     }
   }

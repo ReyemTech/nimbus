@@ -317,14 +317,18 @@ function deployKubePrometheusStack(
         },
       },
     };
+    // Disable public ingress when exposed via access gateway (expose defaults to true)
+    const promIngressEnabled = prometheus?.expose === false;
     prometheusValues["ingress"] = {
-      enabled: true,
-      ingressClassName: "traefik",
-      hosts: [`${promSubdomain}.${domain}`],
-      annotations: {
-        "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
-      },
-      tls: [{ secretName: tlsSecretName, hosts: [`${promSubdomain}.${domain}`] }],
+      enabled: promIngressEnabled,
+      ...(promIngressEnabled && {
+        ingressClassName: "traefik",
+        hosts: [`${promSubdomain}.${domain}`],
+        annotations: {
+          "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+        },
+        tls: [{ secretName: tlsSecretName, hosts: [`${promSubdomain}.${domain}`] }],
+      }),
     };
   }
 
@@ -397,14 +401,17 @@ function deployKubePrometheusStack(
   };
   if (alertmanager?.enabled) {
     const amSubdomain = alertmanager.subdomain ?? "alertmanager";
+    const amIngressEnabled = alertmanager?.expose === false;
     alertmanagerValues["ingress"] = {
-      enabled: true,
-      ingressClassName: "traefik",
-      hosts: [`${amSubdomain}.${domain}`],
-      annotations: {
-        "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
-      },
-      tls: [{ secretName: tlsSecretName, hosts: [`${amSubdomain}.${domain}`] }],
+      enabled: amIngressEnabled,
+      ...(amIngressEnabled && {
+        ingressClassName: "traefik",
+        hosts: [`${amSubdomain}.${domain}`],
+        annotations: {
+          "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+        },
+        tls: [{ secretName: tlsSecretName, hosts: [`${amSubdomain}.${domain}`] }],
+      }),
     };
   }
 

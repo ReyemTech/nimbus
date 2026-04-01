@@ -317,8 +317,8 @@ function deployToCluster(
     );
   }
 
-  // 9. OAuth2 Proxy — optional, protects dashboards
-  if (config.oauth2Proxy?.enabled) {
+  // 9. OAuth2 Proxy — only needed when dashboards are NOT exposed via Tailscale
+  if (config.oauth2Proxy?.enabled && config.traefik?.expose === false) {
     components["oauth2-proxy"] = deployOAuth2Proxy(
       name,
       config.oauth2Proxy,
@@ -329,6 +329,7 @@ function deployToCluster(
   }
 
   // 10. OAuth2 Proxy ingress + Traefik dashboard IngressRoute
+  // Skip when exposed via Tailscale (default)
   if (components["traefik"] && components["oauth2-proxy"]) {
     // OAuth2 callback ingress
     new k8s.networking.v1.Ingress(
@@ -516,6 +517,11 @@ function deployToCluster(
 
   // Collect exposed services
   const exposedServices: IExposedService[] = [];
+
+  if (components["traefik"] && config.traefik?.expose !== false) {
+    const originalName = components["traefik"].status.apply((s) => s?.name ?? "");
+    exposedServices.push({ name: "traefik", originalName, namespace: "traefik", port: 9100, label: "traefik" });
+  }
 
   if (components["vault"] && config.vault?.expose !== false) {
     const originalName = components["vault"].status.apply((s) => s?.name ?? "");

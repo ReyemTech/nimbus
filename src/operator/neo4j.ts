@@ -243,6 +243,18 @@ export function createNeo4jCluster(
                 },
                 spec: {
                   restartPolicy: "Never",
+                  affinity: {
+                    podAffinity: {
+                      requiredDuringSchedulingIgnoredDuringExecution: [
+                        {
+                          labelSelector: {
+                            matchLabels: { app: name },
+                          },
+                          topologyKey: "kubernetes.io/hostname",
+                        },
+                      ],
+                    },
+                  },
                   containers: [
                     {
                       name: "neo4j-backup",

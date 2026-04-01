@@ -205,6 +205,8 @@ export {
   ArgoApp,
   createArgoCD,
   createAppSecrets,
+  createExternalSecrets,
+  type IExternalSecretsConfig,
 } from "./argocd";
 
 // Global Load Balancer

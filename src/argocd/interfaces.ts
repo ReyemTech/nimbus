@@ -153,6 +153,33 @@ export interface IArgoAppSecrets {
 }
 
 // ---------------------------------------------------------------------------
+// External Secrets (ESO)
+// ---------------------------------------------------------------------------
+
+/** Individual secret key mapping: Vault path + property → K8s Secret key. */
+export interface IExternalSecretDataRef {
+  readonly key: string;
+  readonly property?: string;
+}
+
+/** Bulk pull: all keys from a Vault path. */
+export interface IExternalSecretDataFromRef {
+  readonly key: string;
+}
+
+/** ExternalSecret configuration. */
+export interface IExternalSecretsConfig {
+  /** Individual key mappings (K8s Secret key → Vault remoteRef). */
+  readonly data?: Record<string, IExternalSecretDataRef>;
+  /** Bulk pull all keys from Vault paths. */
+  readonly dataFrom?: ReadonlyArray<IExternalSecretDataFromRef>;
+  /** ClusterSecretStore name. Default: "vault-backend". */
+  readonly store?: string;
+  /** Refresh interval. Default: "1h". */
+  readonly refreshInterval?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Refs (returned by registry lookups)
 // ---------------------------------------------------------------------------
 

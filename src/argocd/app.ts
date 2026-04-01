@@ -14,10 +14,12 @@ import type {
   IArgoSecretsConfig,
   IArgoAppSecrets,
   IArgoRepoRef,
+  IExternalSecretsConfig,
 } from "./interfaces";
 import type { IExposedService } from "../types";
 import type { ICluster } from "../cluster";
 import { createAppSecrets } from "./secrets";
+import { createExternalSecrets } from "./external-secrets";
 import { createArgoAppDashboard } from "../observability/dashboards/argocd-app";
 
 const ARGOCD_NAMESPACE = "argocd";
@@ -165,6 +167,15 @@ export class ArgoApp {
   /** Create K8s Secret with typed refs for Helm values. */
   createSecrets(name: string, config: IArgoSecretsConfig): IArgoAppSecrets {
     return createAppSecrets(name, {
+      namespace: this.namespace,
+      cluster: this.cluster,
+      secrets: config,
+    });
+  }
+
+  /** Create ExternalSecret CRD that ESO syncs from Vault to a K8s Secret. */
+  createExternalSecrets(name: string, config: IExternalSecretsConfig): IArgoAppSecrets {
+    return createExternalSecrets(name, {
       namespace: this.namespace,
       cluster: this.cluster,
       secrets: config,

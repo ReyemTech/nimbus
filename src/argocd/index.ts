@@ -11,6 +11,7 @@ export { ArgoCD } from "./argocd";
 export { ArgoProject } from "./project";
 export { ArgoApp } from "./app";
 export { createAppSecrets } from "./secrets";
+export { createExternalSecrets } from "./external-secrets";
 
 export type {
   ArgoRepoType,
@@ -30,6 +31,9 @@ export type {
   IArgoSecretsConfig,
   IArgoAppSecrets,
   IArgoCDConfig,
+  IExternalSecretsConfig,
+  IExternalSecretDataRef,
+  IExternalSecretDataFromRef,
 } from "./interfaces";
 
 /**

@@ -100,7 +100,10 @@ function buildNeo4jHelmValues(
     },
     config: neo4jConfig,
     // Default to ClusterIP (no public exposure)
-    services: { default: { type: "ClusterIP" } },
+    services: {
+      default: { type: "ClusterIP" },
+      neo4j: { enabled: false },
+    },
   };
 
   if (config?.apoc !== false) {

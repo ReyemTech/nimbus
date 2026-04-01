@@ -39,8 +39,9 @@ function buildCorefile(
   const tldEsc = tld.replace(/\./g, "\\.");
 
   // Build per-service rewrite rules for proxied services
+  // CoreDNS exact name rewrite: rewrite name exact <from> <to>
   const proxyRewrites = proxiedServices.map(
-    (svc) => `    rewrite name ${svc.label}.${prefix}.${tld} access-proxy.access.svc.cluster.local answer auto`
+    (svc) => `    rewrite name exact ${svc.label}.${prefix}.${tld} access-proxy.access.svc.cluster.local`
   );
 
   return pulumi.output(proxyRewrites).apply((rewrites) =>

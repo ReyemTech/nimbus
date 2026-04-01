@@ -1,8 +1,8 @@
 /**
  * Per-app Grafana dashboard — auto-generated for each ArgoCD Application.
  *
- * Filtered by app.kubernetes.io/instance=<appName>.
- * Shows: ArgoCD sync status, pods, CPU/memory, PVCs.
+ * Filtered by namespace (more reliable than app labels).
+ * Shows: ArgoCD sync status, pods, CPU/memory, PVCs, container restarts.
  *
  * @module observability/dashboards/argocd-app
  */
@@ -15,8 +15,8 @@ const OBSERVABILITY_NAMESPACE = "observability";
 /**
  * Generate a Grafana dashboard JSON for a specific ArgoCD app.
  */
-function argoAppDashboardJson(appName: string): Record<string, unknown> {
-  const label = `app_kubernetes_io_instance="${appName}"`;
+function argoAppDashboardJson(appName: string, namespace: string): Record<string, unknown> {
+  const nsFilter = `namespace="${namespace}"`;
 
   return {
     uid: `nimbus-app-${appName}`,
@@ -63,7 +63,7 @@ function argoAppDashboardJson(appName: string): Record<string, unknown> {
         gridPos: { h: 8, w: 24, x: 0, y: 4 },
         datasource: PROM_DS,
         targets: [
-          { expr: `kube_pod_info{${label}}`, refId: "A", format: "table", instant: true },
+          { expr: `kube_pod_info{${nsFilter}}`, refId: "A", format: "table", instant: true },
         ],
       },
       // Row 3: CPU + Memory
@@ -74,7 +74,7 @@ function argoAppDashboardJson(appName: string): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 0, y: 12 },
         datasource: PROM_DS,
         targets: [
-          { expr: `sum(rate(container_cpu_usage_seconds_total{${label}}[5m])) by (pod)`, refId: "A", legendFormat: "{{pod}}" },
+          { expr: `sum(rate(container_cpu_usage_seconds_total{${nsFilter},container!=""}[5m])) by (pod)`, refId: "A", legendFormat: "{{pod}}" },
         ],
       },
       {
@@ -84,7 +84,7 @@ function argoAppDashboardJson(appName: string): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 12, y: 12 },
         datasource: PROM_DS,
         targets: [
-          { expr: `sum(container_memory_working_set_bytes{${label}}) by (pod)`, refId: "A", legendFormat: "{{pod}}" },
+          { expr: `sum(container_memory_working_set_bytes{${nsFilter},container!=""}) by (pod)`, refId: "A", legendFormat: "{{pod}}" },
         ],
         fieldConfig: { defaults: { unit: "bytes" } },
       },
@@ -97,7 +97,7 @@ function argoAppDashboardJson(appName: string): Record<string, unknown> {
         datasource: PROM_DS,
         targets: [
           {
-            expr: `kubelet_volume_stats_used_bytes{${label}} / kubelet_volume_stats_capacity_bytes{${label}} * 100`,
+            expr: `kubelet_volume_stats_used_bytes{${nsFilter}} / kubelet_volume_stats_capacity_bytes{${nsFilter}} * 100`,
             refId: "A",
             legendFormat: "{{persistentvolumeclaim}}",
           },
@@ -112,7 +112,7 @@ function argoAppDashboardJson(appName: string): Record<string, unknown> {
         gridPos: { h: 8, w: 24, x: 0, y: 28 },
         datasource: PROM_DS,
         targets: [
-          { expr: `increase(kube_pod_container_status_restarts_total{${label}}[1h])`, refId: "A", legendFormat: "{{pod}} / {{container}}" },
+          { expr: `increase(kube_pod_container_status_restarts_total{${nsFilter}}[1h])`, refId: "A", legendFormat: "{{pod}} / {{container}}" },
         ],
       },
     ],
@@ -121,10 +121,15 @@ function argoAppDashboardJson(appName: string): Record<string, unknown> {
 
 /**
  * Create a Grafana dashboard ConfigMap for an ArgoCD app.
+ *
+ * @param appName - ArgoCD Application name (used for dashboard title/UID)
+ * @param provider - K8s provider
+ * @param namespace - App namespace for metric filtering (defaults to appName)
  */
 export function createArgoAppDashboard(
   appName: string,
-  provider: k8s.Provider
+  provider: k8s.Provider,
+  namespace?: string
 ): void {
   new k8s.core.v1.ConfigMap(
     `nimbus-dashboard-app-${appName}`,
@@ -135,7 +140,7 @@ export function createArgoAppDashboard(
         labels: { grafana_dashboard: "1" },
       },
       data: {
-        [`app-${appName}.json`]: JSON.stringify(argoAppDashboardJson(appName)),
+        [`app-${appName}.json`]: JSON.stringify(argoAppDashboardJson(appName, namespace ?? appName)),
       },
     },
     { provider }

@@ -493,7 +493,7 @@ function deployToCluster(
               auth: {
                 kubernetes: {
                   mountPath: "kubernetes",
-                  role: "external-secrets",
+                  role: "eso",
                 },
               },
             },

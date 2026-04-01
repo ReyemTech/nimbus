@@ -22,6 +22,9 @@ export function deployExternalSecrets(
       namespace: "external-secrets",
       createNamespace: true,
       values: {
+        serviceAccount: {
+          name: "external-secrets",
+        },
         crds: {
           createClusterExternalSecret: true,
           createClusterSecretStore: true,

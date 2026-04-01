@@ -22,6 +22,7 @@ import type {
 } from "./interfaces";
 import { createCnpgClusterDashboard } from "../observability/dashboards";
 import { createPrometheusRule } from "../observability/alerts";
+import { nimbus } from "../nimbus";
 
 const DATA_NAMESPACE = "data";
 const DEFAULT_PG_VERSION = "17";
@@ -382,6 +383,19 @@ function createSingleCnpgCluster(
 
   const endpoint = pulumi.output(`${name}-rw.${DATA_NAMESPACE}.svc.cluster.local`);
   const port = pulumi.output(5432);
+
+  nimbus.register(name, {
+    name,
+    type: "database",
+    namespace: DATA_NAMESPACE,
+    endpoint,
+    port: 5432,
+    secretRef: {
+      name: `${name}-superuser`,
+      keys: { password: "password" },
+    },
+    nativeResource: cluster,
+  });
 
   return {
     name,

@@ -12,6 +12,7 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { resolveCloudTarget } from "../types";
 import type { ResolvedCloudTarget } from "../types";
+import { nimbus } from "../nimbus";
 import { resolveStorageTier, type StorageTierMap } from "../types/storage-tiers";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import type { ICacheConfig, ICache } from "./interfaces";
@@ -152,6 +153,19 @@ export function createCache(name: string, config: ICacheConfig, provider: k8s.Pr
       ],
     },
   ], provider, [release]);
+
+  nimbus.register(name, {
+    name,
+    type: "cache",
+    namespace: CACHE_NAMESPACE,
+    endpoint,
+    port: architecture === "replication" ? SENTINEL_PORT : REDIS_PORT,
+    secretRef: {
+      name: `${helmReleaseName}-redis`,
+      keys: { password: "redis-password" },
+    },
+    nativeResource: release,
+  });
 
   return {
     name,

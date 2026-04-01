@@ -22,6 +22,7 @@ import type {
 } from "./interfaces";
 import { createMariadbClusterDashboard } from "../observability/dashboards";
 import { createPrometheusRule } from "../observability/alerts";
+import { nimbus } from "../nimbus";
 
 const DATA_NAMESPACE = "data";
 const DEFAULT_MARIADB_VERSION = "11.7";
@@ -367,6 +368,19 @@ function createSingleMariadbCluster(
 
   const endpoint = pulumi.output(`${name}.${DATA_NAMESPACE}.svc.cluster.local`);
   const port = pulumi.output(3306);
+
+  nimbus.register(name, {
+    name,
+    type: "database",
+    namespace: DATA_NAMESPACE,
+    endpoint,
+    port: 3306,
+    secretRef: {
+      name: `${name}-root`,
+      keys: { password: "password" },
+    },
+    nativeResource: mariadb,
+  });
 
   return {
     name,

@@ -258,24 +258,20 @@ export function createNeo4jCluster(
                   containers: [
                     {
                       name: "neo4j-backup",
-                      image: "neo4j:community",
+                      image: "alpine:latest",
                       command: [
                         "sh",
                         "-c",
                         [
-                          // Generate timestamped dump filename
+                          // Install AWS CLI (alpine has tar built-in)
+                          `apk add --no-cache aws-cli > /dev/null 2>&1`,
                           `TIMESTAMP=$(date +%Y%m%d-%H%M%S)`,
-                          `DUMP_FILE="/tmp/${name}-neo4j-\${TIMESTAMP}.dump"`,
-                          `S3_PATH="s3://$BACKUP_BUCKET/neo4j/${name}/\${TIMESTAMP}.dump"`,
-                          // Stop accepting new transactions and dump
-                          `neo4j-admin database dump neo4j --to-path=/tmp --overwrite-destination=true`,
-                          // Rename to timestamped name
-                          `mv /tmp/neo4j.dump "\${DUMP_FILE}"`,
-                          // Install AWS CLI (minimal)
-                          `apt-get update -qq && apt-get install -y -qq python3-pip > /dev/null 2>&1`,
-                          `pip3 install -q awscli`,
+                          `ARCHIVE="/tmp/${name}-neo4j-\${TIMESTAMP}.tar.gz"`,
+                          `S3_PATH="s3://$BACKUP_BUCKET/neo4j/${name}/\${TIMESTAMP}.tar.gz"`,
+                          // Tar the data directory (read-only mount, online-safe file copy)
+                          `tar czf "\${ARCHIVE}" -C /data .`,
                           // Upload to S3
-                          `aws s3 cp "\${DUMP_FILE}" "\${S3_PATH}"`,
+                          `aws s3 cp "\${ARCHIVE}" "\${S3_PATH}"`,
                           // Clean up old backups (retention)
                           `aws s3 ls "s3://$BACKUP_BUCKET/neo4j/${name}/" | while read -r line; do`,
                           `  file_date=$(echo "$line" | awk '{print $1}')`,
@@ -295,12 +291,6 @@ export function createNeo4jCluster(
                           name: "BACKUP_BUCKET",
                           value: backupDefaults.target.bucket,
                         },
-                        {
-                          name: "NEO4J_ADMIN_PASSWORD",
-                          valueFrom: {
-                            secretKeyRef: { name: passwordSecretName, key: "password" },
-                          },
-                        },
                       ],
                       envFrom: [
                         { secretRef: { name: backupCredsName } },
@@ -314,7 +304,6 @@ export function createNeo4jCluster(
                       ],
                     },
                   ],
-                  // Mount the Neo4j data PVC for offline dump
                   volumes: [
                     {
                       name: "data",

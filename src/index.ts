@@ -47,6 +47,18 @@ export {
 export { type StorageTier, type StorageTierMap, STORAGE_TIERS, resolveStorageTier } from "./types";
 export { type IExposedService } from "./types";
 
+// Nimbus singleton
+export { nimbus } from "./nimbus";
+export type {
+  INimbusConfig,
+  INimbusResource,
+  INimbusResourceRef,
+  INotificationsConfig,
+  INotificationEmailConfig,
+  INotificationSlackConfig,
+  NimbusResourceType,
+} from "./nimbus";
+
 // Cluster
 export type {
   INodeTaint,

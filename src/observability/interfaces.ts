@@ -96,6 +96,8 @@ export interface ILokiConfig {
   readonly storageGb?: number;
   /** Storage performance tier mapped to cluster storage class. */
   readonly storageTier?: StorageTier;
+  /** Log retention period (e.g., "7d", "30d"). Default: no compactor retention. */
+  readonly retention?: string;
   /** Helm chart version override. */
   readonly version?: string;
   /** Additional Helm values to merge with defaults. */

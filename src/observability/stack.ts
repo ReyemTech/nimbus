@@ -482,6 +482,15 @@ function deployLoki(
         ],
       },
     };
+    if (config.retention) {
+      lokiValues["loki"]["limits_config"] = {
+        retention_period: config.retention,
+      };
+      lokiValues["loki"]["compactor"] = {
+        retention_enabled: true,
+        delete_request_store: "filesystem",
+      };
+    }
     lokiValues["gateway"] = { enabled: false };
     lokiValues["chunksCache"] = { enabled: false };
     lokiValues["resultsCache"] = { enabled: false };

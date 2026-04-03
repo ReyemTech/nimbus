@@ -1,5 +1,10 @@
 /**
- * Rackspace Spot cluster implementation — cloudspace + spot node pools.
+ * Rackspace Spot cluster implementation — reads existing cloudspace, manages node pools.
+ *
+ * The cloudspace is treated as a data source (read-only) because the Rackspace Spot
+ * Terraform provider sends ALL fields on update, and the Rackspace API webhook rejects
+ * updates containing immutable fields. Node pools are managed resources that can be
+ * imported and updated normally.
  *
  * @module rackspace/cluster
  */
@@ -12,18 +17,20 @@ import type { IRackspaceProviderOptions } from "../factories/types";
 import { resolveCloudTarget } from "../types";
 
 /**
- * Create a Rackspace Spot cloudspace with spot node pools.
+ * Create a Rackspace Spot cluster (reads cloudspace, manages node pools).
+ *
+ * The cloudspace must already exist — this function reads it via data source.
+ * Node pools are created/managed as Pulumi resources and can be imported.
  *
  * @example
  * ```typescript
- * const cluster = createRackspaceSpotCluster("prod", {
- *   cloud: "rackspace",
- *   version: "1.31",
+ * const cluster = createRackspaceSpotCluster("iad-1", {
+ *   cloud: { provider: "rackspace", region: "us-east-iad-1" },
+ *   version: "1.33.0",
  *   nodePools: [
- *     { name: "system", instanceType: "gp.vs1.small-2", minNodes: 2, maxNodes: 4, bidPrice: 0.02 },
- *     { name: "workers", instanceType: "gp.vs1.medium-4", minNodes: 1, maxNodes: 8, bidPrice: 0.05 },
+ *     { name: "workers", instanceType: "gp.vs1.xlarge-iad", minNodes: 3, maxNodes: 3, spot: true, bidPrice: 0.04 },
  *   ],
- * }, { cloudspaceName: "prod-iad-1" });
+ * }, { cloudspaceName: "reyemtech2" });
  * ```
  */
 export function createRackspaceSpotCluster(
@@ -34,28 +41,12 @@ export function createRackspaceSpotCluster(
   const cloud = Array.isArray(config.cloud) ? (config.cloud[0] ?? "rackspace") : config.cloud;
   const target = resolveCloudTarget(cloud);
 
-  // Cloudspace
-  const cloudspace = new spot.Cloudspace(
-    `${name}-cloudspace`,
-    {
-      cloudspaceName: options.cloudspaceName,
-      name: options.cloudspaceName,
-      region: target.region,
-      kubernetesVersion: config.version,
-      deploymentType: "gen2",
-      cni: options.cni ?? "calico",
-      preemptionWebhook: options.preemptionWebhookUrl,
-    },
-    {
-      // hacontrolPlane, waitUntilReady, cni, region are immutable after creation
-      ignoreChanges: ["hacontrolPlane", "waitUntilReady", "cni", "region"],
-      ...(options.importIds?.cloudspaceId
-        ? { import: options.importIds.cloudspaceId }
-        : {}),
-    },
-  );
+  // Read existing cloudspace (data source — no mutations)
+  const cloudspace = spot.getCloudspaceOutput({
+    cloudspaceName: options.cloudspaceName,
+  });
 
-  // Spot node pools
+  // Spot node pools (managed resources)
   for (const np of config.nodePools) {
     const bidPrice = np.bidPrice ?? options.defaultBidPrice;
     if (bidPrice === undefined) {
@@ -70,7 +61,7 @@ export function createRackspaceSpotCluster(
     new spot.Spotnodepool(
       `${name}-np-${np.name}`,
       {
-        cloudspaceName: cloudspace.cloudspaceName,
+        cloudspaceName: options.cloudspaceName,
         serverClass: np.instanceType,
         bidPrice,
         desiredServerCount: np.desiredNodes ?? np.minNodes,
@@ -79,16 +70,13 @@ export function createRackspaceSpotCluster(
           : undefined,
         labels: np.labels,
       },
-      {
-        dependsOn: [cloudspace],
-        ...(importId ? { import: importId } : {}),
-      },
+      importId ? { import: importId } : undefined,
     );
   }
 
-  // Kubeconfig from data source
+  // Kubeconfig from data source (fresh on every deployment)
   const kubeconfigResult = spot.getKubeconfigOutput({
-    cloudspaceName: cloudspace.cloudspaceName,
+    cloudspaceName: options.cloudspaceName,
   });
 
   const kubeconfig = kubeconfigResult.raw;
@@ -107,9 +95,9 @@ export function createRackspaceSpotCluster(
     cloud: target,
     endpoint,
     kubeconfig,
-    version: cloudspace.kubernetesVersion,
+    version: cloudspace.kubernetesVersion.apply((v) => v ?? config.version ?? "unknown"),
     nodePools: config.nodePools,
-    nativeResource: cloudspace,
+    nativeResource: provider as unknown as pulumi.Resource,
     provider,
     storageTiers: config.storageTiers,
   };

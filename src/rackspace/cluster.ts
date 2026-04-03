@@ -47,7 +47,10 @@ export function createRackspaceSpotCluster(
       waitUntilReady: options.waitUntilReady ?? true,
     },
     options.importIds?.cloudspaceId
-      ? { import: options.importIds.cloudspaceId }
+      ? {
+          import: options.importIds.cloudspaceId,
+          ignoreChanges: ["hacontrolPlane", "waitUntilReady", "cni", "region"],
+        }
       : undefined,
   );
 

@@ -89,7 +89,8 @@
     "@pulumi/aws": ">=6.0.0",
     "@pulumi/azure-native": ">=2.0.0",
     "@pulumi/kubernetes": ">=4.0.0",
-    "@pulumi/pulumi": ">=3.0.0"
+    "@pulumi/pulumi": ">=3.0.0",
+    "@reyemtech/pulumi-rackspace-spot": "^0.1.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

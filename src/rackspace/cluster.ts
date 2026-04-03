@@ -65,7 +65,7 @@ export function createRackspaceSpotCluster(
         cloudspaceName: options.cloudspaceName,
         serverClass: np.instanceType,
         bidPrice,
-        desiredCount: hasAutoscaling ? undefined : (np.desiredNodes ?? np.minNodes),
+        desiredCount: np.desiredNodes ?? np.minNodes,
         autoscaling: hasAutoscaling
           ? { minNodes: np.minNodes, maxNodes: np.maxNodes }
           : undefined,

@@ -1,3 +1,11 @@
+## [2.0.2](https://github.com/ReyemTech/nimbus/compare/v2.0.1...v2.0.2) (2026-04-03)
+
+
+### Bug Fixes
+
+* **argocd:** don't prepend oci:// to OCI repo URLs in Application spec ([75b6ffb](https://github.com/ReyemTech/nimbus/commit/75b6ffb3284e956e45d493428bf5730a27bd358f))
+* **argocd:** remove unused isOci variable ([7cf3d5b](https://github.com/ReyemTech/nimbus/commit/7cf3d5bc7e1e17e825766e062036e0b0b5fb2704))
+
 ## [2.0.1](https://github.com/ReyemTech/nimbus/compare/v2.0.0...v2.0.1) (2026-04-03)
 
 

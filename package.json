@@ -76,7 +76,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/reyemtech/nimbus.git"
+    "url": "https://github.com/ReyemTech/nimbus.git"
   },
   "publishConfig": {
     "access": "public",

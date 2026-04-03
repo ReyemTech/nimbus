@@ -1,3 +1,10 @@
+## [2.0.1](https://github.com/ReyemTech/nimbus/compare/v2.0.0...v2.0.1) (2026-04-03)
+
+
+### Bug Fixes
+
+* match repository.url case to GitHub org (ReyemTech) for npm provenance ([c86015c](https://github.com/ReyemTech/nimbus/commit/c86015c00e526e8729f3e54e427f736b79fff684))
+
 # [2.0.0](https://github.com/reyemtech/nimbus/compare/v1.3.0...v2.0.0) (2026-04-03)
 
 

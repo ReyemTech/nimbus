@@ -87,6 +87,12 @@ export function createCluster(
   }
 
   const targets = resolveCloudTarget(config.cloud);
+  if (!networks) {
+    throw new UnsupportedFeatureError(
+      "Multi-cloud clusters require a networks parameter",
+      "multi-cloud"
+    );
+  }
   const networkArray = Array.isArray(networks) ? networks : [networks];
 
   return targets.map((target) => {

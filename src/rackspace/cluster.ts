@@ -5,6 +5,7 @@
  */
 
 import * as k8s from "@pulumi/kubernetes";
+import * as pulumi from "@pulumi/pulumi";
 import * as spot from "@pulumi/spot";
 import type { ICluster, IClusterConfig } from "../cluster";
 import type { IRackspaceProviderOptions } from "../factories/types";
@@ -92,7 +93,10 @@ export function createRackspaceSpotCluster(
   // K8s provider
   const provider = new k8s.Provider(`${name}-k8s`, {
     kubeconfig,
-  });
+  }, options.k8sProviderAliases?.length
+    ? { aliases: options.k8sProviderAliases as pulumi.Alias[] }
+    : undefined,
+  );
 
   return {
     name,

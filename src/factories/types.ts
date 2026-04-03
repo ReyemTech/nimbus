@@ -69,6 +69,8 @@ export interface IRackspaceProviderOptions {
     readonly cloudspaceId?: string;
     readonly nodePoolIds?: Record<string, string>;
   };
+  /** Aliases for the K8s provider resource (for migrating from a manual provider). */
+  readonly k8sProviderAliases?: ReadonlyArray<string | { name?: string; parent?: unknown }>;
 }
 
 /**

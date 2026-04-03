@@ -15,6 +15,7 @@ import type { IProviderOptions } from "./types";
 import { isMultiCloud } from "./types";
 import { createEksCluster } from "../aws/index.js";
 import { createAksCluster } from "../azure/index.js";
+import { createRackspaceSpotCluster } from "../rackspace/index.js";
 
 /** Config for the createCluster factory. */
 export type ICreateClusterConfig = IClusterConfig & {
@@ -53,10 +54,34 @@ export type ICreateClusterConfig = IClusterConfig & {
 export function createCluster(
   name: string,
   config: ICreateClusterConfig,
-  networks: INetwork | INetwork[]
+  networks?: INetwork | INetwork[]
 ): ICluster | ICluster[] {
   if (!isMultiCloud(config.cloud)) {
     const target = resolveCloudTarget(config.cloud);
+
+    // Rackspace doesn't use a network — dispatch directly
+    if (target.provider === "rackspace") {
+      const rackOpts = config.providerOptions?.rackspace;
+      if (!rackOpts) {
+        throw new UnsupportedFeatureError(
+          "Rackspace requires providerOptions.rackspace with at least cloudspaceName",
+          "rackspace"
+        );
+      }
+      return createRackspaceSpotCluster(
+        name,
+        { ...config, cloud: { provider: target.provider, region: target.region } },
+        rackOpts
+      );
+    }
+
+    // All other providers require a network
+    if (!networks) {
+      throw new UnsupportedFeatureError(
+        `Provider "${target.provider}" clusters require a network parameter`,
+        target.provider
+      );
+    }
     const network = Array.isArray(networks) ? findNetworkForProvider(networks, target) : networks;
     return dispatchCluster(name, config, target, network, config.providerOptions);
   }

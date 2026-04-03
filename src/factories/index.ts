@@ -7,7 +7,7 @@
  * @module factories
  */
 
-export type { IProviderOptions, IAwsProviderOptions, IAzureProviderOptions } from "./types";
+export type { IProviderOptions, IAwsProviderOptions, IAzureProviderOptions, IRackspaceProviderOptions } from "./types";
 export { extractProvider, isMultiCloud } from "./types";
 
 export { createNetwork, type ICreateNetworkConfig } from "./network";

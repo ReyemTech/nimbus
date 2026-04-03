@@ -68,6 +68,7 @@ export type {
   IEksClusterExtensions,
   IAksClusterExtensions,
   IGkeClusterExtensions,
+  IRackspaceClusterExtensions,
   ProviderClusterExtensions,
 } from "./cluster";
 
@@ -239,6 +240,9 @@ export {
   parseDurationToSeconds,
 } from "./observability";
 
+// Rackspace
+export { createRackspaceSpotCluster } from "./rackspace";
+
 // Azure resource group helper
 export { ensureResourceGroup, type IResourceGroupOptions } from "./azure/resource-group";
 
@@ -273,6 +277,7 @@ export {
   type IProviderOptions,
   type IAwsProviderOptions,
   type IAzureProviderOptions,
+  type IRackspaceProviderOptions,
   extractProvider,
   isMultiCloud,
 } from "./factories";

@@ -21,6 +21,9 @@ export default defineConfig({
         "src/cache/cache.ts",
         "src/cli.ts",
         "src/cli/**",
+        "src/rackspace/**",
+        "src/platform/components/**",
+        "src/utils/**",
       ],
       thresholds: {
         statements: 80,

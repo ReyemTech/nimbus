@@ -43,7 +43,7 @@ export function createRackspaceSpotCluster(
 
   // Read existing cloudspace (data source — no mutations)
   const cloudspace = spot.getCloudspaceOutput({
-    cloudspaceName: options.cloudspaceName,
+    name: options.cloudspaceName,
   });
 
   // Spot node pools (managed resources)

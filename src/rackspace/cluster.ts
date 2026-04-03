@@ -39,12 +39,12 @@ export function createRackspaceSpotCluster(
     `${name}-cloudspace`,
     {
       cloudspaceName: options.cloudspaceName,
+      name: options.cloudspaceName,
       region: target.region,
       kubernetesVersion: config.version,
+      deploymentType: "gen2",
       cni: options.cni ?? "calico",
-      hacontrolPlane: options.haControlPlane ?? true,
       preemptionWebhook: options.preemptionWebhookUrl,
-      waitUntilReady: options.waitUntilReady ?? true,
     },
     {
       // hacontrolPlane, waitUntilReady, cni, region are immutable after creation

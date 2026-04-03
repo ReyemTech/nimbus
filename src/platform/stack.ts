@@ -317,8 +317,8 @@ function deployToCluster(
     );
   }
 
-  // 9. OAuth2 Proxy — only needed when dashboards are NOT exposed via Tailscale
-  if (config.oauth2Proxy?.enabled && config.traefik?.expose === false) {
+  // 9. OAuth2 Proxy — optional, deploys when enabled
+  if (config.oauth2Proxy?.enabled) {
     components["oauth2-proxy"] = deployOAuth2Proxy(
       name,
       config.oauth2Proxy,

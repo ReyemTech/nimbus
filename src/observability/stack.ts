@@ -8,6 +8,7 @@
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type {
+  IAlertConfig,
   IAlertmanagerConfig,
   IAlloyConfig,
   IGrafanaConfig,
@@ -17,6 +18,7 @@ import type {
   IPrometheusConfig,
 } from "./interfaces";
 import type { IExposedService } from "../types";
+import type { StorageTierMap } from "../types/storage-tiers";
 import { createDashboards, lokiLogsDashboard } from "./dashboards/index";
 import { resolveStorageTier } from "../types/storage-tiers";
 import { createGlobalAlertRules, buildAlertmanagerConfig } from "./alerts";
@@ -280,9 +282,9 @@ function deployKubePrometheusStack(
   grafana: IGrafanaConfig | undefined,
   alertmanager: IAlertmanagerConfig | undefined,
   provider: k8s.Provider,
-  storageTiers?: import("../types/storage-tiers").StorageTierMap,
+  storageTiers?: StorageTierMap,
   grafanaPlugins?: string[],
-  alertConfig?: import("./interfaces").IAlertConfig
+  alertConfig?: IAlertConfig
 ): k8s.helm.v3.Release {
   const certName = domain.replace(/\./g, "-");
   const tlsSecretName = `${certName}-wildcard-tls`;
@@ -321,14 +323,12 @@ function deployKubePrometheusStack(
     const promIngressEnabled = prometheus?.expose === false;
     prometheusValues["ingress"] = {
       enabled: promIngressEnabled,
-      ...(promIngressEnabled && {
-        ingressClassName: "traefik",
-        hosts: [`${promSubdomain}.${domain}`],
-        annotations: {
-          "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
-        },
-        tls: [{ secretName: tlsSecretName, hosts: [`${promSubdomain}.${domain}`] }],
-      }),
+      ingressClassName: "traefik",
+      hosts: [`${promSubdomain}.${domain}`],
+      annotations: {
+        "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+      },
+      tls: [{ secretName: tlsSecretName, hosts: [`${promSubdomain}.${domain}`] }],
     };
   }
 
@@ -449,7 +449,7 @@ function deployLoki(
   namespace: string,
   config: ILokiConfig,
   provider: k8s.Provider,
-  storageTiers?: import("../types/storage-tiers").StorageTierMap
+  storageTiers?: StorageTierMap
 ): k8s.helm.v3.Release {
   const mode = config.mode ?? "single-binary";
   const storageGb = config.storageGb ?? 10;

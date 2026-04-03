@@ -106,11 +106,24 @@ vi.mock("@pulumi/kubernetes", () => {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockConfigMap = class {};
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockClusterRoleBinding = class {};
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockRole = class {};
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockRoleBinding = class {};
+
   return {
     helm: { v3: { Release: mockRelease } },
     apiextensions: { CustomResource: mockCustomResource },
-    core: { v1: { Secret: mockSecret } },
+    core: { v1: { Secret: mockSecret, ConfigMap: mockConfigMap } },
     networking: { v1: { Ingress: mockIngress } },
+    rbac: { v1: { ClusterRoleBinding: mockClusterRoleBinding, Role: mockRole, RoleBinding: mockRoleBinding } },
     // eslint-disable-next-line @typescript-eslint/no-extraneous-class
     Provider: class {},
   };

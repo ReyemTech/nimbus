@@ -49,17 +49,14 @@ async function patchSplitDns(
   domain: string,
   nameservers: string[]
 ): Promise<void> {
-  const res = await fetch(
-    `https://api.tailscale.com/api/v2/tailnet/${tailnet}/dns/split-dns`,
-    {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ [domain]: nameservers }),
-    }
-  );
+  const res = await fetch(`https://api.tailscale.com/api/v2/tailnet/${tailnet}/dns/split-dns`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ [domain]: nameservers }),
+  });
   if (!res.ok) {
     throw new Error(`Split DNS PATCH failed: ${res.status} ${await res.text()}`);
   }
@@ -68,11 +65,7 @@ async function patchSplitDns(
 /**
  * Delete a split DNS domain from the tailnet.
  */
-async function deleteSplitDns(
-  token: string,
-  tailnet: string,
-  domain: string
-): Promise<void> {
+async function deleteSplitDns(token: string, tailnet: string, domain: string): Promise<void> {
   await patchSplitDns(token, tailnet, domain, []);
 }
 

@@ -15,7 +15,11 @@ export class ArgoProject {
   readonly name: string;
   readonly resource: k8s.apiextensions.CustomResource;
   private readonly appRegistry = new Map<string, ArgoApp>();
-  private readonly createAppFn: (name: string, config: IArgoAppConfig, project: ArgoProject) => ArgoApp;
+  private readonly createAppFn: (
+    name: string,
+    config: IArgoAppConfig,
+    project: ArgoProject
+  ) => ArgoApp;
 
   constructor(
     resourceName: string,

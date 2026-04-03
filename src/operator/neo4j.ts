@@ -187,9 +187,7 @@ export function createNeo4jCluster(
   );
 
   const releaseName = release.status.apply((s) => s?.name ?? `${name}-neo4j`);
-  const endpoint = releaseName.apply(
-    (rn) => `${rn}.${DATA_NAMESPACE}.svc.cluster.local`
-  );
+  const endpoint = releaseName.apply((rn) => `${rn}.${DATA_NAMESPACE}.svc.cluster.local`);
   const port = pulumi.output(NEO4J_BOLT_PORT);
 
   // -------------------------------------------------------------------------
@@ -295,9 +293,7 @@ export function createNeo4jCluster(
                           value: backupDefaults.target.bucket,
                         },
                       ],
-                      envFrom: [
-                        { secretRef: { name: backupCredsName } },
-                      ],
+                      envFrom: [{ secretRef: { name: backupCredsName } }],
                       volumeMounts: [
                         {
                           name: "data",
@@ -332,20 +328,26 @@ export function createNeo4jCluster(
   createNeo4jClusterDashboard(name, "observability", provider, [release]);
 
   // Per-cluster alert rules
-  createPrometheusRule(`${name}-neo4j-alerts`, "observability", [
-    {
-      name: `nimbus.neo4j.${name}`,
-      rules: [
-        {
-          alert: "Neo4jDown",
-          expr: `up{job=~".*neo4j.*",instance=~"${name}.*"} == 0`,
-          for: "2m",
-          labels: { severity: "critical" },
-          annotations: { summary: `Neo4j instance ${name} is DOWN` },
-        },
-      ],
-    },
-  ], provider, [release]);
+  createPrometheusRule(
+    `${name}-neo4j-alerts`,
+    "observability",
+    [
+      {
+        name: `nimbus.neo4j.${name}`,
+        rules: [
+          {
+            alert: "Neo4jDown",
+            expr: `up{job=~".*neo4j.*",instance=~"${name}.*"} == 0`,
+            for: "2m",
+            labels: { severity: "critical" },
+            annotations: { summary: `Neo4j instance ${name} is DOWN` },
+          },
+        ],
+      },
+    ],
+    provider,
+    [release]
+  );
 
   // -------------------------------------------------------------------------
   // 6. Return IClusterInstance with createDatabase()
@@ -357,7 +359,10 @@ export function createNeo4jCluster(
     port,
     nativeResource: release,
 
-    createDatabase(dbName: string, dbConfig: IOperatorDatabaseConfig): IDatabaseInstance & Record<string, IDatabaseInstance> {
+    createDatabase(
+      dbName: string,
+      dbConfig: IOperatorDatabaseConfig
+    ): IDatabaseInstance & Record<string, IDatabaseInstance> {
       const username = dbConfig.owner ?? dbName;
       const userSecretName = `${name}-${dbName}-neo4j-user`;
 
@@ -477,10 +482,7 @@ export function createNeo4jCluster(
               database: dbName,
               uri: pulumi
                 .all([endpoint, stablePassword])
-                .apply(
-                  ([h, pw]) =>
-                    `bolt://${username}:${pw}@${h}:${NEO4J_BOLT_PORT}`
-                ),
+                .apply(([h, pw]) => `bolt://${username}:${pw}@${h}:${NEO4J_BOLT_PORT}`),
             },
           },
           { provider, dependsOn: [initJob, nsResource] }
@@ -497,7 +499,7 @@ export function createNeo4jCluster(
         database: pulumi.output(dbName),
         secrets,
         nativeResource: initJob,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
     },
   };

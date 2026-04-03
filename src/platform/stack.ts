@@ -13,10 +13,7 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type { ICluster } from "../cluster";
 import { createPrometheusRule } from "../observability/alerts";
-import type {
-  IPlatformStack,
-  IPlatformStackConfig,
-} from "./interfaces";
+import type { IPlatformStack, IPlatformStackConfig } from "./interfaces";
 import type { IExposedService } from "../types";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import {
@@ -94,35 +91,57 @@ function deployToCluster(
 
   // 1. Traefik (ingress controller) — enabled by default
   if (config.traefik?.enabled !== false) {
-    components["traefik"] = deployTraefik(name, config.traefik, provider, DEFAULT_VERSIONS.traefik, config.robotsBlock);
+    components["traefik"] = deployTraefik(
+      name,
+      config.traefik,
+      provider,
+      DEFAULT_VERSIONS.traefik,
+      config.robotsBlock
+    );
 
     // Traefik alert rules
-    createPrometheusRule(`${name}-traefik-alerts`, "observability", [
-      {
-        name: "nimbus.traefik",
-        rules: [
-          {
-            alert: "TraefikDown",
-            expr: `kube_deployment_status_replicas_available{namespace="traefik",deployment=~".*traefik.*"} == 0`,
-            for: "2m",
-            labels: { severity: "critical" },
-            annotations: { summary: "Traefik ingress controller has 0 available replicas — all traffic stopped" },
-          },
-          {
-            alert: "TraefikHighErrorRate",
-            expr: `sum(rate(traefik_service_requests_total{code=~"5.."}[5m])) / sum(rate(traefik_service_requests_total[5m])) > 0.05`,
-            for: "5m",
-            labels: { severity: "warning" },
-            annotations: { summary: "Traefik 5xx error rate is above 5% ({{ $value | humanizePercentage }})" },
-          },
-        ],
-      },
-    ], provider, [components["traefik"]]);
+    createPrometheusRule(
+      `${name}-traefik-alerts`,
+      "observability",
+      [
+        {
+          name: "nimbus.traefik",
+          rules: [
+            {
+              alert: "TraefikDown",
+              expr: `kube_deployment_status_replicas_available{namespace="traefik",deployment=~".*traefik.*"} == 0`,
+              for: "2m",
+              labels: { severity: "critical" },
+              annotations: {
+                summary:
+                  "Traefik ingress controller has 0 available replicas — all traffic stopped",
+              },
+            },
+            {
+              alert: "TraefikHighErrorRate",
+              expr: `sum(rate(traefik_service_requests_total{code=~"5.."}[5m])) / sum(rate(traefik_service_requests_total[5m])) > 0.05`,
+              for: "5m",
+              labels: { severity: "warning" },
+              annotations: {
+                summary: "Traefik 5xx error rate is above 5% ({{ $value | humanizePercentage }})",
+              },
+            },
+          ],
+        },
+      ],
+      provider,
+      [components["traefik"]]
+    );
   }
 
   // 2. cert-manager (TLS certificates) — enabled by default
   if (config.certManager?.enabled !== false) {
-    components["cert-manager"] = deployCertManager(name, config.certManager, provider, DEFAULT_VERSIONS.certManager);
+    components["cert-manager"] = deployCertManager(
+      name,
+      config.certManager,
+      provider,
+      DEFAULT_VERSIONS.certManager
+    );
   }
 
   // 3. External DNS — enabled if configured
@@ -208,21 +227,27 @@ function deployToCluster(
       );
 
       // Deploy external-dns with env vars referencing the K8s secret
-      components["external-dns"] = deployExternalDns(name, dnsConfig, provider, DEFAULT_VERSIONS.externalDns, [
-        {
-          name: "AWS_ACCESS_KEY_ID",
-          valueFrom: {
-            secretKeyRef: { name: "route53-credentials", key: "AWS_ACCESS_KEY_ID" },
+      components["external-dns"] = deployExternalDns(
+        name,
+        dnsConfig,
+        provider,
+        DEFAULT_VERSIONS.externalDns,
+        [
+          {
+            name: "AWS_ACCESS_KEY_ID",
+            valueFrom: {
+              secretKeyRef: { name: "route53-credentials", key: "AWS_ACCESS_KEY_ID" },
+            },
           },
-        },
-        {
-          name: "AWS_SECRET_ACCESS_KEY",
-          valueFrom: {
-            secretKeyRef: { name: "route53-credentials", key: "AWS_SECRET_ACCESS_KEY" },
+          {
+            name: "AWS_SECRET_ACCESS_KEY",
+            valueFrom: {
+              secretKeyRef: { name: "route53-credentials", key: "AWS_SECRET_ACCESS_KEY" },
+            },
           },
-        },
-        { name: "AWS_REGION", value: awsRegion },
-      ]);
+          { name: "AWS_REGION", value: awsRegion },
+        ]
+      );
 
       // ClusterIssuer for DNS-01 validation via Route53
       new k8s.apiextensions.CustomResource(
@@ -259,23 +284,45 @@ function deployToCluster(
         }
       );
     } else {
-      components["external-dns"] = deployExternalDns(name, dnsConfig, provider, DEFAULT_VERSIONS.externalDns);
+      components["external-dns"] = deployExternalDns(
+        name,
+        dnsConfig,
+        provider,
+        DEFAULT_VERSIONS.externalDns
+      );
     }
   }
 
   // 4. ArgoCD (GitOps) — optional
   if (config.argocd?.enabled) {
-    components["argocd"] = deployArgocd(name, config.argocd, config.domain, provider, DEFAULT_VERSIONS.argocd);
+    components["argocd"] = deployArgocd(
+      name,
+      config.argocd,
+      config.domain,
+      provider,
+      DEFAULT_VERSIONS.argocd
+    );
   }
 
   // 5. Vault (secrets) — optional
   if (config.vault?.enabled) {
-    components["vault"] = deployVault(name, config.vault, config.domain, provider, DEFAULT_VERSIONS.vault);
+    components["vault"] = deployVault(
+      name,
+      config.vault,
+      config.domain,
+      provider,
+      DEFAULT_VERSIONS.vault
+    );
   }
 
   // 6. External Secrets Operator — optional
   if (config.externalSecrets?.enabled) {
-    components["external-secrets"] = deployExternalSecrets(name, config.externalSecrets, provider, DEFAULT_VERSIONS.externalSecrets);
+    components["external-secrets"] = deployExternalSecrets(
+      name,
+      config.externalSecrets,
+      provider,
+      DEFAULT_VERSIONS.externalSecrets
+    );
   }
 
   // 7. Wildcard certificate — auto-created when cert-manager is enabled
@@ -473,7 +520,12 @@ function deployToCluster(
 
   // 13. Descheduler — pod rebalancing for spot instances
   if (config.descheduler?.enabled) {
-    components["descheduler"] = deployDescheduler(name, config.descheduler, provider, DEFAULT_VERSIONS.descheduler);
+    components["descheduler"] = deployDescheduler(
+      name,
+      config.descheduler,
+      provider,
+      DEFAULT_VERSIONS.descheduler
+    );
   }
 
   // 14. ClusterSecretStore — connects ESO to Vault
@@ -520,18 +572,36 @@ function deployToCluster(
 
   if (components["traefik"] && config.traefik?.expose !== false) {
     const originalName = components["traefik"].status.apply((s) => s?.name ?? "");
-    exposedServices.push({ name: "traefik", originalName, namespace: "traefik", port: 9100, label: "traefik" });
+    exposedServices.push({
+      name: "traefik",
+      originalName,
+      namespace: "traefik",
+      port: 9100,
+      label: "traefik",
+    });
   }
 
   if (components["vault"] && config.vault?.expose !== false) {
     const originalName = components["vault"].status.apply((s) => s?.name ?? "");
-    exposedServices.push({ name: "vault", originalName, namespace: "vault", port: 8200, label: "vault" });
+    exposedServices.push({
+      name: "vault",
+      originalName,
+      namespace: "vault",
+      port: 8200,
+      label: "vault",
+    });
   }
 
   if (components["argocd"] && config.argocd?.expose !== false) {
     const originalName = components["argocd"].status.apply((s) => s?.name ?? "");
     const serverName = originalName.apply((r) => `${r}-server`);
-    exposedServices.push({ name: "argocd", originalName: serverName, namespace: "argocd", port: 80, label: "argocd" });
+    exposedServices.push({
+      name: "argocd",
+      originalName: serverName,
+      namespace: "argocd",
+      port: 80,
+      label: "argocd",
+    });
   }
 
   return {

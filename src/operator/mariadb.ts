@@ -312,20 +312,26 @@ function createSingleMariadbCluster(
   createMariadbClusterDashboard(name, "observability", provider, [mariadb]);
 
   // Per-cluster alert rules
-  createPrometheusRule(`${name}-mariadb-alerts`, "observability", [
-    {
-      name: `nimbus.mariadb.${name}`,
-      rules: [
-        {
-          alert: "MariadbDown",
-          expr: `mysql_up{job=~".*mariadb.*",instance=~"${name}.*"} == 0`,
-          for: "2m",
-          labels: { severity: "critical" },
-          annotations: { summary: `MariaDB instance ${name} is DOWN` },
-        },
-      ],
-    },
-  ], provider, [mariadb]);
+  createPrometheusRule(
+    `${name}-mariadb-alerts`,
+    "observability",
+    [
+      {
+        name: `nimbus.mariadb.${name}`,
+        rules: [
+          {
+            alert: "MariadbDown",
+            expr: `mysql_up{job=~".*mariadb.*",instance=~"${name}.*"} == 0`,
+            for: "2m",
+            labels: { severity: "critical" },
+            annotations: { summary: `MariaDB instance ${name} is DOWN` },
+          },
+        ],
+      },
+    ],
+    provider,
+    [mariadb]
+  );
 
   // Scheduled backup via S3
   if (backup) {
@@ -467,8 +473,22 @@ export function createMariadbDatabase(
 
   if (config) {
     const { environments: _, ...cleanConfig } = config;
-    return createSingleMariadbCluster(name, cleanConfig, backupDefaults, provider, operatorRelease, storageTiers);
+    return createSingleMariadbCluster(
+      name,
+      cleanConfig,
+      backupDefaults,
+      provider,
+      operatorRelease,
+      storageTiers
+    );
   }
 
-  return createSingleMariadbCluster(name, config, backupDefaults, provider, operatorRelease, storageTiers);
+  return createSingleMariadbCluster(
+    name,
+    config,
+    backupDefaults,
+    provider,
+    operatorRelease,
+    storageTiers
+  );
 }

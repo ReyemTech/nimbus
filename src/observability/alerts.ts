@@ -45,11 +45,16 @@ export function parseDurationToSeconds(duration: string): number {
   if (!match || !match[1] || !match[2]) throw new Error(`Invalid duration: ${duration}`);
   const value = parseInt(match[1], 10);
   switch (match[2]) {
-    case "s": return value;
-    case "m": return value * 60;
-    case "h": return value * 3600;
-    case "d": return value * 86400;
-    default: throw new Error(`Unknown unit: ${match[2]}`);
+    case "s":
+      return value;
+    case "m":
+      return value * 60;
+    case "h":
+      return value * 3600;
+    case "d":
+      return value * 86400;
+    default:
+      throw new Error(`Unknown unit: ${match[2]}`);
   }
 }
 
@@ -116,7 +121,8 @@ export function createGlobalAlertRules(
             for: "5m",
             labels: { severity: "critical" },
             annotations: {
-              summary: "PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} is {{ $value | humanizePercentage }} full",
+              summary:
+                "PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} is {{ $value | humanizePercentage }} full",
               description: "PVC disk usage exceeds 90%. Pod may crash if storage fills completely.",
             },
           },
@@ -126,7 +132,8 @@ export function createGlobalAlertRules(
             for: "10m",
             labels: { severity: "warning" },
             annotations: {
-              summary: "PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} is {{ $value | humanizePercentage }} full",
+              summary:
+                "PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} is {{ $value | humanizePercentage }} full",
               description: "PVC disk usage exceeds 75%. Plan capacity expansion.",
             },
           },
@@ -142,7 +149,8 @@ export function createGlobalAlertRules(
             for: "1h",
             labels: { severity: "critical" },
             annotations: {
-              summary: "Certificate {{ $labels.name }} in {{ $labels.namespace }} expires in less than 7 days",
+              summary:
+                "Certificate {{ $labels.name }} in {{ $labels.namespace }} expires in less than 7 days",
               description: "cert-manager should auto-renew. This alert means renewal failed.",
             },
           },
@@ -164,9 +172,7 @@ export function createGlobalAlertRules(
  * Returns values to deep-merge into the kube-prometheus-stack
  * alertmanager section.
  */
-export function buildAlertmanagerConfig(
-  alertConfig: IAlertConfig
-): Record<string, unknown> {
+export function buildAlertmanagerConfig(alertConfig: IAlertConfig): Record<string, unknown> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const receivers: any[] = [{ name: "null" }];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -232,21 +238,25 @@ export function buildAlertmanagerConfig(
 
     receivers.push({
       name: "slack-critical",
-      slack_configs: [{
-        ...slackBase,
-        color: "danger",
-        title: `[CRITICAL] {{ .GroupLabels.alertname }}`,
-        text: `{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}`,
-      }],
+      slack_configs: [
+        {
+          ...slackBase,
+          color: "danger",
+          title: `[CRITICAL] {{ .GroupLabels.alertname }}`,
+          text: `{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}`,
+        },
+      ],
     });
     receivers.push({
       name: "slack-warning",
-      slack_configs: [{
-        ...slackBase,
-        color: "warning",
-        title: `[WARNING] {{ .GroupLabels.alertname }}`,
-        text: `{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}`,
-      }],
+      slack_configs: [
+        {
+          ...slackBase,
+          color: "warning",
+          title: `[WARNING] {{ .GroupLabels.alertname }}`,
+          text: `{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}`,
+        },
+      ],
     });
 
     routes.push({

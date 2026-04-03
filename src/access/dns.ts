@@ -41,11 +41,13 @@ function buildCorefile(
   // Build per-service rewrite rules for proxied services
   // CoreDNS exact name rewrite: rewrite name exact <from> <to>
   const proxyRewrites = proxiedServices.map(
-    (svc) => `    rewrite name exact ${svc.label}.${prefix}.${tld} access-proxy.access.svc.cluster.local`
+    (svc) =>
+      `    rewrite name exact ${svc.label}.${prefix}.${tld} access-proxy.access.svc.cluster.local`
   );
 
-  return pulumi.output(proxyRewrites).apply((rewrites) =>
-    `${zone}:53 {
+  return pulumi.output(proxyRewrites).apply(
+    (rewrites) =>
+      `${zone}:53 {
     # Proxied web services → Nginx reverse proxy (port 80)
 ${rewrites.join("\n")}
 
@@ -108,18 +110,14 @@ export function deployAccessDns(
                   { name: "dns", containerPort: 53, protocol: "UDP" },
                   { name: "dns-tcp", containerPort: 53, protocol: "TCP" },
                 ],
-                volumeMounts: [
-                  { name: "corefile", mountPath: "/etc/coredns", readOnly: true },
-                ],
+                volumeMounts: [{ name: "corefile", mountPath: "/etc/coredns", readOnly: true }],
                 resources: {
                   requests: { cpu: "10m", memory: "16Mi" },
                   limits: { cpu: "50m", memory: "64Mi" },
                 },
               },
             ],
-            volumes: [
-              { name: "corefile", configMap: { name: "access-dns-corefile" } },
-            ],
+            volumes: [{ name: "corefile", configMap: { name: "access-dns-corefile" } }],
           },
         },
       },

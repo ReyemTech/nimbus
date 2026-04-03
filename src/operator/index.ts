@@ -191,16 +191,37 @@ export function createOperator(
       const tierMap = config.cluster.storageTiers;
       switch (type) {
         case "cloudnative-pg":
-          result = createCnpgDatabase(name, clusterConfig, config.backup, provider, helmRelease, tierMap);
+          result = createCnpgDatabase(
+            name,
+            clusterConfig,
+            config.backup,
+            provider,
+            helmRelease,
+            tierMap
+          );
           break;
         case "mariadb-operator":
-          result = createMariadbDatabase(name, clusterConfig, config.backup, provider, helmRelease, tierMap);
+          result = createMariadbDatabase(
+            name,
+            clusterConfig,
+            config.backup,
+            provider,
+            helmRelease,
+            tierMap
+          );
           break;
         case "neo4j":
           // Neo4j Helm chart deploys the instance directly (no CRD operator).
           // The helmRelease IS the Neo4j deployment; createCluster wraps it.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- neo4j config type narrowing handled at runtime
-          result = createNeo4jCluster(name, clusterConfig as any, config.backup, provider, helmRelease, tierMap);
+          result = createNeo4jCluster(
+            name,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- neo4j config type narrowing handled at runtime
+            clusterConfig as any,
+            config.backup,
+            provider,
+            helmRelease,
+            tierMap
+          );
           break;
         default:
           return assertNever(type);

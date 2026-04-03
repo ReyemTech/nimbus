@@ -42,10 +42,7 @@ export { ACCESS_GATEWAY_PROVIDERS } from "./interfaces";
  * });
  * ```
  */
-export function createAccessGateway(
-  name: string,
-  config: IAccessGatewayConfig
-): IAccessGateway {
+export function createAccessGateway(name: string, config: IAccessGatewayConfig): IAccessGateway {
   switch (config.provider) {
     case "tailscale":
       return deployTailscale(name, config);

@@ -39,8 +39,7 @@ export function deployArgocd(
               },
             ],
             annotations: {
-              "traefik.ingress.kubernetes.io/router.entrypoints":
-                "websecure",
+              "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
             },
           },
           metrics: { enabled: true, serviceMonitor: { enabled: true } },

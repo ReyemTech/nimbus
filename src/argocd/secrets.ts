@@ -60,7 +60,9 @@ export function createAppSecrets(
     name,
     ref(key: string) {
       if (!(key in config.secrets)) {
-        throw new Error(`Secret key "${key}" not found in "${name}". Available: ${Object.keys(config.secrets).join(", ")}`);
+        throw new Error(
+          `Secret key "${key}" not found in "${name}". Available: ${Object.keys(config.secrets).join(", ")}`
+        );
       }
       return { secretKeyRef: { name, key } };
     },

@@ -133,29 +133,33 @@ export function createMinioOperator(
         ],
         mountPath: "/export",
         // Allow Prometheus to scrape metrics without auth
-        env: [
-          { name: "MINIO_PROMETHEUS_AUTH_TYPE", value: "public" },
-        ],
+        env: [{ name: "MINIO_PROMETHEUS_AUTH_TYPE", value: "public" }],
       },
     },
     { provider, dependsOn: [helmRelease, configSecret] }
   );
 
   // MinIO alert rules
-  createPrometheusRule(`${TENANT_NAME}-minio-alerts`, "observability", [
-    {
-      name: "nimbus.minio",
-      rules: [
-        {
-          alert: "MinioClusterUnhealthy",
-          expr: `minio_cluster_health_status != 1`,
-          for: "5m",
-          labels: { severity: "critical" },
-          annotations: { summary: "MinIO cluster is unhealthy" },
-        },
-      ],
-    },
-  ], provider, [tenant]);
+  createPrometheusRule(
+    `${TENANT_NAME}-minio-alerts`,
+    "observability",
+    [
+      {
+        name: "nimbus.minio",
+        rules: [
+          {
+            alert: "MinioClusterUnhealthy",
+            expr: `minio_cluster_health_status != 1`,
+            for: "5m",
+            labels: { severity: "critical" },
+            annotations: { summary: "MinIO cluster is unhealthy" },
+          },
+        ],
+      },
+    ],
+    provider,
+    [tenant]
+  );
 
   // MinIO Operator creates a service named "minio" in the tenant namespace
   // S3 API at minio.data.svc.cluster.local:80 (HTTP when requestAutoCert: false)
@@ -176,9 +180,7 @@ export function createMinioOperator(
       const bucketAccessKey = pulumi.secret(
         `nimbus-${bucketName}-${crypto.randomBytes(6).toString("hex")}`
       );
-      const bucketSecretKey = pulumi.secret(
-        crypto.randomBytes(30).toString("base64url")
-      );
+      const bucketSecretKey = pulumi.secret(crypto.randomBytes(30).toString("base64url"));
 
       // Store per-bucket credentials (the Job reads these to create the MinIO user)
       const credentialSecretName = `minio-${bucketName}-credentials`;
@@ -212,10 +214,7 @@ export function createMinioOperator(
           {
             Effect: "Allow",
             Action: ["s3:*"],
-            Resource: [
-              `arn:aws:s3:::${bucketName}`,
-              `arn:aws:s3:::${bucketName}/*`,
-            ],
+            Resource: [`arn:aws:s3:::${bucketName}`, `arn:aws:s3:::${bucketName}/*`],
           },
         ],
       });

@@ -54,7 +54,12 @@ const REDIS_PORT = 6379;
  * @param provider - Kubernetes provider to deploy into
  * @returns Deployed cache resource
  */
-export function createCache(name: string, config: ICacheConfig, provider: k8s.Provider, storageTiers?: StorageTierMap): ICache {
+export function createCache(
+  name: string,
+  config: ICacheConfig,
+  provider: k8s.Provider,
+  storageTiers?: StorageTierMap
+): ICache {
   // Resolve to a single cloud target (take the first when multi-cloud array is given)
   const resolved = resolveCloudTarget(config.cloud);
   const cloud: ResolvedCloudTarget = Array.isArray(resolved) ? resolved[0] : resolved;
@@ -139,20 +144,26 @@ export function createCache(name: string, config: ICacheConfig, provider: k8s.Pr
   };
 
   // Redis alert rules
-  createPrometheusRule(`${name}-redis-alerts`, "observability", [
-    {
-      name: `nimbus.redis.${name}`,
-      rules: [
-        {
-          alert: "RedisDown",
-          expr: `redis_up{job=~".*${name}.*"} == 0`,
-          for: "2m",
-          labels: { severity: "critical" },
-          annotations: { summary: `Redis ${name} is DOWN` },
-        },
-      ],
-    },
-  ], provider, [release]);
+  createPrometheusRule(
+    `${name}-redis-alerts`,
+    "observability",
+    [
+      {
+        name: `nimbus.redis.${name}`,
+        rules: [
+          {
+            alert: "RedisDown",
+            expr: `redis_up{job=~".*${name}.*"} == 0`,
+            for: "2m",
+            labels: { severity: "critical" },
+            annotations: { summary: `Redis ${name} is DOWN` },
+          },
+        ],
+      },
+    ],
+    provider,
+    [release]
+  );
 
   nimbus.register(name, {
     name,

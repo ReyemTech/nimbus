@@ -46,16 +46,10 @@ function deriveSesSmtpPassword(secretKey: string, region: string): string {
   const MESSAGE = "SendRawEmail";
   const VERSION = 0x04;
 
-  let signature = crypto
-    .createHmac("sha256", `AWS4${secretKey}`)
-    .update(DATE)
-    .digest();
+  let signature = crypto.createHmac("sha256", `AWS4${secretKey}`).update(DATE).digest();
   signature = crypto.createHmac("sha256", signature).update(region).digest();
   signature = crypto.createHmac("sha256", signature).update(SERVICE).digest();
-  signature = crypto
-    .createHmac("sha256", signature)
-    .update(TERMINAL)
-    .digest();
+  signature = crypto.createHmac("sha256", signature).update(TERMINAL).digest();
   signature = crypto.createHmac("sha256", signature).update(MESSAGE).digest();
 
   return Buffer.concat([Buffer.from([VERSION]), signature]).toString("base64");
@@ -88,10 +82,7 @@ function deriveSesSmtpPassword(secretKey: string, region: string): string {
  * });
  * ```
  */
-export function createEmailTransport(
-  name: string,
-  config: IEmailTransportConfig
-): IEmailTransport {
+export function createEmailTransport(name: string, config: IEmailTransportConfig): IEmailTransport {
   switch (config.provider) {
     case "ses":
       return createSesTransport(name, config);
@@ -110,10 +101,7 @@ export function createEmailTransport(
 // SES provider
 // ---------------------------------------------------------------------------
 
-function createSesTransport(
-  name: string,
-  config: ISesTransportConfig
-): IEmailTransport {
+function createSesTransport(name: string, config: ISesTransportConfig): IEmailTransport {
   // Lazy import to avoid requiring @pulumi/aws when not using SES
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const aws = require("@pulumi/aws");
@@ -222,10 +210,7 @@ function createSesTransport(
 // SMTP passthrough
 // ---------------------------------------------------------------------------
 
-function createSmtpTransport(
-  name: string,
-  config: ISmtpTransportConfig
-): IEmailTransport {
+function createSmtpTransport(name: string, config: ISmtpTransportConfig): IEmailTransport {
   const host = config.host;
   const port = config.port ?? 587;
   const username = pulumi.output(config.username);
@@ -241,9 +226,7 @@ function createSmtpTransport(
     : undefined;
 
   const password = srcSecret
-    ? srcSecret.data.apply((d) =>
-        Buffer.from(d?.["password"] ?? "", "base64").toString()
-      )
+    ? srcSecret.data.apply((d) => Buffer.from(d?.["password"] ?? "", "base64").toString())
     : pulumi.output("");
 
   // Copy to target namespace if needed
@@ -290,10 +273,7 @@ function createSmtpTransport(
 // Resend
 // ---------------------------------------------------------------------------
 
-function createResendTransport(
-  name: string,
-  config: IResendTransportConfig
-): IEmailTransport {
+function createResendTransport(name: string, config: IResendTransportConfig): IEmailTransport {
   const host = "smtp.resend.com";
   const port = 465;
   const username = pulumi.output("resend");
@@ -352,10 +332,7 @@ function createResendTransport(
 // Mailgun
 // ---------------------------------------------------------------------------
 
-function createMailgunTransport(
-  name: string,
-  config: IMailgunTransportConfig
-): IEmailTransport {
+function createMailgunTransport(name: string, config: IMailgunTransportConfig): IEmailTransport {
   const host = "smtp.mailgun.org";
   const port = 587;
   const smtpUsername = `postmaster@${config.domain}`;

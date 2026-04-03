@@ -23,10 +23,7 @@ export function deployOAuth2Proxy(
   // Generate a deterministic cookie secret from the stack name via SHA-256.
   // In production, override via config.values.config.cookieSecret.
   const cookieSecret = pulumi.output(name).apply((n) => {
-    return createHash("sha256")
-      .update(`${n}-oauth2-proxy-cookie`)
-      .digest("base64")
-      .slice(0, 32);
+    return createHash("sha256").update(`${n}-oauth2-proxy-cookie`).digest("base64").slice(0, 32);
   });
 
   return new k8s.helm.v3.Release(

@@ -25,12 +25,18 @@ export function minioDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 6, x: 0, y: 0 },
         datasource: PROM_DS,
-        targets: [
-          { expr: `minio_cluster_health_status`, refId: "A", legendFormat: "health" },
-        ],
+        targets: [{ expr: `minio_cluster_health_status`, refId: "A", legendFormat: "health" }],
         fieldConfig: {
           defaults: {
-            mappings: [{ type: "value", options: { "1": { text: "Healthy", color: "green" }, "0": { text: "Unhealthy", color: "red" } } }],
+            mappings: [
+              {
+                type: "value",
+                options: {
+                  "1": { text: "Healthy", color: "green" },
+                  "0": { text: "Unhealthy", color: "red" },
+                },
+              },
+            ],
           },
           overrides: [],
         },
@@ -41,9 +47,7 @@ export function minioDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 6, x: 6, y: 0 },
         datasource: PROM_DS,
-        targets: [
-          { expr: `minio_cluster_usage_total_bytes`, refId: "A" },
-        ],
+        targets: [{ expr: `minio_cluster_usage_total_bytes`, refId: "A" }],
         fieldConfig: { defaults: { unit: "bytes" }, overrides: [] },
       },
       {
@@ -52,10 +56,11 @@ export function minioDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 6, x: 12, y: 0 },
         datasource: PROM_DS,
-        targets: [
-          { expr: `minio_cluster_usage_object_total`, refId: "A" },
-        ],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } }, overrides: [] },
+        targets: [{ expr: `minio_cluster_usage_object_total`, refId: "A" }],
+        fieldConfig: {
+          defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } },
+          overrides: [],
+        },
       },
       {
         id: 4,
@@ -63,10 +68,11 @@ export function minioDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 6, x: 18, y: 0 },
         datasource: PROM_DS,
-        targets: [
-          { expr: `minio_cluster_bucket_total`, refId: "A" },
-        ],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } }, overrides: [] },
+        targets: [{ expr: `minio_cluster_bucket_total`, refId: "A" }],
+        fieldConfig: {
+          defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } },
+          overrides: [],
+        },
       },
       // --- Row 2: Capacity ---
       {
@@ -78,13 +84,22 @@ export function minioDashboard(): Record<string, unknown> {
         targets: [
           {
             expr: `minio_node_drive_used_bytes / minio_node_drive_total_bytes`,
-            refId: "A", legendFormat: "{{drive}}",
+            refId: "A",
+            legendFormat: "{{drive}}",
           },
         ],
         fieldConfig: {
           defaults: {
-            unit: "percentunit", min: 0, max: 1,
-            thresholds: { steps: [{ color: "green", value: 0 }, { color: "yellow", value: 0.75 }, { color: "red", value: 0.9 }] },
+            unit: "percentunit",
+            min: 0,
+            max: 1,
+            thresholds: {
+              steps: [
+                { color: "green", value: 0 },
+                { color: "yellow", value: 0.75 },
+                { color: "red", value: 0.9 },
+              ],
+            },
           },
           overrides: [],
         },
@@ -120,7 +135,11 @@ export function minioDashboard(): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 0, y: 12 },
         datasource: PROM_DS,
         targets: [
-          { expr: `rate(minio_s3_requests_incoming_total[5m])`, refId: "A", legendFormat: "incoming/s" },
+          {
+            expr: `rate(minio_s3_requests_incoming_total[5m])`,
+            refId: "A",
+            legendFormat: "incoming/s",
+          },
         ],
         fieldConfig: { defaults: { unit: "reqps" }, overrides: [] },
       },
@@ -131,11 +150,26 @@ export function minioDashboard(): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 12, y: 12 },
         datasource: PROM_DS,
         targets: [
-          { expr: `rate(minio_s3_requests_rejected_auth_total[5m])`, refId: "A", legendFormat: "auth rejected/s" },
-          { expr: `rate(minio_s3_requests_rejected_invalid_total[5m])`, refId: "B", legendFormat: "invalid/s" },
-          { expr: `rate(minio_s3_requests_rejected_header_total[5m])`, refId: "C", legendFormat: "bad header/s" },
+          {
+            expr: `rate(minio_s3_requests_rejected_auth_total[5m])`,
+            refId: "A",
+            legendFormat: "auth rejected/s",
+          },
+          {
+            expr: `rate(minio_s3_requests_rejected_invalid_total[5m])`,
+            refId: "B",
+            legendFormat: "invalid/s",
+          },
+          {
+            expr: `rate(minio_s3_requests_rejected_header_total[5m])`,
+            refId: "C",
+            legendFormat: "bad header/s",
+          },
         ],
-        fieldConfig: { defaults: { unit: "reqps", color: { mode: "fixed", fixedColor: "red" } }, overrides: [] },
+        fieldConfig: {
+          defaults: { unit: "reqps", color: { mode: "fixed", fixedColor: "red" } },
+          overrides: [],
+        },
       },
       // --- Row 4: Traffic ---
       {
@@ -145,7 +179,11 @@ export function minioDashboard(): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 0, y: 20 },
         datasource: PROM_DS,
         targets: [
-          { expr: `rate(minio_s3_traffic_received_bytes[5m])`, refId: "A", legendFormat: "received" },
+          {
+            expr: `rate(minio_s3_traffic_received_bytes[5m])`,
+            refId: "A",
+            legendFormat: "received",
+          },
           { expr: `rate(minio_s3_traffic_sent_bytes[5m])`, refId: "B", legendFormat: "sent" },
         ],
         fieldConfig: { defaults: { unit: "Bps" }, overrides: [] },
@@ -168,9 +206,7 @@ export function minioDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 8, x: 0, y: 28 },
         datasource: PROM_DS,
-        targets: [
-          { expr: `minio_node_process_uptime_seconds`, refId: "A" },
-        ],
+        targets: [{ expr: `minio_node_process_uptime_seconds`, refId: "A" }],
         fieldConfig: { defaults: { unit: "s" }, overrides: [] },
       },
       {
@@ -179,10 +215,18 @@ export function minioDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 8, x: 8, y: 28 },
         datasource: PROM_DS,
-        targets: [
-          { expr: `minio_node_go_routine_total`, refId: "A" },
-        ],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }, { color: "yellow", value: 500 }] } }, overrides: [] },
+        targets: [{ expr: `minio_node_go_routine_total`, refId: "A" }],
+        fieldConfig: {
+          defaults: {
+            thresholds: {
+              steps: [
+                { color: "green", value: 0 },
+                { color: "yellow", value: 500 },
+              ],
+            },
+          },
+          overrides: [],
+        },
       },
       {
         id: 14,
@@ -191,12 +235,23 @@ export function minioDashboard(): Record<string, unknown> {
         gridPos: { h: 4, w: 8, x: 16, y: 28 },
         datasource: PROM_DS,
         targets: [
-          { expr: `minio_node_file_descriptor_open_total / minio_node_file_descriptor_limit_total`, refId: "A" },
+          {
+            expr: `minio_node_file_descriptor_open_total / minio_node_file_descriptor_limit_total`,
+            refId: "A",
+          },
         ],
         fieldConfig: {
           defaults: {
-            unit: "percentunit", min: 0, max: 1,
-            thresholds: { steps: [{ color: "green", value: 0 }, { color: "yellow", value: 0.75 }, { color: "red", value: 0.9 }] },
+            unit: "percentunit",
+            min: 0,
+            max: 1,
+            thresholds: {
+              steps: [
+                { color: "green", value: 0 },
+                { color: "yellow", value: 0.75 },
+                { color: "red", value: 0.9 },
+              ],
+            },
           },
           overrides: [],
         },

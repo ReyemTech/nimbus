@@ -40,7 +40,9 @@ export function pvcDiskUsagePanels(
       ],
       fieldConfig: {
         defaults: {
-          unit: "percentunit", min: 0, max: 1,
+          unit: "percentunit",
+          min: 0,
+          max: 1,
           thresholds: {
             steps: [
               { color: "green", value: 0 },

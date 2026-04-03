@@ -58,7 +58,9 @@ export class ArgoCD {
   repo(name: string): IArgoRepoRef {
     const ref = this.repoRegistry.get(name);
     if (!ref) {
-      throw new Error(`Repo "${name}" not found. Registered: ${[...this.repoRegistry.keys()].join(", ") || "(none)"}`);
+      throw new Error(
+        `Repo "${name}" not found. Registered: ${[...this.repoRegistry.keys()].join(", ") || "(none)"}`
+      );
     }
     return ref;
   }
@@ -85,7 +87,9 @@ export class ArgoCD {
   project(name: string): ArgoProject {
     const project = this.projectRegistry.get(name);
     if (!project) {
-      throw new Error(`Project "${name}" not found. Registered: ${[...this.projectRegistry.keys()].join(", ") || "(none)"}`);
+      throw new Error(
+        `Project "${name}" not found. Registered: ${[...this.projectRegistry.keys()].join(", ") || "(none)"}`
+      );
     }
     return project;
   }
@@ -103,7 +107,9 @@ export class ArgoCD {
   app(name: string): ArgoApp {
     const app = this.appRegistry.get(name);
     if (!app) {
-      throw new Error(`App "${name}" not found. Registered: ${[...this.appRegistry.keys()].join(", ") || "(none)"}`);
+      throw new Error(
+        `App "${name}" not found. Registered: ${[...this.appRegistry.keys()].join(", ") || "(none)"}`
+      );
     }
     return app;
   }
@@ -169,13 +175,16 @@ export class ArgoCD {
               ([host, port, username]) =>
                 `host: ${host}\nport: ${port}\nusername: ${username}\nfrom: ${transport.fromAddress}\n`
             ),
-          "trigger.on-sync-failed": "- when: app.status.sync.status == 'OutOfSync' and app.status.operationState.phase == 'Failed'\n  send: [app-sync-failed]",
-          "trigger.on-health-degraded": "- when: app.status.health.status == 'Degraded'\n  send: [app-health-degraded]",
-          "trigger.on-sync-succeeded": "- when: app.status.operationState.phase == 'Succeeded'\n  send: [app-sync-succeeded]",
+          "trigger.on-sync-failed":
+            "- when: app.status.sync.status == 'OutOfSync' and app.status.operationState.phase == 'Failed'\n  send: [app-sync-failed]",
+          "trigger.on-health-degraded":
+            "- when: app.status.health.status == 'Degraded'\n  send: [app-health-degraded]",
+          "trigger.on-sync-succeeded":
+            "- when: app.status.operationState.phase == 'Succeeded'\n  send: [app-sync-succeeded]",
           "template.app-sync-failed": `message: |\n  Application {{.app.metadata.name}} sync failed.\n  Sync Status: {{.app.status.sync.status}}\n  Health: {{.app.status.health.status}}`,
           "template.app-health-degraded": `message: |\n  Application {{.app.metadata.name}} health degraded.\n  Health: {{.app.status.health.status}}`,
           "template.app-sync-succeeded": `message: |\n  Application {{.app.metadata.name}} synced successfully.\n  Revision: {{.app.status.sync.revision}}`,
-          "defaultTriggers": "- on-sync-failed\n- on-health-degraded",
+          defaultTriggers: "- on-sync-failed\n- on-health-degraded",
         },
       },
       { provider: this.provider, dependsOn: [this.helmRelease] }

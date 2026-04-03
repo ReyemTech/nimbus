@@ -330,34 +330,40 @@ function createSingleCnpgCluster(
 
   // Per-cluster alert rules
   const fc = `cluster="${name}"`;
-  createPrometheusRule(`${name}-cnpg-alerts`, "observability", [
-    {
-      name: `nimbus.cnpg.${name}`,
-      rules: [
-        {
-          alert: "CnpgClusterDown",
-          expr: `cnpg_collector_up{${fc}} == 0`,
-          for: "2m",
-          labels: { severity: "critical" },
-          annotations: { summary: `CNPG cluster ${name} is DOWN` },
-        },
-        {
-          alert: "CnpgReplicationLagCritical",
-          expr: `cnpg_pg_replication_lag{${fc}} > 120`,
-          for: "5m",
-          labels: { severity: "critical" },
-          annotations: { summary: `CNPG replication lag on ${name} is {{ $value }}s` },
-        },
-        {
-          alert: "CnpgBackupStaleCritical",
-          expr: `(time() - cnpg_collector_last_available_backup_timestamp{${fc}}) > 172800`,
-          for: "10m",
-          labels: { severity: "critical" },
-          annotations: { summary: `CNPG backup for ${name} is older than 48h` },
-        },
-      ],
-    },
-  ], provider, [cluster]);
+  createPrometheusRule(
+    `${name}-cnpg-alerts`,
+    "observability",
+    [
+      {
+        name: `nimbus.cnpg.${name}`,
+        rules: [
+          {
+            alert: "CnpgClusterDown",
+            expr: `cnpg_collector_up{${fc}} == 0`,
+            for: "2m",
+            labels: { severity: "critical" },
+            annotations: { summary: `CNPG cluster ${name} is DOWN` },
+          },
+          {
+            alert: "CnpgReplicationLagCritical",
+            expr: `cnpg_pg_replication_lag{${fc}} > 120`,
+            for: "5m",
+            labels: { severity: "critical" },
+            annotations: { summary: `CNPG replication lag on ${name} is {{ $value }}s` },
+          },
+          {
+            alert: "CnpgBackupStaleCritical",
+            expr: `(time() - cnpg_collector_last_available_backup_timestamp{${fc}}) > 172800`,
+            for: "10m",
+            labels: { severity: "critical" },
+            annotations: { summary: `CNPG backup for ${name} is older than 48h` },
+          },
+        ],
+      },
+    ],
+    provider,
+    [cluster]
+  );
 
   // ScheduledBackup CRD if backup is configured
   if (backup) {
@@ -481,8 +487,22 @@ export function createCnpgDatabase(
 
   if (config) {
     const { environments: _, ...cleanConfig } = config;
-    return createSingleCnpgCluster(name, cleanConfig, backupDefaults, provider, operatorRelease, storageTiers);
+    return createSingleCnpgCluster(
+      name,
+      cleanConfig,
+      backupDefaults,
+      provider,
+      operatorRelease,
+      storageTiers
+    );
   }
 
-  return createSingleCnpgCluster(name, config, backupDefaults, provider, operatorRelease, storageTiers);
+  return createSingleCnpgCluster(
+    name,
+    config,
+    backupDefaults,
+    provider,
+    operatorRelease,
+    storageTiers
+  );
 }

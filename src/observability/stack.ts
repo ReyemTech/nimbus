@@ -257,17 +257,35 @@ export function createObservabilityStack(
 
     if (grafanaEnabled && config.grafana?.expose !== false) {
       const originalName = releaseName.apply((r) => `${r}-grafana`);
-      exposedServices.push({ name: "grafana", originalName, namespace, port: 80, label: "grafana" });
+      exposedServices.push({
+        name: "grafana",
+        originalName,
+        namespace,
+        port: 80,
+        label: "grafana",
+      });
     }
 
     if (prometheusEnabled && config.prometheus?.expose !== false) {
       const originalName = `${name}-kube-prometheus-prometheus`;
-      exposedServices.push({ name: "prometheus", originalName, namespace, port: 9090, label: "prometheus" });
+      exposedServices.push({
+        name: "prometheus",
+        originalName,
+        namespace,
+        port: 9090,
+        label: "prometheus",
+      });
     }
 
     if (alertmanagerEnabled && config.alertmanager?.expose !== false) {
       const originalName = `${name}-kube-prometheus-alertmanager`;
-      exposedServices.push({ name: "alertmanager", originalName, namespace, port: 9093, label: "alertmanager" });
+      exposedServices.push({
+        name: "alertmanager",
+        originalName,
+        namespace,
+        port: 9093,
+        label: "alertmanager",
+      });
     }
   }
 
@@ -295,10 +313,7 @@ function deployKubePrometheusStack(
   };
   if (prometheus?.enabled) {
     const promSubdomain = prometheus.subdomain ?? "prometheus";
-    const promStorageClass = resolveStorageTier(
-      prometheus.storageTier ?? "standard",
-      storageTiers
-    );
+    const promStorageClass = resolveStorageTier(prometheus.storageTier ?? "standard", storageTiers);
     prometheusValues["prometheusSpec"] = {
       serviceMonitorSelectorNilUsesHelmValues: false,
       podMonitorSelectorNilUsesHelmValues: false,
@@ -437,7 +452,9 @@ function deployKubePrometheusStack(
         ...prometheus?.values,
         ...grafana?.values,
         ...alertmanager?.values,
-        ...(alertConfig ? { alertmanager: { ...alertmanagerValues, ...buildAlertmanagerConfig(alertConfig) } } : {}),
+        ...(alertConfig
+          ? { alertmanager: { ...alertmanagerValues, ...buildAlertmanagerConfig(alertConfig) } }
+          : {}),
       },
     },
     { provider }
@@ -497,10 +514,7 @@ function deployLoki(
     lokiValues["backend"] = { replicas: 0 };
     lokiValues["read"] = { replicas: 0 };
     lokiValues["write"] = { replicas: 0 };
-    const lokiStorageClass = resolveStorageTier(
-      config.storageTier ?? "standard",
-      storageTiers
-    );
+    const lokiStorageClass = resolveStorageTier(config.storageTier ?? "standard", storageTiers);
     lokiValues["singleBinary"]["persistence"] = {
       enabled: true,
       size: `${storageGb}Gi`,

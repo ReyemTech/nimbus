@@ -28,9 +28,7 @@ export function alertsDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 6, x: 0, y: 0 },
         datasource: PROM_DS,
-        targets: [
-          { expr: `count(ALERTS{alertstate="firing"}) or vector(0)`, refId: "A" },
-        ],
+        targets: [{ expr: `count(ALERTS{alertstate="firing"}) or vector(0)`, refId: "A" }],
         fieldConfig: {
           defaults: {
             thresholds: {
@@ -50,9 +48,7 @@ export function alertsDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 6, x: 6, y: 0 },
         datasource: PROM_DS,
-        targets: [
-          { expr: `count(ALERTS{alertstate="pending"}) or vector(0)`, refId: "A" },
-        ],
+        targets: [{ expr: `count(ALERTS{alertstate="pending"}) or vector(0)`, refId: "A" }],
         fieldConfig: {
           defaults: {
             thresholds: {
@@ -72,7 +68,10 @@ export function alertsDashboard(): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 12, y: 0 },
         datasource: PROM_DS,
         targets: [
-          { expr: `count(ALERTS{alertstate="firing",severity="critical"}) or vector(0)`, refId: "A" },
+          {
+            expr: `count(ALERTS{alertstate="firing",severity="critical"}) or vector(0)`,
+            refId: "A",
+          },
         ],
         fieldConfig: {
           defaults: {
@@ -93,7 +92,10 @@ export function alertsDashboard(): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 18, y: 0 },
         datasource: PROM_DS,
         targets: [
-          { expr: `count(ALERTS{alertstate="firing",severity="warning"}) or vector(0)`, refId: "A" },
+          {
+            expr: `count(ALERTS{alertstate="firing",severity="warning"}) or vector(0)`,
+            refId: "A",
+          },
         ],
         fieldConfig: {
           defaults: {
@@ -245,7 +247,10 @@ export function alertsDashboard(): Record<string, unknown> {
             legendFormat: "{{ integration }}",
           },
         ],
-        fieldConfig: { defaults: { unit: "ops", color: { mode: "fixed", fixedColor: "red" } }, overrides: [] },
+        fieldConfig: {
+          defaults: { unit: "ops", color: { mode: "fixed", fixedColor: "red" } },
+          overrides: [],
+        },
       },
     ],
     schemaVersion: 39,

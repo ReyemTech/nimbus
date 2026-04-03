@@ -462,7 +462,14 @@ describe("rackspace dispatch", () => {
     const result = createCluster("test-rs", {
       cloud: { provider: "rackspace", region: "us-east-iad-1" },
       nodePools: [
-        { name: "workers", instanceType: "gp.vs1.xlarge-iad", minNodes: 3, maxNodes: 3, spot: true, bidPrice: 0.04 },
+        {
+          name: "workers",
+          instanceType: "gp.vs1.xlarge-iad",
+          minNodes: 3,
+          maxNodes: 3,
+          spot: true,
+          bidPrice: 0.04,
+        },
       ],
       providerOptions: {
         rackspace: { cloudspaceName: "my-cloudspace" },
@@ -479,7 +486,7 @@ describe("rackspace dispatch", () => {
       createCluster("test-rs", {
         cloud: "rackspace",
         nodePools: [],
-      }),
+      })
     ).toThrow(/providerOptions.rackspace/);
   });
 
@@ -498,7 +505,7 @@ describe("rackspace dispatch", () => {
       createCluster("test-aws", {
         cloud: "aws",
         nodePools: [],
-      }),
+      })
     ).toThrow(/require a network/);
   });
 });

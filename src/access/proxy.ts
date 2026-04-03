@@ -27,10 +27,7 @@ function buildNginxConfig(
   const serviceConfigs = services.map((svc) => {
     const upstream = pulumi
       .output(svc.originalName ?? svc.name)
-      .apply(
-        (name) =>
-          `${name}.${svc.namespace}.svc.cluster.local:${svc.port}`
-      );
+      .apply((name) => `${name}.${svc.namespace}.svc.cluster.local:${svc.port}`);
 
     return upstream.apply(
       (u) => `    server {

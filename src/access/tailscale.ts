@@ -20,10 +20,7 @@ const NAMESPACE = "access";
 /**
  * Deploy Tailscale access gateway.
  */
-export function deployTailscale(
-  name: string,
-  config: ITailscaleGatewayConfig
-): IAccessGateway {
+export function deployTailscale(name: string, config: ITailscaleGatewayConfig): IAccessGateway {
   const provider = config.cluster.provider;
   const prefix = config.hostnamePrefix ?? name;
   const tags = config.tailscale.tags ?? ["tag:k8s"];
@@ -97,12 +94,22 @@ export function deployTailscale(
   if (config.tailscale.services && config.tailscale.services.length > 0 && config.dns?.enabled) {
     const tld = config.dns.tld ?? "internal";
     const dnsSuffix = `${prefix}.${tld}`;
-    deployAccessProxy(name, config.tailscale.services, dnsSuffix, NAMESPACE, provider, [nsResource]);
+    deployAccessProxy(name, config.tailscale.services, dnsSuffix, NAMESPACE, provider, [
+      nsResource,
+    ]);
   }
 
   // Split DNS — deploy CoreDNS + configure Tailscale API
   if (config.dns?.enabled) {
-    const dns = deployAccessDns(name, prefix, config.dns, NAMESPACE, provider, config.tailscale.services ?? [], [nsResource]);
+    const dns = deployAccessDns(
+      name,
+      prefix,
+      config.dns,
+      NAMESPACE,
+      provider,
+      config.tailscale.services ?? [],
+      [nsResource]
+    );
 
     // Automatically configure Tailscale split DNS via API
     new TailscaleSplitDns(

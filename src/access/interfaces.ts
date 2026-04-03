@@ -94,9 +94,7 @@ export interface IWireGuardGatewayConfig {
 }
 
 /** Access gateway config — discriminated union on provider. */
-export type IAccessGatewayConfig =
-  | ITailscaleGatewayConfig
-  | IWireGuardGatewayConfig;
+export type IAccessGatewayConfig = ITailscaleGatewayConfig | IWireGuardGatewayConfig;
 
 /** Access gateway output. */
 export interface IAccessGateway {

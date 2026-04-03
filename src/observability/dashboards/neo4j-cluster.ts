@@ -33,10 +33,11 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 6, x: 0, y: 0 },
         datasource: NEO4J_DS,
-        targets: [
-          { cypherQuery: "MATCH (n) RETURN count(n) AS nodes", refId: "A" },
-        ],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } }, overrides: [] },
+        targets: [{ cypherQuery: "MATCH (n) RETURN count(n) AS nodes", refId: "A" }],
+        fieldConfig: {
+          defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } },
+          overrides: [],
+        },
       },
       {
         id: 2,
@@ -44,10 +45,11 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 6, x: 6, y: 0 },
         datasource: NEO4J_DS,
-        targets: [
-          { cypherQuery: "MATCH ()-[r]->() RETURN count(r) AS relationships", refId: "A" },
-        ],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "purple", value: 0 }] } }, overrides: [] },
+        targets: [{ cypherQuery: "MATCH ()-[r]->() RETURN count(r) AS relationships", refId: "A" }],
+        fieldConfig: {
+          defaults: { thresholds: { steps: [{ color: "purple", value: 0 }] } },
+          overrides: [],
+        },
       },
       {
         id: 3,
@@ -56,9 +58,16 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 12, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { cypherQuery: "CALL db.labels() YIELD label MATCH (n) WHERE label IN labels(n) RETURN label, count(n) AS count ORDER BY count DESC LIMIT 10", refId: "A" },
+          {
+            cypherQuery:
+              "CALL db.labels() YIELD label MATCH (n) WHERE label IN labels(n) RETURN label, count(n) AS count ORDER BY count DESC LIMIT 10",
+            refId: "A",
+          },
         ],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }] } }, overrides: [] },
+        fieldConfig: {
+          defaults: { thresholds: { steps: [{ color: "green", value: 0 }] } },
+          overrides: [],
+        },
       },
       {
         id: 4,
@@ -67,7 +76,11 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 18, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { cypherQuery: "CALL dbms.queryJmx('org.neo4j:instance=kernel#0,name=Store sizes') YIELD attributes RETURN attributes['TotalStoreSize']['value'] AS bytes", refId: "A" },
+          {
+            cypherQuery:
+              "CALL dbms.queryJmx('org.neo4j:instance=kernel#0,name=Store sizes') YIELD attributes RETURN attributes['TotalStoreSize']['value'] AS bytes",
+            refId: "A",
+          },
         ],
         fieldConfig: { defaults: { unit: "bytes" }, overrides: [] },
       },
@@ -79,9 +92,24 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 4, w: 8, x: 0, y: 4 },
         datasource: NEO4J_DS,
         targets: [
-          { cypherQuery: "SHOW TRANSACTIONS YIELD transactionId RETURN count(transactionId) AS active_transactions", refId: "A" },
+          {
+            cypherQuery:
+              "SHOW TRANSACTIONS YIELD transactionId RETURN count(transactionId) AS active_transactions",
+            refId: "A",
+          },
         ],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }, { color: "yellow", value: 10 }, { color: "red", value: 50 }] } }, overrides: [] },
+        fieldConfig: {
+          defaults: {
+            thresholds: {
+              steps: [
+                { color: "green", value: 0 },
+                { color: "yellow", value: 10 },
+                { color: "red", value: 50 },
+              ],
+            },
+          },
+          overrides: [],
+        },
       },
       {
         id: 6,
@@ -90,7 +118,11 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 4, w: 16, x: 8, y: 4 },
         datasource: NEO4J_DS,
         targets: [
-          { cypherQuery: "SHOW DATABASES YIELD name, currentStatus, role, store RETURN name, currentStatus, role, store", refId: "A" },
+          {
+            cypherQuery:
+              "SHOW DATABASES YIELD name, currentStatus, role, store RETURN name, currentStatus, role, store",
+            refId: "A",
+          },
         ],
       },
       // --- Row 3: Prometheus metrics (Enterprise — shown when available) ---
@@ -102,10 +134,21 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 0, y: 8 },
         datasource: PROM_DS,
         targets: [
-          { expr: `rate(neo4j_database_transaction_committed_total{${fi}}[5m])`, refId: "A", legendFormat: "committed/s" },
-          { expr: `rate(neo4j_database_transaction_rollbacks_total{${fi}}[5m])`, refId: "B", legendFormat: "rollbacks/s" },
+          {
+            expr: `rate(neo4j_database_transaction_committed_total{${fi}}[5m])`,
+            refId: "A",
+            legendFormat: "committed/s",
+          },
+          {
+            expr: `rate(neo4j_database_transaction_rollbacks_total{${fi}}[5m])`,
+            refId: "B",
+            legendFormat: "rollbacks/s",
+          },
         ],
-        fieldConfig: { defaults: { unit: "ops", noValue: "Enterprise metrics not available" }, overrides: [] },
+        fieldConfig: {
+          defaults: { unit: "ops", noValue: "Enterprise metrics not available" },
+          overrides: [],
+        },
       },
       {
         id: 8,
@@ -128,14 +171,20 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         type: "gauge",
         gridPos: { h: 8, w: 12, x: 0, y: 16 },
         datasource: PROM_DS,
-        targets: [
-          { expr: `neo4j_page_cache_hit_ratio{${fi}}`, refId: "A" },
-        ],
+        targets: [{ expr: `neo4j_page_cache_hit_ratio{${fi}}`, refId: "A" }],
         fieldConfig: {
           defaults: {
-            unit: "percentunit", min: 0, max: 1,
+            unit: "percentunit",
+            min: 0,
+            max: 1,
             noValue: "Enterprise metrics not available",
-            thresholds: { steps: [{ color: "red", value: 0 }, { color: "yellow", value: 0.9 }, { color: "green", value: 0.99 }] },
+            thresholds: {
+              steps: [
+                { color: "red", value: 0 },
+                { color: "yellow", value: 0.9 },
+                { color: "green", value: 0.99 },
+              ],
+            },
           },
           overrides: [],
         },
@@ -148,10 +197,21 @@ function neo4jClusterDashboard(clusterName: string): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 12, y: 16 },
         datasource: PROM_DS,
         targets: [
-          { expr: `neo4j_vm_memory_pool_bytes{${fi},pool="heap"}`, refId: "A", legendFormat: "used" },
-          { expr: `neo4j_vm_memory_pool_bytes_max{${fi},pool="heap"}`, refId: "B", legendFormat: "max" },
+          {
+            expr: `neo4j_vm_memory_pool_bytes{${fi},pool="heap"}`,
+            refId: "A",
+            legendFormat: "used",
+          },
+          {
+            expr: `neo4j_vm_memory_pool_bytes_max{${fi},pool="heap"}`,
+            refId: "B",
+            legendFormat: "max",
+          },
         ],
-        fieldConfig: { defaults: { unit: "bytes", noValue: "Enterprise metrics not available" }, overrides: [] },
+        fieldConfig: {
+          defaults: { unit: "bytes", noValue: "Enterprise metrics not available" },
+          overrides: [],
+        },
       },
       // --- PVC Disk Usage ---
       ...pvcDiskUsagePanels(`persistentvolumeclaim=~"data-${clusterName}-.*"`, 11, 24),

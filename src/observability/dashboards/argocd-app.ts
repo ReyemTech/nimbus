@@ -35,8 +35,18 @@ function argoAppDashboardJson(appName: string, namespace: string): Record<string
         type: "stat",
         gridPos: { h: 4, w: 6, x: 0, y: 0 },
         datasource: PROM_DS,
-        targets: [{ expr: `argocd_app_info{name="${appName}"}`, refId: "A", legendFormat: "{{sync_status}}" }],
-        fieldConfig: { defaults: { mappings: [{ type: "value", options: { "1": { text: "Synced", color: "green" } } }] } },
+        targets: [
+          {
+            expr: `argocd_app_info{name="${appName}"}`,
+            refId: "A",
+            legendFormat: "{{sync_status}}",
+          },
+        ],
+        fieldConfig: {
+          defaults: {
+            mappings: [{ type: "value", options: { "1": { text: "Synced", color: "green" } } }],
+          },
+        },
       },
       {
         id: 2,
@@ -44,7 +54,13 @@ function argoAppDashboardJson(appName: string, namespace: string): Record<string
         type: "stat",
         gridPos: { h: 4, w: 6, x: 6, y: 0 },
         datasource: PROM_DS,
-        targets: [{ expr: `argocd_app_info{name="${appName}"}`, refId: "A", legendFormat: "{{health_status}}" }],
+        targets: [
+          {
+            expr: `argocd_app_info{name="${appName}"}`,
+            refId: "A",
+            legendFormat: "{{health_status}}",
+          },
+        ],
       },
       {
         id: 3,
@@ -74,7 +90,11 @@ function argoAppDashboardJson(appName: string, namespace: string): Record<string
         gridPos: { h: 8, w: 12, x: 0, y: 12 },
         datasource: PROM_DS,
         targets: [
-          { expr: `sum(rate(container_cpu_usage_seconds_total{${nsFilter},container!=""}[5m])) by (pod)`, refId: "A", legendFormat: "{{pod}}" },
+          {
+            expr: `sum(rate(container_cpu_usage_seconds_total{${nsFilter},container!=""}[5m])) by (pod)`,
+            refId: "A",
+            legendFormat: "{{pod}}",
+          },
         ],
       },
       {
@@ -84,7 +104,11 @@ function argoAppDashboardJson(appName: string, namespace: string): Record<string
         gridPos: { h: 8, w: 12, x: 12, y: 12 },
         datasource: PROM_DS,
         targets: [
-          { expr: `sum(container_memory_working_set_bytes{${nsFilter},container!=""}) by (pod)`, refId: "A", legendFormat: "{{pod}}" },
+          {
+            expr: `sum(container_memory_working_set_bytes{${nsFilter},container!=""}) by (pod)`,
+            refId: "A",
+            legendFormat: "{{pod}}",
+          },
         ],
         fieldConfig: { defaults: { unit: "bytes" } },
       },
@@ -102,7 +126,19 @@ function argoAppDashboardJson(appName: string, namespace: string): Record<string
             legendFormat: "{{persistentvolumeclaim}}",
           },
         ],
-        fieldConfig: { defaults: { unit: "percent", max: 100, thresholds: { steps: [{ value: 0, color: "green" }, { value: 75, color: "yellow" }, { value: 90, color: "red" }] } } },
+        fieldConfig: {
+          defaults: {
+            unit: "percent",
+            max: 100,
+            thresholds: {
+              steps: [
+                { value: 0, color: "green" },
+                { value: 75, color: "yellow" },
+                { value: 90, color: "red" },
+              ],
+            },
+          },
+        },
       },
       // Row 5: Pod restarts
       {
@@ -112,7 +148,11 @@ function argoAppDashboardJson(appName: string, namespace: string): Record<string
         gridPos: { h: 8, w: 24, x: 0, y: 28 },
         datasource: PROM_DS,
         targets: [
-          { expr: `increase(kube_pod_container_status_restarts_total{${nsFilter}}[1h])`, refId: "A", legendFormat: "{{pod}} / {{container}}" },
+          {
+            expr: `increase(kube_pod_container_status_restarts_total{${nsFilter}}[1h])`,
+            refId: "A",
+            legendFormat: "{{pod}} / {{container}}",
+          },
         ],
       },
     ],
@@ -140,7 +180,9 @@ export function createArgoAppDashboard(
         labels: { grafana_dashboard: "1" },
       },
       data: {
-        [`app-${appName}.json`]: JSON.stringify(argoAppDashboardJson(appName, namespace ?? appName)),
+        [`app-${appName}.json`]: JSON.stringify(
+          argoAppDashboardJson(appName, namespace ?? appName)
+        ),
       },
     },
     { provider }

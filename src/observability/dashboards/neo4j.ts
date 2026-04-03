@@ -27,10 +27,11 @@ export function neo4jDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 6, x: 0, y: 0 },
         datasource: NEO4J_DS,
-        targets: [
-          { cypherQuery: "MATCH (n) RETURN count(n) AS nodes", refId: "A" },
-        ],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } }, overrides: [] },
+        targets: [{ cypherQuery: "MATCH (n) RETURN count(n) AS nodes", refId: "A" }],
+        fieldConfig: {
+          defaults: { thresholds: { steps: [{ color: "blue", value: 0 }] } },
+          overrides: [],
+        },
       },
       {
         id: 2,
@@ -38,10 +39,11 @@ export function neo4jDashboard(): Record<string, unknown> {
         type: "stat",
         gridPos: { h: 4, w: 6, x: 6, y: 0 },
         datasource: NEO4J_DS,
-        targets: [
-          { cypherQuery: "MATCH ()-[r]->() RETURN count(r) AS relationships", refId: "A" },
-        ],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "purple", value: 0 }] } }, overrides: [] },
+        targets: [{ cypherQuery: "MATCH ()-[r]->() RETURN count(r) AS relationships", refId: "A" }],
+        fieldConfig: {
+          defaults: { thresholds: { steps: [{ color: "purple", value: 0 }] } },
+          overrides: [],
+        },
       },
       {
         id: 3,
@@ -50,9 +52,24 @@ export function neo4jDashboard(): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 12, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { cypherQuery: "SHOW TRANSACTIONS YIELD transactionId RETURN count(transactionId) AS active", refId: "A" },
+          {
+            cypherQuery:
+              "SHOW TRANSACTIONS YIELD transactionId RETURN count(transactionId) AS active",
+            refId: "A",
+          },
         ],
-        fieldConfig: { defaults: { thresholds: { steps: [{ color: "green", value: 0 }, { color: "yellow", value: 10 }, { color: "red", value: 50 }] } }, overrides: [] },
+        fieldConfig: {
+          defaults: {
+            thresholds: {
+              steps: [
+                { color: "green", value: 0 },
+                { color: "yellow", value: 10 },
+                { color: "red", value: 50 },
+              ],
+            },
+          },
+          overrides: [],
+        },
       },
       {
         id: 4,
@@ -61,7 +78,11 @@ export function neo4jDashboard(): Record<string, unknown> {
         gridPos: { h: 4, w: 6, x: 18, y: 0 },
         datasource: NEO4J_DS,
         targets: [
-          { cypherQuery: "SHOW DATABASES YIELD name, currentStatus, role RETURN name, currentStatus, role", refId: "A" },
+          {
+            cypherQuery:
+              "SHOW DATABASES YIELD name, currentStatus, role RETURN name, currentStatus, role",
+            refId: "A",
+          },
         ],
       },
       // --- Row 2: Label & Relationship type distribution ---
@@ -72,7 +93,11 @@ export function neo4jDashboard(): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 0, y: 4 },
         datasource: NEO4J_DS,
         targets: [
-          { cypherQuery: "CALL db.labels() YIELD label CALL { WITH label MATCH (n) WHERE label IN labels(n) RETURN count(n) AS count } RETURN label, count ORDER BY count DESC LIMIT 15", refId: "A" },
+          {
+            cypherQuery:
+              "CALL db.labels() YIELD label CALL { WITH label MATCH (n) WHERE label IN labels(n) RETURN count(n) AS count } RETURN label, count ORDER BY count DESC LIMIT 15",
+            refId: "A",
+          },
         ],
       },
       {
@@ -82,7 +107,11 @@ export function neo4jDashboard(): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 12, y: 4 },
         datasource: NEO4J_DS,
         targets: [
-          { cypherQuery: "CALL db.relationshipTypes() YIELD relationshipType AS type CALL { WITH type MATCH ()-[r]->() WHERE type(r) = type RETURN count(r) AS count } RETURN type, count ORDER BY count DESC LIMIT 15", refId: "A" },
+          {
+            cypherQuery:
+              "CALL db.relationshipTypes() YIELD relationshipType AS type CALL { WITH type MATCH ()-[r]->() WHERE type(r) = type RETURN count(r) AS count } RETURN type, count ORDER BY count DESC LIMIT 15",
+            refId: "A",
+          },
         ],
       },
       // --- Row 3: Prometheus metrics (Enterprise) ---
@@ -94,10 +123,21 @@ export function neo4jDashboard(): Record<string, unknown> {
         gridPos: { h: 8, w: 12, x: 0, y: 12 },
         datasource: PROM_DS,
         targets: [
-          { expr: `rate(neo4j_database_transaction_committed_total[5m])`, refId: "A", legendFormat: "{{database}} committed/s" },
-          { expr: `rate(neo4j_database_transaction_rollbacks_total[5m])`, refId: "B", legendFormat: "{{database}} rollbacks/s" },
+          {
+            expr: `rate(neo4j_database_transaction_committed_total[5m])`,
+            refId: "A",
+            legendFormat: "{{database}} committed/s",
+          },
+          {
+            expr: `rate(neo4j_database_transaction_rollbacks_total[5m])`,
+            refId: "B",
+            legendFormat: "{{database}} rollbacks/s",
+          },
         ],
-        fieldConfig: { defaults: { unit: "ops", noValue: "Enterprise metrics not available" }, overrides: [] },
+        fieldConfig: {
+          defaults: { unit: "ops", noValue: "Enterprise metrics not available" },
+          overrides: [],
+        },
       },
       {
         id: 8,
@@ -106,10 +146,11 @@ export function neo4jDashboard(): Record<string, unknown> {
         type: "timeseries",
         gridPos: { h: 8, w: 12, x: 12, y: 12 },
         datasource: PROM_DS,
-        targets: [
-          { expr: `rate(neo4j_vm_gc_time_total[5m])`, refId: "A", legendFormat: "{{gc}}" },
-        ],
-        fieldConfig: { defaults: { unit: "ms", noValue: "Enterprise metrics not available" }, overrides: [] },
+        targets: [{ expr: `rate(neo4j_vm_gc_time_total[5m])`, refId: "A", legendFormat: "{{gc}}" }],
+        fieldConfig: {
+          defaults: { unit: "ms", noValue: "Enterprise metrics not available" },
+          overrides: [],
+        },
       },
     ],
     schemaVersion: 39,

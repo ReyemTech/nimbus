@@ -35,7 +35,7 @@ import { resolveCloudTarget } from "../types";
 export function createRackspaceSpotCluster(
   name: string,
   config: IClusterConfig,
-  options: IRackspaceProviderOptions,
+  options: IRackspaceProviderOptions
 ): ICluster {
   const cloud = Array.isArray(config.cloud) ? (config.cloud[0] ?? "rackspace") : config.cloud;
   const target = resolveCloudTarget(cloud);
@@ -52,7 +52,7 @@ export function createRackspaceSpotCluster(
     const bidPrice = np.bidPrice ?? options.defaultBidPrice;
     if (bidPrice === undefined) {
       throw new Error(
-        `Node pool "${np.name}" has no bidPrice and no defaultBidPrice was set in provider options.`,
+        `Node pool "${np.name}" has no bidPrice and no defaultBidPrice was set in provider options.`
       );
     }
 
@@ -66,12 +66,10 @@ export function createRackspaceSpotCluster(
         serverClass: np.instanceType,
         bidPrice,
         desiredCount: np.desiredNodes ?? np.minNodes,
-        autoscaling: hasAutoscaling
-          ? { minNodes: np.minNodes, maxNodes: np.maxNodes }
-          : undefined,
+        autoscaling: hasAutoscaling ? { minNodes: np.minNodes, maxNodes: np.maxNodes } : undefined,
         labels: np.labels,
       },
-      importId ? { import: importId } : undefined,
+      importId ? { import: importId } : undefined
     );
   }
 
@@ -84,11 +82,14 @@ export function createRackspaceSpotCluster(
   const endpoint = kubeconfigResult.host;
 
   // K8s provider
-  const provider = new k8s.Provider(`${name}-k8s`, {
-    kubeconfig,
-  }, options.k8sProviderAliases?.length
-    ? { aliases: options.k8sProviderAliases as pulumi.Alias[] }
-    : undefined,
+  const provider = new k8s.Provider(
+    `${name}-k8s`,
+    {
+      kubeconfig,
+    },
+    options.k8sProviderAliases?.length
+      ? { aliases: options.k8sProviderAliases as pulumi.Alias[] }
+      : undefined
   );
 
   return {
@@ -96,7 +97,7 @@ export function createRackspaceSpotCluster(
     cloud: target,
     endpoint,
     kubeconfig,
-    version: cloudspace.kubernetesVersion.apply(v => v ?? config.version ?? "unknown"),
+    version: cloudspace.kubernetesVersion.apply((v) => v ?? config.version ?? "unknown"),
     nodePools: config.nodePools,
     nativeResource: provider as unknown as pulumi.Resource,
     provider,

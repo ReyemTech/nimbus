@@ -123,7 +123,13 @@ vi.mock("@pulumi/kubernetes", () => {
     apiextensions: { CustomResource: mockCustomResource },
     core: { v1: { Secret: mockSecret, ConfigMap: mockConfigMap } },
     networking: { v1: { Ingress: mockIngress } },
-    rbac: { v1: { ClusterRoleBinding: mockClusterRoleBinding, Role: mockRole, RoleBinding: mockRoleBinding } },
+    rbac: {
+      v1: {
+        ClusterRoleBinding: mockClusterRoleBinding,
+        Role: mockRole,
+        RoleBinding: mockRoleBinding,
+      },
+    },
     // eslint-disable-next-line @typescript-eslint/no-extraneous-class
     Provider: class {},
   };

@@ -5,11 +5,7 @@
  */
 
 import * as pulumi from "@pulumi/pulumi";
-import type {
-  INimbusResource,
-  INimbusResourceRef,
-  NimbusResourceType,
-} from "./interfaces";
+import type { INimbusResource, INimbusResourceRef, NimbusResourceType } from "./interfaces";
 
 /**
  * Wrap a registered resource with helper methods.
@@ -39,7 +35,7 @@ function wrapResource(resource: INimbusResource): INimbusResourceRef {
       }
       const resolvedKey = key
         ? (resource.secretRef.keys[key] ?? key)
-        : Object.values(resource.secretRef.keys)[0] ?? "password";
+        : (Object.values(resource.secretRef.keys)[0] ?? "password");
       return {
         secretKeyRef: {
           name: resource.secretRef.name,
@@ -100,8 +96,6 @@ export class NimbusRegistry {
   }
 
   private byType(type: NimbusResourceType): ReadonlyArray<INimbusResourceRef> {
-    return [...this.resources.values()]
-      .filter((r) => r.type === type)
-      .map(wrapResource);
+    return [...this.resources.values()].filter((r) => r.type === type).map(wrapResource);
   }
 }

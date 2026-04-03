@@ -192,40 +192,29 @@ exec sleep infinity
  * Must include listener + storage because setting standalone.config
  * overrides the chart's auto-generated config.
  */
-function buildVaultHclConfig(
-  ha: boolean,
-  sealStanza?: string
-): string {
+function buildVaultHclConfig(ha: boolean, sealStanza?: string): string {
   const lines = [
-    'ui = true',
-    '',
+    "ui = true",
+    "",
     'listener "tcp" {',
-    '  tls_disable = 1',
+    "  tls_disable = 1",
     '  address     = "[::]:8200"',
     '  cluster_address = "[::]:8201"',
-    '}',
-    '',
+    "}",
+    "",
   ];
 
   if (ha) {
-    lines.push(
-      'storage "raft" {',
-      '  path = "/vault/data"',
-      '}',
-    );
+    lines.push('storage "raft" {', '  path = "/vault/data"', "}");
   } else {
-    lines.push(
-      'storage "file" {',
-      '  path = "/vault/data"',
-      '}',
-    );
+    lines.push('storage "file" {', '  path = "/vault/data"', "}");
   }
 
   if (sealStanza) {
-    lines.push('', sealStanza);
+    lines.push("", sealStanza);
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 /**
@@ -241,8 +230,7 @@ function buildSealStanza(
     case "awskms":
       if (!kmsKeyId) throw new Error("KMS key ID required for awskms seal");
       return kmsKeyId.apply(
-        (id) =>
-          `seal "awskms" {\n  region     = "${config.region}"\n  kms_key_id = "${id}"\n}`
+        (id) => `seal "awskms" {\n  region     = "${config.region}"\n  kms_key_id = "${id}"\n}`
       );
 
     case "azurekeyvault":
@@ -364,7 +352,6 @@ export function deployVault(
   const certName = domain.replace(/\./g, "-");
   const bootstrap = config.bootstrap ?? true;
 
-
   // Auto-unseal: provision cloud resources + build seal stanza
   let sealStanza: string | pulumi.Output<string> | undefined;
   const extraSecretEnvVars: Record<string, unknown>[] = [];
@@ -372,11 +359,7 @@ export function deployVault(
   if (config.autoUnseal) {
     switch (config.autoUnseal.provider) {
       case "awskms": {
-        const { kmsKeyId } = provisionAwsKmsUnseal(
-          name,
-          config.autoUnseal,
-          provider
-        );
+        const { kmsKeyId } = provisionAwsKmsUnseal(name, config.autoUnseal, provider);
         sealStanza = buildSealStanza(config.autoUnseal, kmsKeyId);
         extraSecretEnvVars.push(
           {
@@ -393,9 +376,7 @@ export function deployVault(
         break;
       }
       case "azurekeyvault":
-        throw new Error(
-          "Azure Key Vault auto-unseal is not yet implemented."
-        );
+        throw new Error("Azure Key Vault auto-unseal is not yet implemented.");
       case "gcpckms":
         throw new Error("GCP Cloud KMS auto-unseal is not yet implemented.");
     }
@@ -425,9 +406,7 @@ export function deployVault(
           kind: "ClusterRole",
           name: "system:auth-delegator",
         },
-        subjects: [
-          { kind: "ServiceAccount", name: "vault", namespace: "vault" },
-        ],
+        subjects: [{ kind: "ServiceAccount", name: "vault", namespace: "vault" }],
       },
       { provider }
     );
@@ -460,9 +439,7 @@ export function deployVault(
           kind: "Role",
           name: "vault-secret-manager",
         },
-        subjects: [
-          { kind: "ServiceAccount", name: "vault", namespace: "vault" },
-        ],
+        subjects: [{ kind: "ServiceAccount", name: "vault", namespace: "vault" }],
       },
       { provider, dependsOn: [secretRole] }
     );
@@ -498,9 +475,7 @@ export function deployVault(
       configObj["config"] = buildVaultHclConfig(ha, sealStanza);
     } else {
       // pulumi.Output<string>
-      configObj["config"] = sealStanza.apply((seal) =>
-        buildVaultHclConfig(ha, seal)
-      );
+      configObj["config"] = sealStanza.apply((seal) => buildVaultHclConfig(ha, seal));
     }
   }
 

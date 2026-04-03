@@ -53,10 +53,7 @@ function buildClientConfig(
 /**
  * Deploy WireGuard access gateway.
  */
-export function deployWireGuard(
-  name: string,
-  config: IWireGuardGatewayConfig
-): IAccessGateway {
+export function deployWireGuard(name: string, config: IWireGuardGatewayConfig): IAccessGateway {
   const k8sProvider = config.cluster.provider;
   const prefix = config.hostnamePrefix ?? name;
   const listenPort = config.wireguard.listenPort ?? DEFAULT_PORT;
@@ -109,28 +106,30 @@ export function deployWireGuard(
     "<run 'kubectl exec wireguard-0 -n access -- wg show wg0 public-key' after first deploy>"
   );
 
-  const clientConfigs = pulumi.output(
-    Object.fromEntries(
-      config.wireguard.peers.map((peer) => [
-        peer.name,
-        buildClientConfig(
-          peer,
-          serverPublicKey,
-          config.wireguard.endpoint,
-          listenPort,
-          config.wireguard.routes,
-          config.wireguard.serverCidr,
-          dnsClusterIp
-        ),
-      ])
+  const clientConfigs = pulumi
+    .output(
+      Object.fromEntries(
+        config.wireguard.peers.map((peer) => [
+          peer.name,
+          buildClientConfig(
+            peer,
+            serverPublicKey,
+            config.wireguard.endpoint,
+            listenPort,
+            config.wireguard.routes,
+            config.wireguard.serverCidr,
+            dnsClusterIp
+          ),
+        ])
+      )
     )
-  ).apply((entries) => {
-    const result: Record<string, string> = {};
-    for (const [key, value] of Object.entries(entries)) {
-      result[key] = value as string;
-    }
-    return result;
-  });
+    .apply((entries) => {
+      const result: Record<string, string> = {};
+      for (const [key, value] of Object.entries(entries)) {
+        result[key] = value as string;
+      }
+      return result;
+    });
 
   return {
     name,

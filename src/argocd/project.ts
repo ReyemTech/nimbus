@@ -5,7 +5,7 @@
  */
 
 import * as k8s from "@pulumi/kubernetes";
-import * as pulumi from "@pulumi/pulumi";
+import type * as pulumi from "@pulumi/pulumi";
 import type { IArgoProjectConfig, IArgoAppConfig } from "./interfaces";
 import type { ArgoApp } from "./app";
 

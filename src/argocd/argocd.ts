@@ -47,6 +47,7 @@ export class ArgoCD {
 
   addRepo(name: string, config: IArgoRepoConfig): IArgoRepoRef {
     if (this.repoRegistry.has(name)) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- checked by has() above
       return this.repoRegistry.get(name)!;
     }
     const ref = createArgoRepo(this.name, name, config, this.provider, [this.helmRelease]);
@@ -66,6 +67,7 @@ export class ArgoCD {
 
   createProject(name: string, config: IArgoProjectConfig = {}): ArgoProject {
     if (this.projectRegistry.has(name)) {
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- checked by has() above
       return this.projectRegistry.get(name)!;
     }
     const project = new ArgoProject(

@@ -17,7 +17,7 @@ import * as crypto from "node:crypto";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { ensureNamespace } from "../utils/ensure-namespace";
-import { resolveStorageTier, type StorageTierMap } from "../types/storage-tiers";
+import { resolveStorageTier, type StorageTier, type StorageTierMap } from "../types/storage-tiers";
 import type {
   IBackupDefaults,
   IOperatorDatabaseConfig,
@@ -39,7 +39,7 @@ export interface INeo4jClusterConfig {
   /** Storage size in GB. Default: 10. */
   readonly storageGb?: number;
   /** Storage performance tier. Default: "performance". */
-  readonly storageTier?: import("../types/storage-tiers").StorageTier;
+  readonly storageTier?: StorageTier;
   /** CPU and memory resource requests. */
   readonly resources?: {
     readonly cpu?: string;

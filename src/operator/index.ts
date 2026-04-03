@@ -199,6 +199,7 @@ export function createOperator(
         case "neo4j":
           // Neo4j Helm chart deploys the instance directly (no CRD operator).
           // The helmRelease IS the Neo4j deployment; createCluster wraps it.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- neo4j config type narrowing handled at runtime
           result = createNeo4jCluster(name, clusterConfig as any, config.backup, provider, helmRelease, tierMap);
           break;
         default:

@@ -7,7 +7,7 @@
  */
 
 import * as k8s from "@pulumi/kubernetes";
-import * as pulumi from "@pulumi/pulumi";
+import type * as pulumi from "@pulumi/pulumi";
 import * as random from "@pulumi/random";
 import type { IArgoSecretsConfig, IArgoAppSecrets } from "./interfaces";
 import type { ICluster } from "../cluster";

@@ -9,7 +9,7 @@
  */
 
 import * as k8s from "@pulumi/kubernetes";
-import * as pulumi from "@pulumi/pulumi";
+import type * as pulumi from "@pulumi/pulumi";
 import * as spot from "@reyemtech/pulumi-rackspace-spot";
 import type { ICluster, IClusterConfig } from "../cluster";
 import type { IRackspaceProviderOptions } from "../factories/types";

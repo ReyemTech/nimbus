@@ -12,5 +12,6 @@ export type {
   IEksClusterExtensions,
   IAksClusterExtensions,
   IGkeClusterExtensions,
+  IRackspaceClusterExtensions,
   ProviderClusterExtensions,
 } from "./interfaces";

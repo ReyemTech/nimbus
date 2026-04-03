@@ -50,6 +50,27 @@ export interface IAzureProviderOptions {
   readonly sku?: "standard" | "premium";
 }
 
+/** Rackspace Spot-specific options passed through factory functions. */
+export interface IRackspaceProviderOptions {
+  /** Cloudspace name in the Rackspace Spot platform. Required. */
+  readonly cloudspaceName: string;
+  /** CNI plugin. Default: "calico". */
+  readonly cni?: "calico" | "cilium" | "byocni";
+  /** HA control plane. Default: true. */
+  readonly haControlPlane?: boolean;
+  /** Preemption webhook URL (e.g., Slack webhook). */
+  readonly preemptionWebhookUrl?: string;
+  /** Wait for cloudspace to be ready. Default: true. */
+  readonly waitUntilReady?: boolean;
+  /** Default bid price (USD) for spot node pools that don't specify their own. */
+  readonly defaultBidPrice?: number;
+  /** Pulumi import IDs for adopting existing resources. */
+  readonly importIds?: {
+    readonly cloudspaceId?: string;
+    readonly nodePoolIds?: Record<string, string>;
+  };
+}
+
 /**
  * Provider-specific options keyed by cloud provider.
  *
@@ -70,6 +91,7 @@ export interface IAzureProviderOptions {
 export interface IProviderOptions {
   readonly aws?: IAwsProviderOptions;
   readonly azure?: IAzureProviderOptions;
+  readonly rackspace?: IRackspaceProviderOptions;
 }
 
 /**

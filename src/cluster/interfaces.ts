@@ -57,6 +57,8 @@ export interface INodePool {
   readonly taints?: ReadonlyArray<INodeTaint>;
   /** Node pool mode (AKS concept: "system" vs "user"). Maps to labels on other providers. */
   readonly mode?: "system" | "user";
+  /** Max bid price in USD for spot/preemptible instances. Used by Rackspace Spot, optional for AWS Spot. */
+  readonly bidPrice?: number;
 }
 
 /**
@@ -89,6 +91,8 @@ export interface IClusterConfig {
   readonly networkId?: pulumi.Input<string>;
   /** Resource tags applied to the cluster and child resources. */
   readonly tags?: Readonly<Record<string, string>>;
+  /** Storage tier mapping. Maps abstract tiers to provider-specific storage class names. */
+  readonly storageTiers?: StorageTierMap;
 }
 
 /**
@@ -158,6 +162,14 @@ export interface IGkeClusterExtensions {
   readonly autopilot?: boolean;
 }
 
+/** Rackspace Spot-specific cluster extensions. */
+export interface IRackspaceClusterExtensions {
+  /** Discriminant identifying this as Rackspace. */
+  readonly provider: "rackspace";
+  /** Cloudspace name in the Rackspace Spot platform. */
+  readonly cloudspaceName: string;
+}
+
 /**
  * Discriminated union of provider-specific cluster extensions.
  * Use `provider` field to narrow the type in a switch/case.
@@ -165,4 +177,5 @@ export interface IGkeClusterExtensions {
 export type ProviderClusterExtensions =
   | IEksClusterExtensions
   | IAksClusterExtensions
-  | IGkeClusterExtensions;
+  | IGkeClusterExtensions
+  | IRackspaceClusterExtensions;

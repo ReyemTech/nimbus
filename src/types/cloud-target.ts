@@ -65,7 +65,7 @@ export const DEFAULT_REGIONS: Readonly<Record<CloudProvider, string>> = {
   aws: "us-east-1",
   azure: "eastus",
   gcp: "us-central1",
-  rackspace: "us-central-iad3",
+  rackspace: "us-east-iad-1",
 } as const;
 
 /** All valid cloud providers for exhaustive checks. */

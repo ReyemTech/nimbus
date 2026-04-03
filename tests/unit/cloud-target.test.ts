@@ -101,7 +101,7 @@ describe("DEFAULT_REGIONS", () => {
   });
 
   it("includes rackspace", () => {
-    expect(DEFAULT_REGIONS.rackspace).toBe("us-central-iad3");
+    expect(DEFAULT_REGIONS.rackspace).toBe("us-east-iad-1");
   });
 });
 

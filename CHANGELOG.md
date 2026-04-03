@@ -1,3 +1,10 @@
+# [2.1.0](https://github.com/ReyemTech/nimbus/compare/v2.0.2...v2.1.0) (2026-04-03)
+
+
+### Features
+
+* **neo4j:** add NEO4J_ prefixed keys to replicated secrets ([8bc37d3](https://github.com/ReyemTech/nimbus/commit/8bc37d30a825d2741cbd8a27734f68a896caba1f))
+
 ## [2.0.2](https://github.com/ReyemTech/nimbus/compare/v2.0.1...v2.0.2) (2026-04-03)
 
 

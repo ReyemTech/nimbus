@@ -33,12 +33,9 @@ function buildSourceSpec(source: IArgoAppSource): Record<string, unknown> {
   }
 
   let repoURL: string;
-  let isOci = false;
 
   if ("repo" in source) {
-    const repo = source.repo as IArgoRepoRef;
-    repoURL = repo.url;
-    isOci = repo.type === "oci";
+    repoURL = (source.repo as IArgoRepoRef).url;
   } else {
     repoURL = (source as IArgoPublicSource).repoURL;
   }

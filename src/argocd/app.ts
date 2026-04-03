@@ -44,7 +44,7 @@ function buildSourceSpec(source: IArgoAppSource): Record<string, unknown> {
   }
 
   const spec: Record<string, unknown> = {
-    repoURL: isOci ? `oci://${repoURL}` : repoURL,
+    repoURL,
   };
 
   if (source.chart) {

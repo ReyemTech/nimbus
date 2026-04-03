@@ -483,6 +483,11 @@ export function createNeo4jCluster(
               uri: pulumi
                 .all([endpoint, stablePassword])
                 .apply(([h, pw]) => `bolt://${username}:${pw}@${h}:${NEO4J_BOLT_PORT}`),
+              // App-friendly keys (mountable as envFrom without key remapping)
+              NEO4J_URI: pulumi.interpolate`neo4j://${endpoint}:${NEO4J_BOLT_PORT}`,
+              NEO4J_USERNAME: username,
+              NEO4J_PASSWORD: stablePassword,
+              NEO4J_DATABASE: dbName,
             },
           },
           { provider, dependsOn: [initJob, nsResource] }

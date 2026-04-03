@@ -46,12 +46,13 @@ export function createRackspaceSpotCluster(
       preemptionWebhook: options.preemptionWebhookUrl,
       waitUntilReady: options.waitUntilReady ?? true,
     },
-    options.importIds?.cloudspaceId
-      ? {
-          import: options.importIds.cloudspaceId,
-          ignoreChanges: ["hacontrolPlane", "waitUntilReady", "cni", "region"],
-        }
-      : undefined,
+    {
+      // hacontrolPlane, waitUntilReady, cni, region are immutable after creation
+      ignoreChanges: ["hacontrolPlane", "waitUntilReady", "cni", "region"],
+      ...(options.importIds?.cloudspaceId
+        ? { import: options.importIds.cloudspaceId }
+        : {}),
+    },
   );
 
   // Spot node pools

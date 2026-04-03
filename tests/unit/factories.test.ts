@@ -30,10 +30,11 @@ function makeNetwork(name: string, provider: "aws" | "azure"): INetwork {
   };
 }
 
-function makeCluster(name: string, provider: "aws" | "azure"): ICluster {
+function makeCluster(name: string, provider: "aws" | "azure" | "rackspace"): ICluster {
+  const regionMap = { aws: "us-east-1", azure: "eastus", rackspace: "us-east-iad-1" };
   return {
     name,
-    cloud: { provider, region: provider === "aws" ? "us-east-1" : "eastus" },
+    cloud: { provider, region: regionMap[provider] },
     endpoint: mockOutput(`https://${provider}-mock`),
     kubeconfig: mockOutput("{}"),
     version: mockOutput("1.32"),
@@ -81,6 +82,10 @@ vi.mock("../../src/azure", () => ({
   createAzureSecrets: vi.fn((name: string) => makeSecrets(name, "azure")),
 }));
 
+vi.mock("../../src/rackspace", () => ({
+  createRackspaceSpotCluster: vi.fn((name: string) => makeCluster(name, "rackspace")),
+}));
+
 import { createNetwork } from "../../src/factories/network";
 import { createCluster } from "../../src/factories/cluster";
 import { createDns } from "../../src/factories/dns";
@@ -98,6 +103,7 @@ import {
   createAzureDns,
   createAzureSecrets,
 } from "../../src/azure";
+import { createRackspaceSpotCluster } from "../../src/rackspace";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -448,5 +454,51 @@ describe("multi-cloud naming", () => {
     });
 
     expect(vi.mocked(createAwsNetwork).mock.calls[0]?.[0]).toBe("prod");
+  });
+});
+
+describe("rackspace dispatch", () => {
+  it("dispatches to createRackspaceSpotCluster for cloud: rackspace", () => {
+    const result = createCluster("test-rs", {
+      cloud: { provider: "rackspace", region: "us-east-iad-1" },
+      nodePools: [
+        { name: "workers", instanceType: "gp.vs1.xlarge-iad", minNodes: 3, maxNodes: 3, spot: true, bidPrice: 0.04 },
+      ],
+      providerOptions: {
+        rackspace: { cloudspaceName: "my-cloudspace" },
+      },
+    });
+
+    expect(createRackspaceSpotCluster).toHaveBeenCalledOnce();
+    expect(result).toBeDefined();
+    expect((result as ICluster).cloud.provider).toBe("rackspace");
+  });
+
+  it("throws when rackspace options are missing", () => {
+    expect(() =>
+      createCluster("test-rs", {
+        cloud: "rackspace",
+        nodePools: [],
+      }),
+    ).toThrow(/providerOptions.rackspace/);
+  });
+
+  it("does not require a network parameter for rackspace", () => {
+    const result = createCluster("test-rs", {
+      cloud: "rackspace",
+      nodePools: [],
+      providerOptions: { rackspace: { cloudspaceName: "test" } },
+    });
+
+    expect(result).toBeDefined();
+  });
+
+  it("still requires network for aws", () => {
+    expect(() =>
+      createCluster("test-aws", {
+        cloud: "aws",
+        nodePools: [],
+      }),
+    ).toThrow(/require a network/);
   });
 });

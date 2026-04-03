@@ -89,8 +89,7 @@
     "@pulumi/aws": ">=6.0.0",
     "@pulumi/azure-native": ">=2.0.0",
     "@pulumi/kubernetes": ">=4.0.0",
-    "@pulumi/pulumi": ">=3.0.0",
-    "@pulumi/spot": ">=0.1.0"
+    "@pulumi/pulumi": ">=3.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
@@ -111,8 +110,7 @@
     "typedoc": "^0.28.16",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^3.0.0",
-    "@pulumi/spot": "file:sdks/spot"
+    "vitest": "^3.0.0"
   },
   "dependencies": {
     "@pulumi/random": "^4.19.2"

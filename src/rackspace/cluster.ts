@@ -1,26 +1,25 @@
 /**
- * Rackspace Spot cluster implementation — reads existing cloudspace, manages node pools.
+ * Rackspace Spot cluster implementation — native Pulumi provider.
  *
- * The cloudspace is treated as a data source (read-only) because the Rackspace Spot
- * Terraform provider sends ALL fields on update, and the Rackspace API webhook rejects
- * updates containing immutable fields. Node pools are managed resources that can be
- * imported and updated normally.
+ * Uses @reyemtech/pulumi-rackspace-spot which calls the Rackspace Spot
+ * K8s API directly. CloudSpace is a managed resource with proper diff
+ * (only mutable fields trigger updates). No more TF bridge bugs.
  *
  * @module rackspace/cluster
  */
 
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
-import * as spot from "@pulumi/spot";
+import * as spot from "@reyemtech/pulumi-rackspace-spot";
 import type { ICluster, IClusterConfig } from "../cluster";
 import type { IRackspaceProviderOptions } from "../factories/types";
 import { resolveCloudTarget } from "../types";
 
 /**
- * Create a Rackspace Spot cluster (reads cloudspace, manages node pools).
+ * Create a Rackspace Spot cluster via the native Pulumi provider.
  *
- * The cloudspace must already exist — this function reads it via data source.
- * Node pools are created/managed as Pulumi resources and can be imported.
+ * Manages cloudspace and node pools as proper Pulumi resources with
+ * correct diff behavior. Kubeconfig is fetched fresh on every deployment.
  *
  * @example
  * ```typescript
@@ -41,12 +40,14 @@ export function createRackspaceSpotCluster(
   const cloud = Array.isArray(config.cloud) ? (config.cloud[0] ?? "rackspace") : config.cloud;
   const target = resolveCloudTarget(cloud);
 
-  // Read existing cloudspace (data source — no mutations)
+  // CloudSpace — read via data source. The native provider's CloudSpace resource
+  // has a protobuf serialization issue during import (toJavaScript error).
+  // TODO: Switch to managed resource when import is fixed.
   const cloudspace = spot.getCloudspaceOutput({
     name: options.cloudspaceName,
   });
 
-  // Spot node pools (managed resources)
+  // Spot node pools
   for (const np of config.nodePools) {
     const bidPrice = np.bidPrice ?? options.defaultBidPrice;
     if (bidPrice === undefined) {
@@ -58,13 +59,13 @@ export function createRackspaceSpotCluster(
     const hasAutoscaling = np.minNodes !== np.maxNodes;
     const importId = options.importIds?.nodePoolIds?.[np.name];
 
-    new spot.Spotnodepool(
+    new spot.SpotNodePool(
       `${name}-np-${np.name}`,
       {
         cloudspaceName: options.cloudspaceName,
         serverClass: np.instanceType,
         bidPrice,
-        desiredServerCount: np.desiredNodes ?? np.minNodes,
+        desiredCount: hasAutoscaling ? undefined : (np.desiredNodes ?? np.minNodes),
         autoscaling: hasAutoscaling
           ? { minNodes: np.minNodes, maxNodes: np.maxNodes }
           : undefined,
@@ -74,13 +75,13 @@ export function createRackspaceSpotCluster(
     );
   }
 
-  // Kubeconfig from data source (fresh on every deployment)
+  // Kubeconfig — fresh from the native provider on every deployment
   const kubeconfigResult = spot.getKubeconfigOutput({
     cloudspaceName: options.cloudspaceName,
   });
 
   const kubeconfig = kubeconfigResult.raw;
-  const endpoint = kubeconfigResult.kubeconfigs.apply((kcs) => kcs[0]!.host);
+  const endpoint = kubeconfigResult.host;
 
   // K8s provider
   const provider = new k8s.Provider(`${name}-k8s`, {
@@ -95,7 +96,7 @@ export function createRackspaceSpotCluster(
     cloud: target,
     endpoint,
     kubeconfig,
-    version: cloudspace.kubernetesVersion.apply((v) => v ?? config.version ?? "unknown"),
+    version: cloudspace.kubernetesVersion.apply(v => v ?? config.version ?? "unknown"),
     nodePools: config.nodePools,
     nativeResource: provider as unknown as pulumi.Resource,
     provider,

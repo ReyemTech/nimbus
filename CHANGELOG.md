@@ -1,3 +1,10 @@
+## [2.3.1](https://github.com/ReyemTech/nimbus/compare/v2.3.0...v2.3.1) (2026-04-04)
+
+
+### Bug Fixes
+
+* use proper import for IExposedService (eslint consistent-type-imports) ([f95ff0c](https://github.com/ReyemTech/nimbus/commit/f95ff0ce06215f68af2dcdc16e40604f2a61d4ad))
+
 # [2.3.0](https://github.com/ReyemTech/nimbus/compare/v2.2.0...v2.3.0) (2026-04-04)
 
 

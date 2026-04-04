@@ -1,3 +1,11 @@
+# [2.2.0](https://github.com/ReyemTech/nimbus/compare/v2.1.0...v2.2.0) (2026-04-04)
+
+
+### Features
+
+* **argocd:** default prune to true for automated sync ([63cf03e](https://github.com/ReyemTech/nimbus/commit/63cf03e2511db254b4adbb158370d4db8a80536b))
+* **argocd:** default selfHeal to true for automated sync ([a4c6a2d](https://github.com/ReyemTech/nimbus/commit/a4c6a2dfe5715b4e1e15a990f3e36eef735253ff))
+
 # [2.1.0](https://github.com/ReyemTech/nimbus/compare/v2.0.2...v2.1.0) (2026-04-03)
 
 

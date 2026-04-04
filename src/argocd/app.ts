@@ -79,7 +79,7 @@ function buildSyncPolicySpec(policy?: IArgoSyncPolicy): Record<string, unknown> 
 
   if (policy.automated) {
     spec["automated"] = {
-      prune: policy.prune ?? false,
+      prune: policy.prune ?? true,
       selfHeal: policy.selfHeal ?? false,
     };
   }

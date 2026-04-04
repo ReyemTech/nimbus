@@ -182,6 +182,8 @@ export interface IMinIOBucket {
 export interface IMinIOOperator extends Omit<IOperator, "createCluster"> {
   /** S3 API endpoint URL (internal cluster URL). */
   readonly endpoint: pulumi.Output<string>;
+  /** Services to expose via access gateway (console UI). */
+  readonly exposedServices: ReadonlyArray<import("../types").IExposedService>;
   /** Create a bucket on the MinIO deployment and replicate credentials to target namespaces. */
   createBucket(name: string, config?: IMinIOBucketConfig): IMinIOBucket;
 }

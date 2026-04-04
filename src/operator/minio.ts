@@ -172,6 +172,9 @@ export function createMinioOperator(
     type: "minio",
     helmRelease,
     endpoint,
+    exposedServices: [
+      { name: "minio-console", namespace: DATA_NAMESPACE, port: 9090, label: "minio" },
+    ],
 
     createBucket(bucketName: string, bucketConfig?: IMinIOBucketConfig): IMinIOBucket {
       const targetNamespaces = bucketConfig?.namespaces ?? [];

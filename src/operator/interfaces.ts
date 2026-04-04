@@ -13,6 +13,7 @@ import type * as k8s from "@pulumi/kubernetes";
 import type { ICluster } from "../cluster";
 import type { IBackupTarget } from "../backup";
 import type { StorageTier } from "../types/storage-tiers";
+import type { IExposedService } from "../types";
 
 /** Per-environment config overrides. Keys are environment names (e.g. "dev", "prod"). */
 export type EnvironmentOverrides<T> = Record<string, Partial<T>>;
@@ -183,7 +184,7 @@ export interface IMinIOOperator extends Omit<IOperator, "createCluster"> {
   /** S3 API endpoint URL (internal cluster URL). */
   readonly endpoint: pulumi.Output<string>;
   /** Services to expose via access gateway (console UI). */
-  readonly exposedServices: ReadonlyArray<import("../types").IExposedService>;
+  readonly exposedServices: ReadonlyArray<IExposedService>;
   /** Create a bucket on the MinIO deployment and replicate credentials to target namespaces. */
   createBucket(name: string, config?: IMinIOBucketConfig): IMinIOBucket;
 }

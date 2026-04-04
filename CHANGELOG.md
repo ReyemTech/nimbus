@@ -1,3 +1,10 @@
+# [2.3.0](https://github.com/ReyemTech/nimbus/compare/v2.2.0...v2.3.0) (2026-04-04)
+
+
+### Features
+
+* **minio:** expose console via exposedServices for access gateway ([cf4d48b](https://github.com/ReyemTech/nimbus/commit/cf4d48bb209fe636f9427bdc5155879960567385))
+
 # [2.2.0](https://github.com/ReyemTech/nimbus/compare/v2.1.0...v2.2.0) (2026-04-04)
 
 

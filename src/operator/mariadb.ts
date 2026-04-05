@@ -69,7 +69,7 @@ function createSingleMariadbDatabaseInstance(
         collate: "utf8mb4_unicode_ci",
       },
     },
-    { provider, dependsOn: [mariadb] }
+    { provider, dependsOn: [mariadb], ignoreChanges: ["spec.name"] }
   );
 
   // 2. Generate a password and store it in a Secret for the User CRD to reference
@@ -118,7 +118,7 @@ function createSingleMariadbDatabaseInstance(
         maxUserConnections: 100,
       },
     },
-    { provider, dependsOn: [mariadb, passwordSecret] }
+    { provider, dependsOn: [mariadb, passwordSecret], ignoreChanges: ["spec.name"] }
   );
 
   // 3. Grant CRD — grants ALL PRIVILEGES on the database to the user

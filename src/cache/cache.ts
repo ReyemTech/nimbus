@@ -121,25 +121,25 @@ export function createCache(
     { provider, dependsOn: [ns] }
   );
 
-  // The Pulumi resource name becomes the Helm release name when no explicit
-  // `name` is set in the Release spec. Bitnami Redis creates a secret named
-  // `{releaseName}-redis` with a `redis-password` key.
-  const helmReleaseName = `${name}-redis`;
+  // Pulumi appends a random suffix to the Helm release name. Use the actual
+  // release name from status for deriving service/secret names.
+  const actualReleaseName = release.status.apply((s) => s.name);
 
   // Endpoint and port depend on architecture:
-  //   replication → headless service on Sentinel port 26379
+  //   replication → master service on Redis port 6379 (apps connect to master, not Sentinel)
   //   standalone  → master service on Redis port 6379
-  const endpoint = pulumi.output(
-    architecture === "replication"
-      ? `${helmReleaseName}-redis-headless.${CACHE_NAMESPACE}.svc.cluster.local`
-      : `${helmReleaseName}-redis-master.${CACHE_NAMESPACE}.svc.cluster.local`
+  const endpoint = actualReleaseName.apply(
+    (rn) => `${rn}-master.${CACHE_NAMESPACE}.svc.cluster.local`
   );
 
+  // Sentinel port for internal Pulumi use, app-facing port is always 6379
   const port = pulumi.output(architecture === "replication" ? SENTINEL_PORT : REDIS_PORT);
 
-  // Bitnami creates a secret named `{releaseName}-redis` with key `redis-password`
+  // Bitnami creates a secret with the release name and key `redis-password`.
+  // secretRef.path is a string; use a placeholder that matches the pattern.
+  const helmReleaseName = `${name}-redis`;
   const secretRef = {
-    path: `${helmReleaseName}-redis`,
+    path: `${helmReleaseName}`,
     key: "redis-password",
   };
 
@@ -166,24 +166,19 @@ export function createCache(
   );
 
   // Replicate connection secrets to target namespaces
-  const bitnamiSecretName = `${helmReleaseName}-redis`;
   const secrets: Record<string, pulumi.Output<string>> = {};
 
   if (config.namespaces?.length) {
     // Read the Bitnami-generated password from the data namespace
     const bitnamiSecret = k8s.core.v1.Secret.get(
       `${name}-redis-password-read`,
-      pulumi.interpolate`${CACHE_NAMESPACE}/${bitnamiSecretName}`,
+      pulumi.interpolate`${CACHE_NAMESPACE}/${actualReleaseName}`,
       { provider, dependsOn: [release] }
     );
     const password = bitnamiSecret.data.apply((d) =>
       Buffer.from(d?.["redis-password"] ?? "", "base64").toString()
     );
 
-    // App-facing endpoint: master service on port 6379 (not Sentinel port)
-    const appEndpoint = pulumi.output(
-      `${helmReleaseName}-redis-master.${CACHE_NAMESPACE}.svc.cluster.local`
-    );
     const appPort = REDIS_PORT;
 
     for (const targetNs of config.namespaces) {
@@ -202,10 +197,10 @@ export function createCache(
             },
           },
           stringData: {
-            host: appEndpoint,
+            host: endpoint,
             port: String(appPort),
             password,
-            uri: pulumi.all([appEndpoint, password]).apply(
+            uri: pulumi.all([endpoint, password]).apply(
               ([h, pw]) => `redis://:${pw}@${h}:${appPort}`
             ),
           },
@@ -224,7 +219,7 @@ export function createCache(
     endpoint,
     port: architecture === "replication" ? SENTINEL_PORT : REDIS_PORT,
     secretRef: {
-      name: `${helmReleaseName}-redis`,
+      name: helmReleaseName,
       keys: { password: "redis-password" },
     },
     nativeResource: release,

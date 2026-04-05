@@ -1,3 +1,10 @@
+## [2.4.3](https://github.com/ReyemTech/nimbus/compare/v2.4.2...v2.4.3) (2026-04-05)
+
+
+### Bug Fixes
+
+* **cache:** remove -master suffix from Redis endpoint (Bitnami uses release name directly) ([592685e](https://github.com/ReyemTech/nimbus/commit/592685e894bba28aebc68497381ea5861a001c3f))
+
 ## [2.4.2](https://github.com/ReyemTech/nimbus/compare/v2.4.1...v2.4.2) (2026-04-05)
 
 

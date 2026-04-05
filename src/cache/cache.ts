@@ -125,11 +125,10 @@ export function createCache(
   // release name from status for deriving service/secret names.
   const actualReleaseName = release.status.apply((s) => s.name);
 
-  // Endpoint and port depend on architecture:
-  //   replication → master service on Redis port 6379 (apps connect to master, not Sentinel)
-  //   standalone  → master service on Redis port 6379
+  // App-facing endpoint: the main ClusterIP service (Bitnami Redis names it
+  // after the release). Apps connect on port 6379 regardless of architecture.
   const endpoint = actualReleaseName.apply(
-    (rn) => `${rn}-master.${CACHE_NAMESPACE}.svc.cluster.local`
+    (rn) => `${rn}.${CACHE_NAMESPACE}.svc.cluster.local`
   );
 
   // Sentinel port for internal Pulumi use, app-facing port is always 6379
@@ -200,9 +199,9 @@ export function createCache(
             host: endpoint,
             port: String(appPort),
             password,
-            uri: pulumi.all([endpoint, password]).apply(
-              ([h, pw]) => `redis://:${pw}@${h}:${appPort}`
-            ),
+            uri: pulumi
+              .all([endpoint, password])
+              .apply(([h, pw]) => `redis://:${pw}@${h}:${appPort}`),
           },
         },
         { provider, dependsOn: [release, nsResource], ignoreChanges: ["data", "stringData"] }

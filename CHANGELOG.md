@@ -1,3 +1,10 @@
+# [2.4.0](https://github.com/ReyemTech/nimbus/compare/v2.3.1...v2.4.0) (2026-04-05)
+
+
+### Features
+
+* align MariaDB naming with CNPG, add Redis namespace replication ([96fe4a7](https://github.com/ReyemTech/nimbus/commit/96fe4a7ba51729e1f9001610be21742c04c1199a))
+
 ## [2.3.1](https://github.com/ReyemTech/nimbus/compare/v2.3.0...v2.3.1) (2026-04-04)
 
 

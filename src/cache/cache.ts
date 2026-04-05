@@ -165,6 +165,58 @@ export function createCache(
     [release]
   );
 
+  // Replicate connection secrets to target namespaces
+  const bitnamiSecretName = `${helmReleaseName}-redis`;
+  const secrets: Record<string, pulumi.Output<string>> = {};
+
+  if (config.namespaces?.length) {
+    // Read the Bitnami-generated password from the data namespace
+    const bitnamiSecret = k8s.core.v1.Secret.get(
+      `${name}-redis-password-read`,
+      pulumi.interpolate`${CACHE_NAMESPACE}/${bitnamiSecretName}`,
+      { provider, dependsOn: [release] }
+    );
+    const password = bitnamiSecret.data.apply((d) =>
+      Buffer.from(d?.["redis-password"] ?? "", "base64").toString()
+    );
+
+    // App-facing endpoint: master service on port 6379 (not Sentinel port)
+    const appEndpoint = pulumi.output(
+      `${helmReleaseName}-redis-master.${CACHE_NAMESPACE}.svc.cluster.local`
+    );
+    const appPort = REDIS_PORT;
+
+    for (const targetNs of config.namespaces) {
+      const nsResource = ensureNamespace(targetNs, provider);
+      const secretName = `${name}-redis`;
+
+      new k8s.core.v1.Secret(
+        `${name}-redis-secret-${targetNs}`,
+        {
+          metadata: {
+            name: secretName,
+            namespace: targetNs,
+            labels: {
+              "app.kubernetes.io/managed-by": "nimbus",
+              "nimbus/cache": name,
+            },
+          },
+          stringData: {
+            host: appEndpoint,
+            port: String(appPort),
+            password,
+            uri: pulumi.all([appEndpoint, password]).apply(
+              ([h, pw]) => `redis://:${pw}@${h}:${appPort}`
+            ),
+          },
+        },
+        { provider, dependsOn: [release, nsResource], ignoreChanges: ["data", "stringData"] }
+      );
+
+      secrets[targetNs] = pulumi.output(secretName);
+    }
+  }
+
   nimbus.register(name, {
     name,
     type: "cache",
@@ -185,6 +237,7 @@ export function createCache(
     endpoint,
     port,
     secretRef,
+    secrets,
     nativeResource: release,
   };
 }

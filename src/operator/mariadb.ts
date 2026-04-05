@@ -42,8 +42,9 @@ function createSingleMariadbDatabaseInstance(
   mariadb: k8s.apiextensions.CustomResource,
   provider: k8s.Provider
 ): IDatabaseInstance {
-  // MariaDB operator uses the User CRD name as the MySQL username
-  const username = `${clusterName}-${dbName}`;
+  // Use dbName as the actual MySQL username (matching CNPG convention).
+  // K8s resource names stay prefixed with clusterName for uniqueness.
+  const username = dbName;
   const userSecretName = `${clusterName}-${dbName}-user`;
 
   // 1. Database CRD — creates the database on the MariaDB instance
@@ -63,6 +64,7 @@ function createSingleMariadbDatabaseInstance(
       },
       spec: {
         mariaDbRef: { name: clusterName },
+        name: dbName,
         characterSet: "utf8mb4",
         collate: "utf8mb4_unicode_ci",
       },
@@ -108,6 +110,7 @@ function createSingleMariadbDatabaseInstance(
       },
       spec: {
         mariaDbRef: { name: clusterName },
+        name: dbName,
         passwordSecretKeyRef: {
           name: userSecretName,
           key: "password",
@@ -136,9 +139,9 @@ function createSingleMariadbDatabaseInstance(
       spec: {
         mariaDbRef: { name: clusterName },
         privileges: ["ALL PRIVILEGES"],
-        database: `${clusterName}-${dbName}`,
+        database: dbName,
         table: "*",
-        username: `${clusterName}-${dbName}`,
+        username: dbName,
         grantOption: true,
       },
     },
@@ -181,10 +184,10 @@ function createSingleMariadbDatabaseInstance(
           port: dbPort.apply((p) => String(p)),
           username,
           password: stablePassword,
-          database: `${clusterName}-${dbName}`,
+          database: dbName,
           uri: pulumi
             .all([dbHost, dbPort, stablePassword])
-            .apply(([h, p, pw]) => `mysql://${username}:${pw}@${h}:${p}/${clusterName}-${dbName}`),
+            .apply(([h, p, pw]) => `mysql://${username}:${pw}@${h}:${p}/${dbName}`),
         },
       },
       { provider, dependsOn: [grant, nsResource] }

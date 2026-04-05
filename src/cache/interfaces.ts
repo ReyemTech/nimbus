@@ -84,6 +84,8 @@ export interface ICacheConfig {
   readonly metrics?: boolean;
   /** Resource tags applied to the cache and child resources. */
   readonly tags?: Readonly<Record<string, string>>;
+  /** Namespaces to replicate connection secrets into (host, port, password, uri). */
+  readonly namespaces?: string[];
 }
 
 /** Cache output — the created cache resource. */
@@ -100,6 +102,9 @@ export interface ICache {
   readonly port: pulumi.Output<number>;
   /** Reference to cache credentials in the secrets backend, if authentication is enabled. */
   readonly secretRef?: ISecretRef;
+
+  /** Connection secrets replicated to target namespaces (namespace → secret name). */
+  readonly secrets: Record<string, pulumi.Output<string>>;
 
   /** Escape hatch: cloud-native or Helm release resource. */
   readonly nativeResource: pulumi.Resource;

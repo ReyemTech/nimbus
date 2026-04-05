@@ -1,3 +1,10 @@
+## [2.4.2](https://github.com/ReyemTech/nimbus/compare/v2.4.1...v2.4.2) (2026-04-05)
+
+
+### Bug Fixes
+
+* **mariadb:** ignore spec.name changes on existing Database/User CRDs ([36ef47a](https://github.com/ReyemTech/nimbus/commit/36ef47a15a06b7eaff97b10defcd641bc2e70fd2))
+
 ## [2.4.1](https://github.com/ReyemTech/nimbus/compare/v2.4.0...v2.4.1) (2026-04-05)
 
 

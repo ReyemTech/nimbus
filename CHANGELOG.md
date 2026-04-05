@@ -1,3 +1,10 @@
+## [2.4.1](https://github.com/ReyemTech/nimbus/compare/v2.4.0...v2.4.1) (2026-04-05)
+
+
+### Bug Fixes
+
+* **cache:** use actual Helm release name for secret and endpoint derivation ([f965012](https://github.com/ReyemTech/nimbus/commit/f9650129710f3246ca05741c4291cd6e96507bca))
+
 # [2.4.0](https://github.com/ReyemTech/nimbus/compare/v2.3.1...v2.4.0) (2026-04-05)
 
 

@@ -1,3 +1,10 @@
+## [2.8.2](https://github.com/ReyemTech/nimbus/compare/v2.8.1...v2.8.2) (2026-04-06)
+
+
+### Bug Fixes
+
+* **kuma:** fix npm install in reconciler job (no-package-lock, /tmp workdir) ([cb01a20](https://github.com/ReyemTech/nimbus/commit/cb01a20dcd72815ef3494a441783da9f6412bdd1))
+
 ## [2.8.1](https://github.com/ReyemTech/nimbus/compare/v2.8.0...v2.8.1) (2026-04-06)
 
 

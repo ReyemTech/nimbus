@@ -1,3 +1,10 @@
+# [2.7.0](https://github.com/ReyemTech/nimbus/compare/v2.6.0...v2.7.0) (2026-04-06)
+
+
+### Features
+
+* support all Kuma monitor types (mysql, postgres, redis, grpc, dns, etc) ([3055e52](https://github.com/ReyemTech/nimbus/commit/3055e527b4a0ce51acaf94e4567bb12a1c0a1564))
+
 # [2.6.0](https://github.com/ReyemTech/nimbus/compare/v2.5.0...v2.6.0) (2026-04-06)
 
 

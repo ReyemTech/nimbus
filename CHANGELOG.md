@@ -1,3 +1,10 @@
+## [2.8.5](https://github.com/ReyemTech/nimbus/compare/v2.8.4...v2.8.5) (2026-04-06)
+
+
+### Bug Fixes
+
+* **kuma:** use username/password login for Socket.IO (API keys are REST-only) ([5ad10a8](https://github.com/ReyemTech/nimbus/commit/5ad10a87e649d44541256616cc70a6af1cd5efc6))
+
 ## [2.8.4](https://github.com/ReyemTech/nimbus/compare/v2.8.3...v2.8.4) (2026-04-06)
 
 

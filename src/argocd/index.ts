@@ -29,6 +29,7 @@ export type {
   IArgoProjectConfig,
   IArgoAppConfig,
   IArgoAppMonitor,
+  KumaMonitorType,
   IArgoSecretsConfig,
   IArgoAppSecrets,
   IArgoCDConfig,

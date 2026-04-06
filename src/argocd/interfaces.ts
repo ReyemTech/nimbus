@@ -123,18 +123,56 @@ export interface IArgoProjectConfig {
 // App
 // ---------------------------------------------------------------------------
 
+/** Supported Uptime Kuma monitor types. */
+export type KumaMonitorType =
+  | "http"        // HTTP(s) status check
+  | "keyword"     // HTTP(s) + keyword match in response body
+  | "json-query"  // HTTP(s) + JSON path query
+  | "tcp"         // TCP port check
+  | "dns"         // DNS record check
+  | "grpc"        // gRPC health check
+  | "mysql"       // MySQL/MariaDB connection check
+  | "postgres"    // PostgreSQL connection check
+  | "redis"       // Redis connection check
+  | "mongodb"     // MongoDB connection check
+  | "mqtt"        // MQTT broker check
+  | "rabbitmq"    // RabbitMQ management API check
+  | "smtp"        // SMTP server check
+  | "group"       // Monitor group (container for child monitors)
+  | "push"        // Push-based (passive heartbeat)
+  | "gamedig"     // GameDig game server check
+  | "docker"      // Docker container check
+  | "snmp"        // SNMP check
+  | "tailscale-ping"; // Tailscale ICMP ping
+
 /** Uptime monitor definition for auto-registration. */
 export interface IArgoAppMonitor {
-  /** URL to monitor (e.g., "https://www.reyem.tech"). */
-  readonly url: string;
+  /** Display name. Defaults to "{appName} — {hostname}". */
+  readonly name?: string;
+  /** URL or hostname to monitor. */
+  readonly url?: string;
+  /** Hostname for non-URL monitors (tcp, mysql, postgres, redis, etc). */
+  readonly hostname?: string;
+  /** Port for TCP/database monitors. */
+  readonly port?: number;
   /** Monitor type. Default: "http". */
-  readonly type?: "http" | "keyword" | "tcp";
+  readonly type?: KumaMonitorType;
   /** Expected keyword in response body (for keyword type). */
   readonly keyword?: string;
   /** Check interval in seconds. Default: 60. */
   readonly interval?: number;
   /** Monitor group name. Defaults to the ArgoCD project name. */
   readonly group?: string;
+  /** Database connection string (for mysql, postgres, redis, mongodb). */
+  readonly connectionString?: string;
+  /** DNS resolve type (for dns type): A, AAAA, CNAME, MX, TXT, etc. */
+  readonly dnsResolveType?: string;
+  /** DNS resolve server (for dns type). */
+  readonly dnsResolveServer?: string;
+  /** GRPC service name (for grpc type). */
+  readonly grpcServiceName?: string;
+  /** Additional Kuma-specific properties passed directly. */
+  readonly extra?: Readonly<Record<string, unknown>>;
 }
 
 export interface IArgoAppConfig {

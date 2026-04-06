@@ -693,6 +693,43 @@ function deployUptimeKuma(
     { provider, dependsOn: [ns] }
   );
 
+  // Infrastructure monitors ConfigMap (databases, caches, etc.)
+  const monitors = config.monitors ?? [];
+  if (monitors.length > 0) {
+    const infraMonitors = monitors.map((m) => ({
+      name: m.name ?? `${m.hostname}:${m.port}`,
+      url: m.url,
+      hostname: m.hostname,
+      port: m.port,
+      type: m.type ?? "tcp",
+      keyword: m.keyword,
+      interval: m.interval ?? 60,
+      group: m.group ?? "Infrastructure",
+      connectionString: m.connectionString,
+      dnsResolveType: m.dnsResolveType,
+      dnsResolveServer: m.dnsResolveServer,
+      grpcServiceName: m.grpcServiceName,
+      extra: m.extra,
+    }));
+
+    new k8s.core.v1.ConfigMap(
+      `${name}-kuma-infra-monitors`,
+      {
+        metadata: {
+          name: "kuma-monitors-infrastructure",
+          namespace: ukNamespace,
+          labels: {
+            "app.kubernetes.io/managed-by": "nimbus",
+            "nimbus/component": "uptime-kuma-monitor",
+            "nimbus/app": "infrastructure",
+          },
+        },
+        data: { "monitors.json": JSON.stringify(infraMonitors, null, 2) },
+      },
+      { provider, dependsOn: [ns] }
+    );
+  }
+
   // Monitor reconciler — reads ConfigMaps labeled nimbus/component=uptime-kuma-monitor
   // from all namespaces and syncs them to Kuma via Socket.IO API.
   // Requires: Secret "kuma-api-key" with KUMA_API_KEY in uptime-kuma namespace.
@@ -721,8 +758,17 @@ function deployUptimeKuma(
     "  for (const m of desired) {",
     '    if (byName[m.name]) { console.log("EXISTS:", m.name); continue; }',
     '    console.log("CREATE:", m.name);',
-    '    const data = { type: m.type === "keyword" ? "keyword" : "http", name: m.name, url: m.url, interval: m.interval || 60, retryInterval: 60, maxretries: 3, accepted_statuscodes: ["200-299"] };',
-    "    if (m.keyword) data.keyword = m.keyword;",
+    '    const data = { type: m.type || "http", name: m.name, interval: m.interval || 60, retryInterval: 60, maxretries: 3 };',
+    '    if (m.url) data.url = m.url;',
+    '    if (m.hostname) data.hostname = m.hostname;',
+    '    if (m.port) data.port = m.port;',
+    '    if (m.keyword) data.keyword = m.keyword;',
+    '    if (m.connectionString) data.databaseConnectionString = m.connectionString;',
+    '    if (m.dnsResolveType) data.dns_resolve_type = m.dnsResolveType;',
+    '    if (m.dnsResolveServer) data.dns_resolve_server = m.dnsResolveServer;',
+    '    if (m.grpcServiceName) data.grpcServiceName = m.grpcServiceName;',
+    '    if (["http","keyword","json-query"].includes(data.type)) data.accepted_statuscodes = ["200-299"];',
+    '    if (m.extra) Object.assign(data, m.extra);',
     "    if (m.group) data.parent_name = m.group;",
     '    await new Promise(resolve => socket.emit("add", data, res => { console.log(res.ok ? "  OK" : "  FAIL: " + res.msg); resolve(); }));',
     "  }",

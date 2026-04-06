@@ -162,14 +162,24 @@ export class ArgoApp {
 
     // Write monitor definitions to shared ConfigMap for Uptime Kuma reconciler
     if (config.monitors?.length) {
-      const monitors = config.monitors.map((m) => ({
-        name: `${name} — ${new URL(m.url).hostname}`,
-        url: m.url,
-        type: m.type ?? "http",
-        keyword: m.keyword,
-        interval: m.interval ?? 60,
-        group: m.group ?? this.project,
-      }));
+      const monitors = config.monitors.map((m) => {
+        const displayName = m.name ?? (m.url ? `${name} — ${new URL(m.url).hostname}` : `${name} — ${m.hostname}:${m.port}`);
+        return {
+          name: displayName,
+          url: m.url,
+          hostname: m.hostname,
+          port: m.port,
+          type: m.type ?? "http",
+          keyword: m.keyword,
+          interval: m.interval ?? 60,
+          group: m.group ?? this.project,
+          connectionString: m.connectionString,
+          dnsResolveType: m.dnsResolveType,
+          dnsResolveServer: m.dnsResolveServer,
+          grpcServiceName: m.grpcServiceName,
+          extra: m.extra,
+        };
+      });
 
       new k8s.core.v1.ConfigMap(
         `${resourceName}-monitors-${name}`,

@@ -14,6 +14,7 @@ import type { StorageTier } from "../types/storage-tiers";
 import type { IEmailTransport } from "../email/interfaces";
 import type { IExposedService } from "../types";
 import type { IClusterInstance } from "../operator/interfaces";
+import type { IArgoAppMonitor } from "../argocd/interfaces";
 
 // ---------------------------------------------------------------------------
 // Alerting interfaces
@@ -129,6 +130,8 @@ export interface IUptimeKumaConfig {
   readonly expose?: boolean;
   /** Additional Helm values to merge with defaults. */
   readonly values?: Readonly<Record<string, unknown>>;
+  /** Infrastructure monitors (databases, caches, etc.) — written to ConfigMap for reconciler. */
+  readonly monitors?: ReadonlyArray<IArgoAppMonitor>;
 }
 
 /** Alertmanager configuration. */

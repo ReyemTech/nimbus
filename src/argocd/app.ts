@@ -159,6 +159,37 @@ export class ArgoApp {
     if (config.dashboard !== false) {
       createArgoAppDashboard(name, provider);
     }
+
+    // Write monitor definitions to shared ConfigMap for Uptime Kuma reconciler
+    if (config.monitors?.length) {
+      const monitors = config.monitors.map((m) => ({
+        name: `${name} — ${new URL(m.url).hostname}`,
+        url: m.url,
+        type: m.type ?? "http",
+        keyword: m.keyword,
+        interval: m.interval ?? 60,
+        group: m.group ?? this.project,
+      }));
+
+      new k8s.core.v1.ConfigMap(
+        `${resourceName}-monitors-${name}`,
+        {
+          metadata: {
+            name: `kuma-monitors-${name}`,
+            namespace: "uptime-kuma",
+            labels: {
+              "app.kubernetes.io/managed-by": "nimbus",
+              "nimbus/component": "uptime-kuma-monitor",
+              "nimbus/app": name,
+            },
+          },
+          data: {
+            "monitors.json": JSON.stringify(monitors, null, 2),
+          },
+        },
+        { provider, dependsOn: [this.resource] }
+      );
+    }
   }
 
   /** Create K8s Secret with typed refs for Helm values. */

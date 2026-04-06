@@ -28,6 +28,7 @@ export type {
   IArgoSyncPolicy,
   IArgoProjectConfig,
   IArgoAppConfig,
+  IArgoAppMonitor,
   IArgoSecretsConfig,
   IArgoAppSecrets,
   IArgoCDConfig,

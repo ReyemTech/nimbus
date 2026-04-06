@@ -123,6 +123,20 @@ export interface IArgoProjectConfig {
 // App
 // ---------------------------------------------------------------------------
 
+/** Uptime monitor definition for auto-registration. */
+export interface IArgoAppMonitor {
+  /** URL to monitor (e.g., "https://www.reyem.tech"). */
+  readonly url: string;
+  /** Monitor type. Default: "http". */
+  readonly type?: "http" | "keyword" | "tcp";
+  /** Expected keyword in response body (for keyword type). */
+  readonly keyword?: string;
+  /** Check interval in seconds. Default: 60. */
+  readonly interval?: number;
+  /** Monitor group name. Defaults to the ArgoCD project name. */
+  readonly group?: string;
+}
+
 export interface IArgoAppConfig {
   readonly project?: string;
   readonly source: IArgoAppSource;
@@ -134,6 +148,8 @@ export interface IArgoAppConfig {
     readonly onSyncFailed?: boolean;
     readonly onHealthDegraded?: boolean;
   };
+  /** Uptime monitors to register in Uptime Kuma. */
+  readonly monitors?: ReadonlyArray<IArgoAppMonitor>;
 }
 
 // ---------------------------------------------------------------------------

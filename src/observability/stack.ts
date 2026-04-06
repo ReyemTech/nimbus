@@ -692,4 +692,107 @@ function deployUptimeKuma(
     },
     { provider, dependsOn: [ns] }
   );
+
+  // Monitor reconciler — reads ConfigMaps labeled nimbus/component=uptime-kuma-monitor
+  // from all namespaces and syncs them to Kuma via Socket.IO API.
+  // Requires: Secret "kuma-api-key" with KUMA_API_KEY in uptime-kuma namespace.
+  const reconcilerScript = [
+    'const io = require("socket.io-client");',
+    'const { execFileSync } = require("child_process");',
+    "",
+    'const KUMA_URL = "http://localhost:3001";',
+    "const API_KEY = process.env.KUMA_API_KEY;",
+    'if (!API_KEY) { console.error("KUMA_API_KEY not set"); process.exit(1); }',
+    "",
+    "async function main() {",
+    "  const cmJson = execFileSync(",
+    '    "kubectl", ["get", "configmaps", "-A", "-l", "nimbus/component=uptime-kuma-monitor", "-o", "json"],',
+    '    { encoding: "utf8" }',
+    "  );",
+    '  const desired = JSON.parse(cmJson).items.flatMap(cm => JSON.parse(cm.data["monitors.json"] || "[]"));',
+    '  console.log("Desired monitors:", desired.length);',
+    "",
+    '  const socket = io(KUMA_URL, { extraHeaders: { Authorization: "Bearer " + API_KEY } });',
+    '  await new Promise((resolve, reject) => { socket.on("connect", resolve); socket.on("connect_error", reject); setTimeout(() => reject(new Error("timeout")), 10000); });',
+    "",
+    '  const existing = await new Promise(resolve => socket.emit("getMonitorList", resolve));',
+    "  const byName = Object.fromEntries(Object.entries(existing).map(([id, m]) => [m.name, id]));",
+    "",
+    "  for (const m of desired) {",
+    '    if (byName[m.name]) { console.log("EXISTS:", m.name); continue; }',
+    '    console.log("CREATE:", m.name);',
+    '    const data = { type: m.type === "keyword" ? "keyword" : "http", name: m.name, url: m.url, interval: m.interval || 60, retryInterval: 60, maxretries: 3, accepted_statuscodes: ["200-299"] };',
+    "    if (m.keyword) data.keyword = m.keyword;",
+    "    if (m.group) data.parent_name = m.group;",
+    '    await new Promise(resolve => socket.emit("add", data, res => { console.log(res.ok ? "  OK" : "  FAIL: " + res.msg); resolve(); }));',
+    "  }",
+    "  socket.disconnect();",
+    '}',
+    "main().catch(e => { console.error(e); process.exit(1); });",
+  ].join("\n");
+
+  new k8s.core.v1.ConfigMap(
+    `${name}-kuma-reconciler-script`,
+    {
+      metadata: { name: "kuma-reconciler-script", namespace: ukNamespace },
+      data: { "reconcile.js": reconcilerScript },
+    },
+    { provider, dependsOn: [ns] }
+  );
+
+  new k8s.batch.v1.CronJob(
+    `${name}-kuma-reconciler`,
+    {
+      metadata: { name: "kuma-monitor-reconciler", namespace: ukNamespace },
+      spec: {
+        schedule: "*/5 * * * *",
+        successfulJobsHistoryLimit: 1,
+        failedJobsHistoryLimit: 3,
+        jobTemplate: {
+          spec: {
+            template: {
+              spec: {
+                serviceAccountName: "kuma-reconciler",
+                restartPolicy: "OnFailure",
+                containers: [{
+                  name: "reconciler",
+                  image: "node:22-alpine",
+                  command: ["sh", "-c", "npm install socket.io-client && node /scripts/reconcile.js"],
+                  env: [{ name: "KUMA_API_KEY", valueFrom: { secretKeyRef: { name: "kuma-api-key", key: "KUMA_API_KEY" } } }],
+                  volumeMounts: [{ name: "script", mountPath: "/scripts" }],
+                }],
+                volumes: [{ name: "script", configMap: { name: "kuma-reconciler-script" } }],
+              },
+            },
+          },
+        },
+      },
+    },
+    { provider, dependsOn: [ns] }
+  );
+
+  new k8s.core.v1.ServiceAccount(
+    `${name}-kuma-reconciler-sa`,
+    { metadata: { name: "kuma-reconciler", namespace: ukNamespace } },
+    { provider, dependsOn: [ns] }
+  );
+
+  new k8s.rbac.v1.ClusterRole(
+    `${name}-kuma-reconciler-role`,
+    {
+      metadata: { name: "kuma-monitor-reader" },
+      rules: [{ apiGroups: [""], resources: ["configmaps"], verbs: ["get", "list"] }],
+    },
+    { provider }
+  );
+
+  new k8s.rbac.v1.ClusterRoleBinding(
+    `${name}-kuma-reconciler-binding`,
+    {
+      metadata: { name: "kuma-monitor-reader" },
+      roleRef: { apiGroup: "rbac.authorization.k8s.io", kind: "ClusterRole", name: "kuma-monitor-reader" },
+      subjects: [{ kind: "ServiceAccount", name: "kuma-reconciler", namespace: ukNamespace }],
+    },
+    { provider }
+  );
 }

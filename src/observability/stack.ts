@@ -820,7 +820,7 @@ function deployUptimeKuma(
                 containers: [{
                   name: "reconciler",
                   image: "node:22-alpine",
-                  command: ["sh", "-c", "npm install socket.io-client && node /scripts/reconcile.js"],
+                  command: ["sh", "-c", "cd /tmp && npm init -y > /dev/null 2>&1 && npm install --no-package-lock socket.io-client > /dev/null 2>&1 && NODE_PATH=/tmp/node_modules node /scripts/reconcile.js"],
                   env: [{ name: "KUMA_API_KEY", valueFrom: { secretKeyRef: { name: "kuma-api-key", key: "KUMA_API_KEY" } } }],
                   volumeMounts: [{ name: "script", mountPath: "/scripts" }],
                 }],

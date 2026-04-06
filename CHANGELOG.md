@@ -1,3 +1,10 @@
+# [2.8.0](https://github.com/ReyemTech/nimbus/compare/v2.7.0...v2.8.0) (2026-04-06)
+
+
+### Features
+
+* **kuma:** auto-create monitor groups per app/project ([296514c](https://github.com/ReyemTech/nimbus/commit/296514c9d1010f3861b40f25c6af5d3c4f0d9d1a))
+
 # [2.7.0](https://github.com/ReyemTech/nimbus/compare/v2.6.0...v2.7.0) (2026-04-06)
 
 

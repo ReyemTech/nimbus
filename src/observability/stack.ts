@@ -652,7 +652,7 @@ function deployUptimeKuma(
     namespaces: [ukNamespace],
   });
 
-  return new k8s.helm.v3.Release(
+  const release = new k8s.helm.v3.Release(
     `${name}-uptime-kuma`,
     {
       chart: "uptime-kuma",
@@ -693,7 +693,7 @@ function deployUptimeKuma(
     { provider, dependsOn: [ns] }
   );
 
-  // Infrastructure monitors ConfigMap (databases, caches, etc.)
+  // Infrastructure monitors ConfigMap — must come after the release variable (databases, caches, etc.)
   const monitors = config.monitors ?? [];
   if (monitors.length > 0) {
     const infraMonitors = monitors.map((m) => ({
@@ -858,4 +858,6 @@ function deployUptimeKuma(
     },
     { provider }
   );
+
+  return release;
 }

@@ -1,3 +1,10 @@
+## [2.8.8](https://github.com/ReyemTech/nimbus/compare/v2.8.7...v2.8.8) (2026-04-06)
+
+
+### Bug Fixes
+
+* **kuma:** wait for monitorList event, add accepted_statuscodes to all monitors and groups ([ccbc7d9](https://github.com/ReyemTech/nimbus/commit/ccbc7d91f305250e2bae0a120126f6905999fd98))
+
 ## [2.8.7](https://github.com/ReyemTech/nimbus/compare/v2.8.6...v2.8.7) (2026-04-06)
 
 

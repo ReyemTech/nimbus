@@ -1,3 +1,10 @@
+# [2.6.0](https://github.com/ReyemTech/nimbus/compare/v2.5.0...v2.6.0) (2026-04-06)
+
+
+### Features
+
+* **argocd:** auto-register Uptime Kuma monitors from createApp() ([f6749fb](https://github.com/ReyemTech/nimbus/commit/f6749fb6f46c7d0c63adc9f9b59bdb93fcd0b3b4))
+
 # [2.5.0](https://github.com/ReyemTech/nimbus/compare/v2.4.3...v2.5.0) (2026-04-06)
 
 

@@ -1,3 +1,10 @@
+# [2.5.0](https://github.com/ReyemTech/nimbus/compare/v2.4.3...v2.5.0) (2026-04-06)
+
+
+### Features
+
+* **observability:** add Uptime Kuma to observability stack ([611c9d9](https://github.com/ReyemTech/nimbus/commit/611c9d9287602e9b7a0225d051ed3a4ee5df2c05))
+
 ## [2.4.3](https://github.com/ReyemTech/nimbus/compare/v2.4.2...v2.4.3) (2026-04-05)
 
 

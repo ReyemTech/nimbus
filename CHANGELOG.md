@@ -1,3 +1,10 @@
+## [2.8.3](https://github.com/ReyemTech/nimbus/compare/v2.8.2...v2.8.3) (2026-04-06)
+
+
+### Bug Fixes
+
+* **kuma:** use K8s API directly instead of kubectl in reconciler ([7852661](https://github.com/ReyemTech/nimbus/commit/78526614d721f53575fb71d6c4b2b28140004edb))
+
 ## [2.8.2](https://github.com/ReyemTech/nimbus/compare/v2.8.1...v2.8.2) (2026-04-06)
 
 

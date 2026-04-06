@@ -16,7 +16,9 @@ import type {
   IObservabilityStack,
   IObservabilityStackConfig,
   IPrometheusConfig,
+  IUptimeKumaConfig,
 } from "./interfaces";
+import { ensureNamespace } from "../utils/ensure-namespace";
 import type { IExposedService } from "../types";
 import type { StorageTierMap } from "../types/storage-tiers";
 import { createDashboards, lokiLogsDashboard } from "./dashboards/index";
@@ -248,6 +250,16 @@ export function createObservabilityStack(
     });
   }
 
+  // 8. Uptime Kuma (uptime monitoring)
+  if (config.uptimeKuma?.enabled) {
+    components["uptime-kuma"] = deployUptimeKuma(
+      name,
+      config.domain,
+      config.uptimeKuma,
+      provider
+    );
+  }
+
   // Collect exposed services — use Helm release name to derive K8s service names
   const exposedServices: IExposedService[] = [];
   const kpsRelease = components["kube-prometheus-stack"];
@@ -287,6 +299,17 @@ export function createObservabilityStack(
         label: "alertmanager",
       });
     }
+  }
+
+  if (components["uptime-kuma"] && config.uptimeKuma?.expose) {
+    const ukReleaseName = components["uptime-kuma"].status.apply((s) => s?.name ?? "");
+    exposedServices.push({
+      name: "uptime-kuma",
+      originalName: ukReleaseName,
+      namespace: "uptime-kuma",
+      port: 3001,
+      label: "uptime-kuma",
+    });
   }
 
   return { name, cluster, components, exposedServices };
@@ -611,5 +634,62 @@ loki.write "default" {
       },
     },
     { provider }
+  );
+}
+
+function deployUptimeKuma(
+  name: string,
+  domain: string,
+  config: IUptimeKumaConfig,
+  provider: k8s.Provider
+): k8s.helm.v3.Release {
+  const ukNamespace = "uptime-kuma";
+  const subdomain = config.subdomain ?? "uptime";
+
+  const ns = ensureNamespace(ukNamespace, provider);
+
+  const db = config.mariadbCluster.createDatabase("uptime-kuma", {
+    namespaces: [ukNamespace],
+  });
+
+  return new k8s.helm.v3.Release(
+    `${name}-uptime-kuma`,
+    {
+      chart: "uptime-kuma",
+      repositoryOpts: { repo: "https://dirsigler.github.io/uptime-kuma-helm" },
+      version: config.version,
+      namespace: ukNamespace,
+      createNamespace: false,
+      values: {
+        externalDatabase: {
+          enabled: true,
+          type: "mariadb",
+          hostname: "mariadb-main.data.svc.cluster.local",
+          port: 3306,
+          database: "uptime-kuma",
+          existingSecret: db.secrets[ukNamespace],
+          existingSecretUsernameKey: "username",
+          existingSecretPasswordKey: "password",
+        },
+        volume: { enabled: false },
+        ingress: {
+          enabled: true,
+          className: "traefik",
+          annotations: {
+            "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+            "cert-manager.io/cluster-issuer": "letsencrypt-dns",
+          },
+          hosts: [{ host: `${subdomain}.${domain}`, paths: [{ path: "/", pathType: "Prefix" }] }],
+          tls: [{ secretName: "uptime-kuma-tls", hosts: [`${subdomain}.${domain}`] }],
+        },
+        resources: {
+          requests: { cpu: "50m", memory: "128Mi" },
+          limits: { cpu: "500m", memory: "256Mi" },
+        },
+        serviceMonitor: { enabled: true },
+        ...config.values,
+      },
+    },
+    { provider, dependsOn: [ns] }
   );
 }

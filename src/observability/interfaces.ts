@@ -13,6 +13,7 @@ import type { ICluster } from "../cluster";
 import type { StorageTier } from "../types/storage-tiers";
 import type { IEmailTransport } from "../email/interfaces";
 import type { IExposedService } from "../types";
+import type { IClusterInstance } from "../operator/interfaces";
 
 // ---------------------------------------------------------------------------
 // Alerting interfaces
@@ -114,6 +115,22 @@ export interface IAlloyConfig {
   readonly values?: Readonly<Record<string, unknown>>;
 }
 
+/** Uptime Kuma configuration. */
+export interface IUptimeKumaConfig {
+  /** Enable Uptime Kuma uptime monitoring. */
+  readonly enabled: boolean;
+  /** Ingress subdomain prefix. Default: "uptime". */
+  readonly subdomain?: string;
+  /** MariaDB cluster instance for database storage. */
+  readonly mariadbCluster: IClusterInstance;
+  /** Helm chart version override. */
+  readonly version?: string;
+  /** Expose via access gateway (Tailscale). Default: false. */
+  readonly expose?: boolean;
+  /** Additional Helm values to merge with defaults. */
+  readonly values?: Readonly<Record<string, unknown>>;
+}
+
 /** Alertmanager configuration. */
 export interface IAlertmanagerConfig {
   /** Enable Alertmanager. */
@@ -160,6 +177,8 @@ export interface IObservabilityStackConfig {
   readonly alloy?: IAlloyConfig;
   /** Alertmanager configuration. */
   readonly alertmanager?: IAlertmanagerConfig;
+  /** Uptime Kuma uptime monitoring configuration. */
+  readonly uptimeKuma?: IUptimeKumaConfig;
   /** Alerting configuration: notification receivers and rule thresholds. */
   readonly alerts?: IAlertConfig;
   /** Neo4j Bolt endpoint for Grafana datasource (e.g., "bolt://neo4j-main.data.svc.cluster.local:7687"). */

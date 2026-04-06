@@ -13,6 +13,7 @@ export type {
   IAlertConfig,
   IAlertEmailConfig,
   IAlertSlackConfig,
+  IUptimeKumaConfig,
   IObservabilityStackConfig,
   IObservabilityStack,
 } from "./interfaces";

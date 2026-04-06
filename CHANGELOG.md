@@ -1,3 +1,10 @@
+## [2.8.7](https://github.com/ReyemTech/nimbus/compare/v2.8.6...v2.8.7) (2026-04-06)
+
+
+### Bug Fixes
+
+* **kuma:** match by URL not just name, use monitorList event instead of callback ([23ebfe6](https://github.com/ReyemTech/nimbus/commit/23ebfe69f44330f7bb8b5113ad928e32f757b0fb))
+
 ## [2.8.6](https://github.com/ReyemTech/nimbus/compare/v2.8.5...v2.8.6) (2026-04-06)
 
 

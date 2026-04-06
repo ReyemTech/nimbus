@@ -1,3 +1,10 @@
+## [2.8.6](https://github.com/ReyemTech/nimbus/compare/v2.8.5...v2.8.6) (2026-04-06)
+
+
+### Bug Fixes
+
+* **kuma:** remove token field from login, add error detail ([9b70b99](https://github.com/ReyemTech/nimbus/commit/9b70b994c4b459c26a8d5cd3bf69da34debea37b))
+
 ## [2.8.5](https://github.com/ReyemTech/nimbus/compare/v2.8.4...v2.8.5) (2026-04-06)
 
 

@@ -1,3 +1,10 @@
+## [2.8.4](https://github.com/ReyemTech/nimbus/compare/v2.8.3...v2.8.4) (2026-04-06)
+
+
+### Bug Fixes
+
+* **kuma:** use service URL for Socket.IO connection, not localhost ([fac6ab9](https://github.com/ReyemTech/nimbus/commit/fac6ab9644e65c9eeae54f09a0889d87bbc7e704))
+
 ## [2.8.3](https://github.com/ReyemTech/nimbus/compare/v2.8.2...v2.8.3) (2026-04-06)
 
 

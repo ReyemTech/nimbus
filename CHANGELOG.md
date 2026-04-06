@@ -1,3 +1,10 @@
+## [2.8.1](https://github.com/ReyemTech/nimbus/compare/v2.8.0...v2.8.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* **kuma:** move reconciler resources before return statement ([5466c34](https://github.com/ReyemTech/nimbus/commit/5466c34c84f1584219f958725caf79d98df9c4c6))
+
 # [2.8.0](https://github.com/ReyemTech/nimbus/compare/v2.7.0...v2.8.0) (2026-04-06)
 
 

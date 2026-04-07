@@ -145,7 +145,7 @@ function createSingleMariadbDatabaseInstance(
         grantOption: true,
       },
     },
-    { provider, dependsOn: [database, user] }
+    { provider, dependsOn: [database, user], ignoreChanges: ["spec.database", "spec.username"] }
   );
 
   // 4. Read password back from the stored secret (stable across deploys)

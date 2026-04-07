@@ -1,3 +1,10 @@
+## [2.8.9](https://github.com/ReyemTech/nimbus/compare/v2.8.8...v2.8.9) (2026-04-07)
+
+
+### Bug Fixes
+
+* **kuma:** register monitorList handler before login to capture initial push ([b546762](https://github.com/ReyemTech/nimbus/commit/b546762c933410baef90747af78a3eaca38f7c47))
+
 ## [2.8.8](https://github.com/ReyemTech/nimbus/compare/v2.8.7...v2.8.8) (2026-04-06)
 
 

@@ -202,6 +202,12 @@ export function createCache(
             uri: pulumi
               .all([endpoint, password])
               .apply(([h, pw]) => `redis://:${pw}@${h}:${appPort}`),
+            // Sentinel fields for failover-aware connections
+            sentinel_host: actualReleaseName.apply(
+              (rn) => `${rn}-headless.${CACHE_NAMESPACE}.svc.cluster.local`
+            ),
+            sentinel_port: String(SENTINEL_PORT),
+            sentinel_service: "mymaster",
           },
         },
         { provider, dependsOn: [release, nsResource], ignoreChanges: ["data", "stringData"] }

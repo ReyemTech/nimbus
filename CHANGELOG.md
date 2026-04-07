@@ -1,3 +1,10 @@
+# [2.10.0](https://github.com/ReyemTech/nimbus/compare/v2.9.0...v2.10.0) (2026-04-07)
+
+
+### Features
+
+* **cache:** master-tracking service for Redis Sentinel ([a6966b4](https://github.com/ReyemTech/nimbus/commit/a6966b4d92319807cb29e0c10380d9ab38ca2f34))
+
 # [2.9.0](https://github.com/ReyemTech/nimbus/compare/v2.8.9...v2.9.0) (2026-04-07)
 
 

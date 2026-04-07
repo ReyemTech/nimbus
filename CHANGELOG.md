@@ -1,3 +1,10 @@
+# [2.9.0](https://github.com/ReyemTech/nimbus/compare/v2.8.9...v2.9.0) (2026-04-07)
+
+
+### Features
+
+* **cache:** add Sentinel fields to Redis replicated secret ([ce8104b](https://github.com/ReyemTech/nimbus/commit/ce8104bf4e7d5a6fcb02a1abfb1861f7c81add6d))
+
 ## [2.8.9](https://github.com/ReyemTech/nimbus/compare/v2.8.8...v2.8.9) (2026-04-07)
 
 

@@ -125,11 +125,123 @@ export function createCache(
   // release name from status for deriving service/secret names.
   const actualReleaseName = release.status.apply((s) => s.name);
 
-  // App-facing endpoint: the main ClusterIP service (Bitnami Redis names it
-  // after the release). Apps connect on port 6379 regardless of architecture.
-  const endpoint = actualReleaseName.apply(
-    (rn) => `${rn}.${CACHE_NAMESPACE}.svc.cluster.local`
-  );
+  // Master-tracking service: a headless Service + Deployment that queries
+  // Sentinel and patches the Endpoints to always point to the current master.
+  // Apps connect to {name}-master.{ns}:6379 — no Sentinel client needed.
+  if (architecture === "replication") {
+    const masterSvcName = `${name}-master`;
+
+    new k8s.core.v1.Service(
+      `${name}-redis-master-svc`,
+      {
+        metadata: {
+          name: masterSvcName,
+          namespace: CACHE_NAMESPACE,
+          labels: { "app.kubernetes.io/managed-by": "nimbus", "nimbus/cache": name },
+        },
+        spec: {
+          type: "ClusterIP",
+          ports: [{ port: REDIS_PORT, targetPort: REDIS_PORT, name: "redis" }],
+          // No selector — Endpoints managed by the tracker
+        },
+      },
+      { provider, dependsOn: [release, ns] }
+    );
+
+    // Tracker Deployment that runs a shell loop querying Sentinel every 10s
+    const trackerScript = actualReleaseName.apply((rn) => [
+      "#!/bin/sh",
+      "set -e",
+      `SENTINEL="${rn}-headless.${CACHE_NAMESPACE}.svc.cluster.local"`,
+      `SVC="${masterSvcName}"`,
+      `NS="${CACHE_NAMESPACE}"`,
+      `TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)`,
+      `CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`,
+      `API=https://kubernetes.default.svc`,
+      "",
+      "while true; do",
+      '  MASTER_IP=$(redis-cli -h "$SENTINEL" -p 26379 SENTINEL get-master-addr-by-name mymaster 2>/dev/null | head -1)',
+      '  if [ -n "$MASTER_IP" ]; then',
+      "    PAYLOAD=$(cat <<EOF",
+      '{"apiVersion":"v1","kind":"Endpoints","metadata":{"name":"$SVC","namespace":"$NS"},"subsets":[{"addresses":[{"ip":"$MASTER_IP"}],"ports":[{"port":6379,"name":"redis"}]}]}',
+      "EOF",
+      "    )",
+      '    PAYLOAD=$(echo "$PAYLOAD" | sed "s/\\$SVC/$SVC/g; s/\\$NS/$NS/g; s/\\$MASTER_IP/$MASTER_IP/g")',
+      '    curl -sk -X PUT "$API/api/v1/namespaces/$NS/endpoints/$SVC" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --cacert "$CACERT" -d "$PAYLOAD" > /dev/null 2>&1',
+      '    echo "$(date -Iseconds) master=$MASTER_IP"',
+      "  fi",
+      "  sleep 10",
+      "done",
+    ].join("\n"));
+
+    new k8s.core.v1.ConfigMap(
+      `${name}-redis-master-tracker-script`,
+      {
+        metadata: { name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE },
+        data: { "track.sh": trackerScript },
+      },
+      { provider, dependsOn: [ns] }
+    );
+
+    new k8s.apps.v1.Deployment(
+      `${name}-redis-master-tracker`,
+      {
+        metadata: { name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE },
+        spec: {
+          replicas: 1,
+          selector: { matchLabels: { app: `${name}-master-tracker` } },
+          template: {
+            metadata: { labels: { app: `${name}-master-tracker` } },
+            spec: {
+              serviceAccountName: `${name}-master-tracker`,
+              containers: [{
+                name: "tracker",
+                image: "bitnami/redis:7",
+                command: ["sh", "/scripts/track.sh"],
+                volumeMounts: [{ name: "script", mountPath: "/scripts" }],
+                resources: { requests: { cpu: "10m", memory: "16Mi" }, limits: { cpu: "50m", memory: "32Mi" } },
+              }],
+              volumes: [{ name: "script", configMap: { name: `${name}-master-tracker` } }],
+            },
+          },
+        },
+      },
+      { provider, dependsOn: [release, ns] }
+    );
+
+    new k8s.core.v1.ServiceAccount(
+      `${name}-redis-master-tracker-sa`,
+      { metadata: { name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE } },
+      { provider, dependsOn: [ns] }
+    );
+
+    new k8s.rbac.v1.Role(
+      `${name}-redis-master-tracker-role`,
+      {
+        metadata: { name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE },
+        rules: [{ apiGroups: [""], resources: ["endpoints"], verbs: ["get", "update", "patch", "create"] }],
+      },
+      { provider }
+    );
+
+    new k8s.rbac.v1.RoleBinding(
+      `${name}-redis-master-tracker-binding`,
+      {
+        metadata: { name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE },
+        roleRef: { apiGroup: "rbac.authorization.k8s.io", kind: "Role", name: `${name}-master-tracker` },
+        subjects: [{ kind: "ServiceAccount", name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE }],
+      },
+      { provider }
+    );
+  }
+
+  // App-facing endpoint: the master-tracking service (always routes to master).
+  // Falls back to the main ClusterIP service for standalone architecture.
+  const endpoint = architecture === "replication"
+    ? pulumi.output(`${name}-master.${CACHE_NAMESPACE}.svc.cluster.local`)
+    : actualReleaseName.apply(
+        (rn) => `${rn}.${CACHE_NAMESPACE}.svc.cluster.local`
+      );
 
   // Sentinel port for internal Pulumi use, app-facing port is always 6379
   const port = pulumi.output(architecture === "replication" ? SENTINEL_PORT : REDIS_PORT);

@@ -1,3 +1,10 @@
+## [2.10.1](https://github.com/ReyemTech/nimbus/compare/v2.10.0...v2.10.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* **cache,mariadb:** master-tracker bugs + Grant immutable fields ([b77bd6e](https://github.com/ReyemTech/nimbus/commit/b77bd6ee592c064edb1a92370957452a0f0d75f4))
+
 # [2.10.0](https://github.com/ReyemTech/nimbus/compare/v2.9.0...v2.10.0) (2026-04-07)
 
 

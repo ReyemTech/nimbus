@@ -72,21 +72,26 @@ export function deployTailscale(name: string, config: ITailscaleGatewayConfig): 
   if (config.tailscale.services) {
     for (const svc of config.tailscale.services) {
       const targetName = svc.originalName ?? svc.name;
-      new k8s.core.v1.ServicePatch(
-        `${name}-ts-expose-${svc.label}`,
-        {
-          metadata: {
-            name: pulumi.output(targetName),
-            namespace: svc.namespace,
-            annotations: {
-              "pulumi.com/patchForce": "true",
-              "tailscale.com/expose": "true",
-              "tailscale.com/hostname": `${prefix}-${svc.label}`,
+      // ServicePatch requires metadata.name as a plain string at preview time.
+      // When targetName is an Output (e.g., derived from Helm release status),
+      // resolve it first so the patch is only created once the name is known.
+      pulumi.output(targetName).apply((resolvedName) => {
+        new k8s.core.v1.ServicePatch(
+          `${name}-ts-expose-${svc.label}`,
+          {
+            metadata: {
+              name: resolvedName,
+              namespace: svc.namespace,
+              annotations: {
+                "pulumi.com/patchForce": "true",
+                "tailscale.com/expose": "true",
+                "tailscale.com/hostname": `${prefix}-${svc.label}`,
+              },
             },
           },
-        },
-        { provider, dependsOn: [helmRelease] }
-      );
+          { provider, dependsOn: [helmRelease] }
+        );
+      });
     }
   }
 

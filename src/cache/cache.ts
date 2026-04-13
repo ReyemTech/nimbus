@@ -152,42 +152,44 @@ export function createCache(
     // Uses alpine:3 + apk redis/curl because bitnami/redis lacks curl.
     // Passes REDIS_PASSWORD for Sentinel auth and resolves hostname → IP
     // since K8s Endpoints require IP addresses, not DNS names.
-    const trackerScript = actualReleaseName.apply((rn) => [
-      "#!/bin/sh",
-      "set -e",
-      "apk add --no-cache redis curl > /dev/null 2>&1",
-      `SENTINEL="${rn}-headless.${CACHE_NAMESPACE}.svc.cluster.local"`,
-      `SVC="${masterSvcName}"`,
-      `NS="${CACHE_NAMESPACE}"`,
-      `API=https://kubernetes.default.svc`,
-      `CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`,
-      'echo "tracker starting"',
-      "while true; do",
-      '  TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)',
-      '  MASTER_HOST=$(redis-cli -h "$SENTINEL" -p 26379 -a "$REDIS_PASSWORD" --no-auth-warning SENTINEL get-master-addr-by-name mymaster 2>/dev/null | head -1)',
-      '  if [ -n "$MASTER_HOST" ]; then',
-      '    MASTER_IP=$(getent hosts "$MASTER_HOST" 2>/dev/null | awk \'{print $1}\' | head -1)',
-      '    if [ -z "$MASTER_IP" ]; then',
-      '      echo "$(date -Iseconds) dns-resolve-failed host=$MASTER_HOST"',
-      "      sleep 10",
-      "      continue",
-      "    fi",
-      `    PAYLOAD='{"apiVersion":"v1","kind":"Endpoints","metadata":{"name":"'$SVC'","namespace":"'$NS'"},"subsets":[{"addresses":[{"ip":"'$MASTER_IP'"}],"ports":[{"port":6379,"name":"redis","protocol":"TCP"}]}]}'`,
-      '    HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" -X PUT "$API/api/v1/namespaces/$NS/endpoints/$SVC" \\',
-      '      -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --cacert "$CACERT" -d "$PAYLOAD")',
-      '    if [ "$HTTP_CODE" = "404" ]; then',
-      '      HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" -X POST "$API/api/v1/namespaces/$NS/endpoints" \\',
-      '        -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --cacert "$CACERT" -d "$PAYLOAD")',
-      '      echo "$(date -Iseconds) created master=$MASTER_IP http=$HTTP_CODE"',
-      "    else",
-      '      echo "$(date -Iseconds) master=$MASTER_IP http=$HTTP_CODE"',
-      "    fi",
-      "  else",
-      '    echo "$(date -Iseconds) sentinel query failed"',
-      "  fi",
-      "  sleep 10",
-      "done",
-    ].join("\n"));
+    const trackerScript = actualReleaseName.apply((rn) =>
+      [
+        "#!/bin/sh",
+        "set -e",
+        "apk add --no-cache redis curl > /dev/null 2>&1",
+        `SENTINEL="${rn}-headless.${CACHE_NAMESPACE}.svc.cluster.local"`,
+        `SVC="${masterSvcName}"`,
+        `NS="${CACHE_NAMESPACE}"`,
+        `API=https://kubernetes.default.svc`,
+        `CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`,
+        'echo "tracker starting"',
+        "while true; do",
+        "  TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)",
+        '  MASTER_HOST=$(redis-cli -h "$SENTINEL" -p 26379 -a "$REDIS_PASSWORD" --no-auth-warning SENTINEL get-master-addr-by-name mymaster 2>/dev/null | head -1)',
+        '  if [ -n "$MASTER_HOST" ]; then',
+        "    MASTER_IP=$(getent hosts \"$MASTER_HOST\" 2>/dev/null | awk '{print $1}' | head -1)",
+        '    if [ -z "$MASTER_IP" ]; then',
+        '      echo "$(date -Iseconds) dns-resolve-failed host=$MASTER_HOST"',
+        "      sleep 10",
+        "      continue",
+        "    fi",
+        `    PAYLOAD='{"apiVersion":"v1","kind":"Endpoints","metadata":{"name":"'$SVC'","namespace":"'$NS'"},"subsets":[{"addresses":[{"ip":"'$MASTER_IP'"}],"ports":[{"port":6379,"name":"redis","protocol":"TCP"}]}]}'`,
+        '    HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" -X PUT "$API/api/v1/namespaces/$NS/endpoints/$SVC" \\',
+        '      -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --cacert "$CACERT" -d "$PAYLOAD")',
+        '    if [ "$HTTP_CODE" = "404" ]; then',
+        '      HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" -X POST "$API/api/v1/namespaces/$NS/endpoints" \\',
+        '        -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --cacert "$CACERT" -d "$PAYLOAD")',
+        '      echo "$(date -Iseconds) created master=$MASTER_IP http=$HTTP_CODE"',
+        "    else",
+        '      echo "$(date -Iseconds) master=$MASTER_IP http=$HTTP_CODE"',
+        "    fi",
+        "  else",
+        '    echo "$(date -Iseconds) sentinel query failed"',
+        "  fi",
+        "  sleep 10",
+        "done",
+      ].join("\n")
+    );
 
     new k8s.core.v1.ConfigMap(
       `${name}-redis-master-tracker-script`,
@@ -209,17 +211,26 @@ export function createCache(
             metadata: { labels: { app: `${name}-master-tracker` } },
             spec: {
               serviceAccountName: `${name}-master-tracker`,
-              containers: [{
-                name: "tracker",
-                image: "alpine:3",
-                command: ["sh", "/scripts/track.sh"],
-                env: [{
-                  name: "REDIS_PASSWORD",
-                  valueFrom: { secretKeyRef: { name: actualReleaseName, key: "redis-password" } },
-                }],
-                volumeMounts: [{ name: "script", mountPath: "/scripts" }],
-                resources: { requests: { cpu: "10m", memory: "32Mi" }, limits: { cpu: "50m", memory: "64Mi" } },
-              }],
+              containers: [
+                {
+                  name: "tracker",
+                  image: "alpine:3",
+                  command: ["sh", "/scripts/track.sh"],
+                  env: [
+                    {
+                      name: "REDIS_PASSWORD",
+                      valueFrom: {
+                        secretKeyRef: { name: actualReleaseName, key: "redis-password" },
+                      },
+                    },
+                  ],
+                  volumeMounts: [{ name: "script", mountPath: "/scripts" }],
+                  resources: {
+                    requests: { cpu: "10m", memory: "32Mi" },
+                    limits: { cpu: "50m", memory: "64Mi" },
+                  },
+                },
+              ],
               volumes: [{ name: "script", configMap: { name: `${name}-master-tracker` } }],
             },
           },
@@ -238,7 +249,13 @@ export function createCache(
       `${name}-redis-master-tracker-role`,
       {
         metadata: { name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE },
-        rules: [{ apiGroups: [""], resources: ["endpoints"], verbs: ["get", "update", "patch", "create"] }],
+        rules: [
+          {
+            apiGroups: [""],
+            resources: ["endpoints"],
+            verbs: ["get", "update", "patch", "create"],
+          },
+        ],
       },
       { provider }
     );
@@ -247,8 +264,14 @@ export function createCache(
       `${name}-redis-master-tracker-binding`,
       {
         metadata: { name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE },
-        roleRef: { apiGroup: "rbac.authorization.k8s.io", kind: "Role", name: `${name}-master-tracker` },
-        subjects: [{ kind: "ServiceAccount", name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE }],
+        roleRef: {
+          apiGroup: "rbac.authorization.k8s.io",
+          kind: "Role",
+          name: `${name}-master-tracker`,
+        },
+        subjects: [
+          { kind: "ServiceAccount", name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE },
+        ],
       },
       { provider }
     );
@@ -256,11 +279,10 @@ export function createCache(
 
   // App-facing endpoint: the master-tracking service (always routes to master).
   // Falls back to the main ClusterIP service for standalone architecture.
-  const endpoint = architecture === "replication"
-    ? pulumi.output(`${name}-master.${CACHE_NAMESPACE}.svc.cluster.local`)
-    : actualReleaseName.apply(
-        (rn) => `${rn}.${CACHE_NAMESPACE}.svc.cluster.local`
-      );
+  const endpoint =
+    architecture === "replication"
+      ? pulumi.output(`${name}-master.${CACHE_NAMESPACE}.svc.cluster.local`)
+      : actualReleaseName.apply((rn) => `${rn}.${CACHE_NAMESPACE}.svc.cluster.local`);
 
   // Sentinel port for internal Pulumi use, app-facing port is always 6379
   const port = pulumi.output(architecture === "replication" ? SENTINEL_PORT : REDIS_PORT);

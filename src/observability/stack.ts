@@ -252,12 +252,7 @@ export function createObservabilityStack(
 
   // 8. Uptime Kuma (uptime monitoring)
   if (config.uptimeKuma?.enabled) {
-    components["uptime-kuma"] = deployUptimeKuma(
-      name,
-      config.domain,
-      config.uptimeKuma,
-      provider
-    );
+    components["uptime-kuma"] = deployUptimeKuma(name, config.domain, config.uptimeKuma, provider);
   }
 
   // Collect exposed services — use Helm release name to derive K8s service names
@@ -759,7 +754,7 @@ function deployUptimeKuma(
     '  const desired = (cms.items || []).flatMap(cm => JSON.parse(cm.data["monitors.json"] || "[]"));',
     '  console.log("Desired monitors:", desired.length);',
     "",
-    '  const socket = io(KUMA_URL);',
+    "  const socket = io(KUMA_URL);",
     '  await new Promise((resolve, reject) => { socket.on("connect", resolve); socket.on("connect_error", reject); setTimeout(() => reject(new Error("connect timeout")), 10000); });',
     "",
     "  // Register monitorList handler BEFORE login (Kuma pushes it immediately after auth)",
@@ -787,7 +782,7 @@ function deployUptimeKuma(
     '  console.log("Existing monitors:", Object.keys(byName).length, "groups:", Object.keys(groupIds).length);',
     "",
     "  // Ensure groups exist",
-    '  const groups = [...new Set(desired.map(m => m.group).filter(Boolean))];',
+    "  const groups = [...new Set(desired.map(m => m.group).filter(Boolean))];",
     "  for (const g of groups) {",
     "    if (groupIds[g]) continue;",
     '    console.log("CREATE GROUP:", g);',
@@ -805,23 +800,23 @@ function deployUptimeKuma(
     "    }",
     '    console.log("CREATE:", m.name);',
     '    const data = { type: m.type || "http", name: m.name, interval: m.interval || 60, retryInterval: 60, maxretries: 3, accepted_statuscodes: ["200-299"] };',
-    '    if (m.url) data.url = m.url;',
-    '    if (m.hostname) data.hostname = m.hostname;',
-    '    if (m.port) data.port = m.port;',
-    '    if (m.keyword) data.keyword = m.keyword;',
-    '    if (m.connectionString) data.databaseConnectionString = m.connectionString;',
-    '    if (m.dnsResolveType) data.dns_resolve_type = m.dnsResolveType;',
-    '    if (m.dnsResolveServer) data.dns_resolve_server = m.dnsResolveServer;',
-    '    if (m.grpcServiceName) data.grpcServiceName = m.grpcServiceName;',
+    "    if (m.url) data.url = m.url;",
+    "    if (m.hostname) data.hostname = m.hostname;",
+    "    if (m.port) data.port = m.port;",
+    "    if (m.keyword) data.keyword = m.keyword;",
+    "    if (m.connectionString) data.databaseConnectionString = m.connectionString;",
+    "    if (m.dnsResolveType) data.dns_resolve_type = m.dnsResolveType;",
+    "    if (m.dnsResolveServer) data.dns_resolve_server = m.dnsResolveServer;",
+    "    if (m.grpcServiceName) data.grpcServiceName = m.grpcServiceName;",
     '    if (["http","keyword","json-query"].includes(data.type)) data.accepted_statuscodes = ["200-299"];',
-    '    if (m.extra) Object.assign(data, m.extra);',
+    "    if (m.extra) Object.assign(data, m.extra);",
     "    if (m.group && groupIds[m.group]) data.parent = groupIds[m.group];",
     '    const res = await new Promise(resolve => socket.emit("add", data, resolve));',
-    '    if (res.ok) byName[m.name] = res.monitorID;',
+    "    if (res.ok) byName[m.name] = res.monitorID;",
     '    console.log(res.ok ? "  OK" : "  FAIL: " + res.msg);',
     "  }",
     "  socket.disconnect();",
-    '}',
+    "}",
     "main().catch(e => { console.error(e); process.exit(1); });",
   ].join("\n");
 
@@ -848,17 +843,35 @@ function deployUptimeKuma(
               spec: {
                 serviceAccountName: "kuma-reconciler",
                 restartPolicy: "OnFailure",
-                containers: [{
-                  name: "reconciler",
-                  image: "node:22-alpine",
-                  command: ["sh", "-c", "cd /tmp && npm init -y > /dev/null 2>&1 && npm install --no-package-lock socket.io-client > /dev/null 2>&1 && NODE_PATH=/tmp/node_modules node /scripts/reconcile.js"],
-                  env: [
-                    { name: "KUMA_USERNAME", valueFrom: { secretKeyRef: { name: "kuma-credentials", key: "username" } } },
-                    { name: "KUMA_PASSWORD", valueFrom: { secretKeyRef: { name: "kuma-credentials", key: "password" } } },
-                    { name: "KUMA_URL", value: release.status.apply((s) => `http://${s?.name ?? "uptime-kuma"}.${ukNamespace}.svc.cluster.local:3001`) },
-                  ],
-                  volumeMounts: [{ name: "script", mountPath: "/scripts" }],
-                }],
+                containers: [
+                  {
+                    name: "reconciler",
+                    image: "node:22-alpine",
+                    command: [
+                      "sh",
+                      "-c",
+                      "cd /tmp && npm init -y > /dev/null 2>&1 && npm install --no-package-lock socket.io-client > /dev/null 2>&1 && NODE_PATH=/tmp/node_modules node /scripts/reconcile.js",
+                    ],
+                    env: [
+                      {
+                        name: "KUMA_USERNAME",
+                        valueFrom: { secretKeyRef: { name: "kuma-credentials", key: "username" } },
+                      },
+                      {
+                        name: "KUMA_PASSWORD",
+                        valueFrom: { secretKeyRef: { name: "kuma-credentials", key: "password" } },
+                      },
+                      {
+                        name: "KUMA_URL",
+                        value: release.status.apply(
+                          (s) =>
+                            `http://${s?.name ?? "uptime-kuma"}.${ukNamespace}.svc.cluster.local:3001`
+                        ),
+                      },
+                    ],
+                    volumeMounts: [{ name: "script", mountPath: "/scripts" }],
+                  },
+                ],
                 volumes: [{ name: "script", configMap: { name: "kuma-reconciler-script" } }],
               },
             },
@@ -888,7 +901,11 @@ function deployUptimeKuma(
     `${name}-kuma-reconciler-binding`,
     {
       metadata: { name: "kuma-monitor-reader" },
-      roleRef: { apiGroup: "rbac.authorization.k8s.io", kind: "ClusterRole", name: "kuma-monitor-reader" },
+      roleRef: {
+        apiGroup: "rbac.authorization.k8s.io",
+        kind: "ClusterRole",
+        name: "kuma-monitor-reader",
+      },
       subjects: [{ kind: "ServiceAccount", name: "kuma-reconciler", namespace: ukNamespace }],
     },
     { provider }

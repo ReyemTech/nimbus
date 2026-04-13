@@ -163,7 +163,9 @@ export class ArgoApp {
     // Write monitor definitions to shared ConfigMap for Uptime Kuma reconciler
     if (config.monitors?.length) {
       const monitors = config.monitors.map((m) => {
-        const displayName = m.name ?? (m.url ? `${name} — ${new URL(m.url).hostname}` : `${name} — ${m.hostname}:${m.port}`);
+        const displayName =
+          m.name ??
+          (m.url ? `${name} — ${new URL(m.url).hostname}` : `${name} — ${m.hostname}:${m.port}`);
         return {
           name: displayName,
           url: m.url,

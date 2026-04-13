@@ -125,24 +125,24 @@ export interface IArgoProjectConfig {
 
 /** Supported Uptime Kuma monitor types. */
 export type KumaMonitorType =
-  | "http"        // HTTP(s) status check
-  | "keyword"     // HTTP(s) + keyword match in response body
-  | "json-query"  // HTTP(s) + JSON path query
-  | "tcp"         // TCP port check
-  | "dns"         // DNS record check
-  | "grpc"        // gRPC health check
-  | "mysql"       // MySQL/MariaDB connection check
-  | "postgres"    // PostgreSQL connection check
-  | "redis"       // Redis connection check
-  | "mongodb"     // MongoDB connection check
-  | "mqtt"        // MQTT broker check
-  | "rabbitmq"    // RabbitMQ management API check
-  | "smtp"        // SMTP server check
-  | "group"       // Monitor group (container for child monitors)
-  | "push"        // Push-based (passive heartbeat)
-  | "gamedig"     // GameDig game server check
-  | "docker"      // Docker container check
-  | "snmp"        // SNMP check
+  | "http" // HTTP(s) status check
+  | "keyword" // HTTP(s) + keyword match in response body
+  | "json-query" // HTTP(s) + JSON path query
+  | "tcp" // TCP port check
+  | "dns" // DNS record check
+  | "grpc" // gRPC health check
+  | "mysql" // MySQL/MariaDB connection check
+  | "postgres" // PostgreSQL connection check
+  | "redis" // Redis connection check
+  | "mongodb" // MongoDB connection check
+  | "mqtt" // MQTT broker check
+  | "rabbitmq" // RabbitMQ management API check
+  | "smtp" // SMTP server check
+  | "group" // Monitor group (container for child monitors)
+  | "push" // Push-based (passive heartbeat)
+  | "gamedig" // GameDig game server check
+  | "docker" // Docker container check
+  | "snmp" // SNMP check
   | "tailscale-ping"; // Tailscale ICMP ping
 
 /** Uptime monitor definition for auto-registration. */

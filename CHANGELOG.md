@@ -1,3 +1,10 @@
+## [2.10.2](https://github.com/ReyemTech/nimbus/compare/v2.10.1...v2.10.2) (2026-04-13)
+
+
+### Bug Fixes
+
+* resolve Output<string> before ServicePatch metadata.name ([5c0c079](https://github.com/ReyemTech/nimbus/commit/5c0c0792fb6c785b5da6949d27480e12b33744d6))
+
 ## [2.10.1](https://github.com/ReyemTech/nimbus/compare/v2.10.0...v2.10.1) (2026-04-07)
 
 

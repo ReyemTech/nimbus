@@ -30,6 +30,8 @@ let createdIamUsers: Array<{ name: string; args: any }>;
 let createdIamPolicies: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdIamAccessKeys: Array<{ name: string; args: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdDaemonSets: Array<{ name: string; args: any }>;
 
 // Mock @pulumi/aws
 vi.mock("@pulumi/aws", () => {
@@ -107,6 +109,14 @@ vi.mock("@pulumi/kubernetes", () => {
   };
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockDaemonSet = class {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, args: any, _opts?: any) {
+      createdDaemonSets.push({ name, args });
+    }
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockConfigMap = class {};
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
@@ -121,6 +131,7 @@ vi.mock("@pulumi/kubernetes", () => {
   return {
     helm: { v3: { Release: mockRelease } },
     apiextensions: { CustomResource: mockCustomResource },
+    apps: { v1: { DaemonSet: mockDaemonSet } },
     core: { v1: { Secret: mockSecret, ConfigMap: mockConfigMap } },
     networking: { v1: { Ingress: mockIngress } },
     rbac: {
@@ -169,6 +180,7 @@ beforeEach(() => {
   createdIamUsers = [];
   createdIamPolicies = [];
   createdIamAccessKeys = [];
+  createdDaemonSets = [];
 });
 
 describe("platform stack — descheduler", () => {
@@ -508,5 +520,27 @@ describe("platform stack — ClusterSecretStore", () => {
 
     const css = createdCustomResources.find((r) => r.args.kind === "ClusterSecretStore");
     expect(css).toBeUndefined();
+  });
+});
+
+describe("platform stack — image pruner", () => {
+  it("creates image pruner DaemonSet by default", () => {
+    const cluster = makeCluster("test");
+    createPlatformStack("test", { cluster, domain: "example.com" });
+    expect(
+      createdDaemonSets.some((d) => d.args.metadata.name === "image-pruner")
+    ).toBe(true);
+  });
+
+  it("skips image pruner when imagePruner.enabled is false", () => {
+    const cluster = makeCluster("test");
+    createPlatformStack("test", {
+      cluster,
+      domain: "example.com",
+      imagePruner: { enabled: false },
+    });
+    expect(
+      createdDaemonSets.some((d) => d.args.metadata.name === "image-pruner")
+    ).toBe(false);
   });
 });

@@ -166,6 +166,9 @@ export interface IPlatformStackConfig {
   /** Descheduler for pod rebalancing on spot instances. */
   readonly descheduler?: IDeschedulerConfig;
 
+  /** Per-node image cache pruner. Default: { enabled: true, intervalSeconds: 21600 }. */
+  readonly imagePruner?: IImagePrunerConfig;
+
   readonly tags?: Readonly<Record<string, string>>;
 }
 
@@ -236,3 +239,15 @@ export const SYSTEM_NAMESPACES: ReadonlySet<string> = new Set([
   "tigera-operator",
   "projectsveltos",
 ]);
+
+/** Image-cache pruner DaemonSet configuration. */
+export interface IImagePrunerConfig {
+  /** Enable the pruner DaemonSet. Default: true. */
+  readonly enabled?: boolean;
+  /** Prune interval in seconds. Default: 21600 (6h). */
+  readonly intervalSeconds?: number;
+  /** Base image. Default: "alpine:3.20" (crictl downloaded at pod start). */
+  readonly image?: string;
+  /** Namespace for the DaemonSet. Default: "kube-system". */
+  readonly namespace?: string;
+}

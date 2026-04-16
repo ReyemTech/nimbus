@@ -540,9 +540,7 @@ describe("platform stack — image pruner", () => {
   it("creates image pruner DaemonSet by default", () => {
     const cluster = makeCluster("test");
     createPlatformStack("test", { cluster, domain: "example.com" });
-    expect(
-      createdDaemonSets.some((d) => d.args.metadata.name === "image-pruner")
-    ).toBe(true);
+    expect(createdDaemonSets.some((d) => d.args.metadata.name === "image-pruner")).toBe(true);
   });
 
   it("skips image pruner when imagePruner.enabled is false", () => {
@@ -552,8 +550,6 @@ describe("platform stack — image pruner", () => {
       domain: "example.com",
       imagePruner: { enabled: false },
     });
-    expect(
-      createdDaemonSets.some((d) => d.args.metadata.name === "image-pruner")
-    ).toBe(false);
+    expect(createdDaemonSets.some((d) => d.args.metadata.name === "image-pruner")).toBe(false);
   });
 });

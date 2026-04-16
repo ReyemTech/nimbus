@@ -1,9 +1,6 @@
 import * as k8s from "@pulumi/kubernetes";
 import type { INamespacePolicy } from "../platform/interfaces";
-import {
-  DEFAULT_NAMESPACE_POLICY,
-  SYSTEM_NAMESPACES,
-} from "../platform/interfaces";
+import { DEFAULT_NAMESPACE_POLICY, SYSTEM_NAMESPACES } from "../platform/interfaces";
 import { nimbus } from "../nimbus";
 
 const createdNamespaces = new Map<string, k8s.core.v1.Namespace>();
@@ -40,11 +37,7 @@ export function ensureNamespace(
   if (existing) {
     return existing;
   }
-  const ns = new k8s.core.v1.Namespace(
-    `ensure-ns-${name}`,
-    { metadata: { name } },
-    { provider }
-  );
+  const ns = new k8s.core.v1.Namespace(`ensure-ns-${name}`, { metadata: { name } }, { provider });
   createdNamespaces.set(name, ns);
 
   if (SYSTEM_NAMESPACES.has(name)) {

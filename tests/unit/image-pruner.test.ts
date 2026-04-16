@@ -30,18 +30,14 @@ beforeEach(() => {
 
 describe("createImagePruner", () => {
   it("returns null when enabled: false", async () => {
-    const { createImagePruner } = await import(
-      "../../src/platform/components/image-pruner.js"
-    );
+    const { createImagePruner } = await import("../../src/platform/components/image-pruner.js");
     const result = createImagePruner("test", { enabled: false }, mockProvider());
     expect(result).toBeNull();
     expect(createdDaemonSets).toHaveLength(0);
   });
 
   it("creates DaemonSet with privileged container, hostPath socket, default interval", async () => {
-    const { createImagePruner } = await import(
-      "../../src/platform/components/image-pruner.js"
-    );
+    const { createImagePruner } = await import("../../src/platform/components/image-pruner.js");
     const result = createImagePruner("test", {}, mockProvider());
     expect(result).not.toBeNull();
     expect(createdDaemonSets).toHaveLength(1);
@@ -72,9 +68,7 @@ describe("createImagePruner", () => {
   });
 
   it("uses custom intervalSeconds when provided", async () => {
-    const { createImagePruner } = await import(
-      "../../src/platform/components/image-pruner.js"
-    );
+    const { createImagePruner } = await import("../../src/platform/components/image-pruner.js");
     createImagePruner("test", { intervalSeconds: 3600 }, mockProvider());
     const args = createdDaemonSets[0]?.args.spec.template.spec.containers[0].args.join(" ");
     expect(args).toContain("3600");
@@ -82,9 +76,7 @@ describe("createImagePruner", () => {
   });
 
   it("uses custom namespace when provided", async () => {
-    const { createImagePruner } = await import(
-      "../../src/platform/components/image-pruner.js"
-    );
+    const { createImagePruner } = await import("../../src/platform/components/image-pruner.js");
     createImagePruner("test", { namespace: "infra" }, mockProvider());
     expect(createdDaemonSets[0]?.args.metadata.namespace).toBe("infra");
   });

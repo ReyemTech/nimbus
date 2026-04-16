@@ -15,3 +15,4 @@ export { deployVault } from "./vault";
 export { deployExternalSecrets } from "./external-secrets";
 export { deployOAuth2Proxy } from "./oauth2-proxy";
 export { deployDescheduler } from "./descheduler";
+export { createImagePruner } from "./image-pruner";

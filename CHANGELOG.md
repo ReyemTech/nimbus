@@ -1,3 +1,10 @@
+## [2.11.1](https://github.com/ReyemTech/nimbus/compare/v2.11.0...v2.11.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* **deps:** relax pulumi-rackspace-spot peer dep to >=0.1.2 ([ab0de95](https://github.com/ReyemTech/nimbus/commit/ab0de95ed0422f9c64e848641c47cd00b5a61f8c))
+
 # [2.11.0](https://github.com/ReyemTech/nimbus/compare/v2.10.2...v2.11.0) (2026-04-16)
 
 

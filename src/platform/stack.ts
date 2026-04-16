@@ -25,6 +25,7 @@ import {
   deployExternalSecrets,
   deployOAuth2Proxy,
   deployDescheduler,
+  createImagePruner,
 } from "./components";
 
 /**
@@ -526,6 +527,11 @@ function deployToCluster(
       provider,
       DEFAULT_VERSIONS.descheduler
     );
+  }
+
+  // Image pruner (per-node container cache cleanup) — enabled by default
+  if (config.imagePruner?.enabled !== false) {
+    createImagePruner(name, config.imagePruner ?? {}, provider);
   }
 
   // 14. ClusterSecretStore — connects ESO to Vault

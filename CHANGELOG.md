@@ -1,3 +1,11 @@
+# [2.11.0](https://github.com/ReyemTech/nimbus/compare/v2.10.2...v2.11.0) (2026-04-16)
+
+
+### Features
+
+* cluster-side disk pressure mitigation (LimitRange + image pruner) ([#15](https://github.com/ReyemTech/nimbus/issues/15)) ([ad94a25](https://github.com/ReyemTech/nimbus/commit/ad94a253fca252814c898f0ff589dde037dc55a4))
+* ship cluster-side disk pressure mitigation (was buried in squash body) ([3969823](https://github.com/ReyemTech/nimbus/commit/396982349a12b3cedca08f6a6765a95f1a708f4f))
+
 ## [2.10.2](https://github.com/ReyemTech/nimbus/compare/v2.10.1...v2.10.2) (2026-04-13)
 
 

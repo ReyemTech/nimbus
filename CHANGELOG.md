@@ -1,3 +1,10 @@
+## [2.11.3](https://github.com/ReyemTech/nimbus/compare/v2.11.2...v2.11.3) (2026-04-16)
+
+
+### Bug Fixes
+
+* **platform:** bump image-pruner ephemeral-storage limit to 200Mi ([d40fa53](https://github.com/ReyemTech/nimbus/commit/d40fa53455136338928f3324884006fb1784c22d))
+
 ## [2.11.2](https://github.com/ReyemTech/nimbus/compare/v2.11.1...v2.11.2) (2026-04-16)
 
 

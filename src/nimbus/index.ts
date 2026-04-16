@@ -36,6 +36,11 @@ class Nimbus {
     return this.config.notifications;
   }
 
+  /** Get per-namespace policy overrides (read by ensureNamespace). */
+  get namespacePolicies(): Readonly<Record<string, import("../platform/interfaces").INamespacePolicy | false>> | undefined {
+    return this.config.namespacePolicies;
+  }
+
   /** Register a resource for cross-module discovery. */
   register(name: string, resource: INimbusResource): void {
     this.registry.register(name, resource);

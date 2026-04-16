@@ -61,7 +61,7 @@ describe("createImagePruner", () => {
     const resources = container.resources;
     expect(resources.requests.cpu).toBe("50m");
     expect(resources.limits.memory).toBe("100Mi");
-    expect(resources.limits["ephemeral-storage"]).toBe("50Mi");
+    expect(resources.limits["ephemeral-storage"]).toBe("200Mi");
 
     const tolerations = ds.spec.template.spec.tolerations;
     expect(tolerations).toContainEqual({ operator: "Exists", effect: "NoSchedule" });

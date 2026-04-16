@@ -80,12 +80,12 @@ done`;
                   requests: {
                     cpu: "50m",
                     memory: "50Mi",
-                    "ephemeral-storage": "50Mi",
+                    "ephemeral-storage": "100Mi",
                   },
                   limits: {
                     cpu: "100m",
                     memory: "100Mi",
-                    "ephemeral-storage": "50Mi",
+                    "ephemeral-storage": "200Mi",
                   },
                 },
                 volumeMounts: [

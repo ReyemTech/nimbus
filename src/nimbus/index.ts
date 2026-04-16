@@ -10,6 +10,7 @@ import type {
   INimbusResourceRef,
   INotificationsConfig,
 } from "./interfaces";
+import type { INamespacePolicy } from "../platform/interfaces";
 import { NimbusRegistry } from "./registry";
 
 export type {
@@ -34,6 +35,11 @@ class Nimbus {
   /** Get notification config (read by Alertmanager, ArgoCD Notifications, etc.). */
   get notifications(): INotificationsConfig | undefined {
     return this.config.notifications;
+  }
+
+  /** Get per-namespace policy overrides (read by ensureNamespace). */
+  get namespacePolicies(): Readonly<Record<string, INamespacePolicy | false>> | undefined {
+    return this.config.namespacePolicies;
   }
 
   /** Register a resource for cross-module discovery. */

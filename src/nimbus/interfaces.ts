@@ -8,6 +8,7 @@
 
 import type * as pulumi from "@pulumi/pulumi";
 import type { IEmailTransport } from "../email/interfaces";
+import type { INamespacePolicy } from "../platform/interfaces";
 
 // ---------------------------------------------------------------------------
 // Notifications
@@ -35,6 +36,8 @@ export interface INotificationsConfig {
 /** Top-level nimbus configuration. */
 export interface INimbusConfig {
   readonly notifications?: INotificationsConfig;
+  /** Per-namespace LimitRange overrides, keyed by namespace name. Read by ensureNamespace. */
+  readonly namespacePolicies?: Readonly<Record<string, INamespacePolicy | false>>;
 }
 
 // ---------------------------------------------------------------------------

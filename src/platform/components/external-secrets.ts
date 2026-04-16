@@ -6,6 +6,7 @@
 
 import * as k8s from "@pulumi/kubernetes";
 import type { IPlatformComponentConfig } from "../interfaces";
+import { ensureNamespace } from "../../utils/ensure-namespace";
 
 export function deployExternalSecrets(
   name: string,
@@ -13,6 +14,8 @@ export function deployExternalSecrets(
   provider: k8s.Provider,
   defaultVersion: string | undefined
 ): k8s.helm.v3.Release {
+  ensureNamespace("external-secrets", provider);
+
   return new k8s.helm.v3.Release(
     `${name}-external-secrets`,
     {
@@ -20,7 +23,7 @@ export function deployExternalSecrets(
       repositoryOpts: { repo: "https://charts.external-secrets.io" },
       version: config.version ?? defaultVersion,
       namespace: "external-secrets",
-      createNamespace: true,
+      createNamespace: false,
       values: {
         serviceAccount: {
           name: "external-secrets",

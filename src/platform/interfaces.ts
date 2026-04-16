@@ -166,6 +166,9 @@ export interface IPlatformStackConfig {
   /** Descheduler for pod rebalancing on spot instances. */
   readonly descheduler?: IDeschedulerConfig;
 
+  /** Per-node image cache pruner. Default: { enabled: true, intervalSeconds: 21600 }. */
+  readonly imagePruner?: IImagePrunerConfig;
+
   readonly tags?: Readonly<Record<string, string>>;
 }
 
@@ -181,4 +184,70 @@ export interface IPlatformStack {
   readonly traefikEndpoint: pulumi.Output<string>;
   /** Services available for access gateway exposure. */
   readonly exposedServices: ReadonlyArray<IExposedService>;
+}
+
+/**
+ * Per-Container LimitRange defaults applied when a pod does not declare its own.
+ * Both fields are required to avoid partial-merge ambiguity at admission time.
+ */
+export interface ILimitRangePolicy {
+  readonly defaultRequest: {
+    readonly cpu?: string;
+    readonly memory?: string;
+    readonly ephemeralStorage?: string;
+  };
+  readonly defaultLimit: {
+    readonly cpu?: string;
+    readonly memory?: string;
+    readonly ephemeralStorage?: string;
+  };
+}
+
+/**
+ * Namespace-scoped policy attached at namespace creation time.
+ * Pass `false` (whole policy) or `{ limitRange: false }` to opt out.
+ */
+export interface INamespacePolicy {
+  readonly limitRange?: ILimitRangePolicy | false;
+}
+
+/**
+ * Default policy applied to every namespace created via ensureNamespace
+ * unless explicitly overridden.
+ *
+ * CPU/memory deliberately omitted: apps already declare these, and silently
+ * capping them would cause throttling/OOM with no warning.
+ */
+export const DEFAULT_NAMESPACE_POLICY: INamespacePolicy = {
+  limitRange: {
+    defaultRequest: { ephemeralStorage: "500Mi" },
+    defaultLimit: { ephemeralStorage: "2Gi" },
+  },
+};
+
+/**
+ * Namespaces that NEVER get a LimitRange, even if a policy is explicitly passed.
+ * These are managed by cluster operators and should not be subject to user-tier
+ * resource policy.
+ */
+export const SYSTEM_NAMESPACES: ReadonlySet<string> = new Set([
+  "kube-system",
+  "kube-public",
+  "kube-node-lease",
+  "calico-system",
+  "calico-apiserver",
+  "tigera-operator",
+  "projectsveltos",
+]);
+
+/** Image-cache pruner DaemonSet configuration. */
+export interface IImagePrunerConfig {
+  /** Enable the pruner DaemonSet. Default: true. */
+  readonly enabled?: boolean;
+  /** Prune interval in seconds. Default: 21600 (6h). */
+  readonly intervalSeconds?: number;
+  /** Base image. Default: "alpine:3.20" (crictl downloaded at pod start). */
+  readonly image?: string;
+  /** Namespace for the DaemonSet. Default: "kube-system". */
+  readonly namespace?: string;
 }

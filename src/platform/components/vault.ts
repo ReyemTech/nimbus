@@ -8,6 +8,7 @@ import * as aws from "@pulumi/aws";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type { IVaultConfig } from "../interfaces";
+import { ensureNamespace } from "../../utils/ensure-namespace";
 
 /** Number of Vault replicas in HA mode (Raft consensus requires odd count). */
 const VAULT_HA_REPLICAS = 3;
@@ -509,6 +510,8 @@ export function deployVault(
     ];
   }
 
+  ensureNamespace("vault", provider);
+
   return new k8s.helm.v3.Release(
     `${name}-vault`,
     {
@@ -516,7 +519,7 @@ export function deployVault(
       repositoryOpts: { repo: "https://helm.releases.hashicorp.com" },
       version: config.version ?? defaultVersion,
       namespace: "vault",
-      createNamespace: true,
+      createNamespace: false,
       values: {
         server: serverValues,
         injector: { enabled: true },

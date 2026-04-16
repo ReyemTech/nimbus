@@ -7,6 +7,7 @@
 import * as k8s from "@pulumi/kubernetes";
 import type { IExternalDnsConfig } from "../interfaces";
 import { assertNever } from "../../types";
+import { ensureNamespace } from "../../utils/ensure-namespace";
 
 export function deployExternalDns(
   name: string,
@@ -46,6 +47,8 @@ export function deployExternalDns(
     values["env"] = envOverrides;
   }
 
+  ensureNamespace("external-dns", provider);
+
   return new k8s.helm.v3.Release(
     `${name}-external-dns`,
     {
@@ -55,7 +58,7 @@ export function deployExternalDns(
       },
       version: config.version ?? defaultVersion,
       namespace: "external-dns",
-      createNamespace: true,
+      createNamespace: false,
       values,
     },
     { provider }

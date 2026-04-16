@@ -120,6 +120,12 @@ vi.mock("@pulumi/kubernetes", () => {
   const mockConfigMap = class {};
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockNamespace = class {};
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockLimitRange = class {};
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockClusterRoleBinding = class {};
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
@@ -132,7 +138,14 @@ vi.mock("@pulumi/kubernetes", () => {
     helm: { v3: { Release: mockRelease } },
     apiextensions: { CustomResource: mockCustomResource },
     apps: { v1: { DaemonSet: mockDaemonSet } },
-    core: { v1: { Secret: mockSecret, ConfigMap: mockConfigMap } },
+    core: {
+      v1: {
+        Secret: mockSecret,
+        ConfigMap: mockConfigMap,
+        Namespace: mockNamespace,
+        LimitRange: mockLimitRange,
+      },
+    },
     networking: { v1: { Ingress: mockIngress } },
     rbac: {
       v1: {

@@ -8,6 +8,7 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { createHash } from "crypto";
 import type { IPlatformComponentConfig } from "../interfaces";
+import { ensureNamespace } from "../../utils/ensure-namespace";
 
 export function deployOAuth2Proxy(
   name: string,
@@ -26,6 +27,8 @@ export function deployOAuth2Proxy(
     return createHash("sha256").update(`${n}-oauth2-proxy-cookie`).digest("base64").slice(0, 32);
   });
 
+  ensureNamespace("traefik", provider);
+
   return new k8s.helm.v3.Release(
     `${name}-oauth2-proxy`,
     {
@@ -35,7 +38,7 @@ export function deployOAuth2Proxy(
       },
       version: config.version ?? defaultVersion,
       namespace: "traefik",
-      createNamespace: true,
+      createNamespace: false,
       values: {
         config: {
           clientID: config.clientId,

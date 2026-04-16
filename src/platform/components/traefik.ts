@@ -6,6 +6,7 @@
 
 import * as k8s from "@pulumi/kubernetes";
 import type { IPlatformComponentConfig } from "../interfaces";
+import { ensureNamespace } from "../../utils/ensure-namespace";
 
 export function deployTraefik(
   name: string,
@@ -14,6 +15,8 @@ export function deployTraefik(
   defaultVersion: string | undefined,
   robotsBlock?: boolean
 ): k8s.helm.v3.Release {
+  ensureNamespace("traefik", provider);
+
   return new k8s.helm.v3.Release(
     `${name}-traefik`,
     {
@@ -21,7 +24,7 @@ export function deployTraefik(
       repositoryOpts: { repo: "https://traefik.github.io/charts" },
       version: config?.version ?? defaultVersion,
       namespace: "traefik",
-      createNamespace: true,
+      createNamespace: false,
       values: {
         ingressClass: { enabled: true, isDefaultClass: true, name: "traefik" },
         ingressRoute: {

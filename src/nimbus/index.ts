@@ -10,6 +10,7 @@ import type {
   INimbusResourceRef,
   INotificationsConfig,
 } from "./interfaces";
+import type { INamespacePolicy } from "../platform/interfaces";
 import { NimbusRegistry } from "./registry";
 
 export type {
@@ -37,7 +38,7 @@ class Nimbus {
   }
 
   /** Get per-namespace policy overrides (read by ensureNamespace). */
-  get namespacePolicies(): Readonly<Record<string, import("../platform/interfaces").INamespacePolicy | false>> | undefined {
+  get namespacePolicies(): Readonly<Record<string, INamespacePolicy | false>> | undefined {
     return this.config.namespacePolicies;
   }
 

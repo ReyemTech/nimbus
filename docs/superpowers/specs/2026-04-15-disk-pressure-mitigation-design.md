@@ -144,10 +144,31 @@ Add one optional field to the existing config interface:
 
 ```ts
 imagePruner?: IImagePrunerConfig;  // default: { enabled: true, intervalSeconds: 21600 }
-namespacePolicies?: Record<string, INamespacePolicy | false>;  // override map by namespace name
 ```
 
-When `imagePruner` is omitted, the platform enables it by default (zero iac changes needed for adoption). The `namespacePolicies` map is plumbed through to every internal `ensureNamespace(...)` call inside the platform stack.
+When `imagePruner` is omitted, the platform enables it by default (zero iac changes needed for adoption).
+
+### `nimbus` singleton integration (for `namespacePolicies`)
+
+Per-namespace overrides are NOT placed on `IPlatformStackConfig` because most namespaces are created by app-deployment code (`iac/src/apps/*.ts`, e.g., booklet, gta-events, reyemtech) — not by the platform stack. The override map must reach those `ensureNamespace()` calls too.
+
+Solution: extend the existing `nimbus` singleton (already used for `notifications` at `nimbus/src/nimbus/index.ts`):
+
+```ts
+// nimbus/src/nimbus/interfaces.ts — extend INimbusConfig
+export interface INimbusConfig {
+  readonly notifications?: INotificationsConfig;  // existing
+  readonly namespacePolicies?: Readonly<Record<string, INamespacePolicy | false>>;  // new
+}
+```
+
+`ensureNamespace` reads from `nimbus.namespacePolicies?.[name]` as the override source on every call. Override resolution order inside `ensureNamespace`:
+
+1. `opts.policy` (explicit per-call override) — highest precedence
+2. `nimbus.namespacePolicies?.[name]` (singleton override)
+3. `DEFAULT_NAMESPACE_POLICY` (fallback)
+
+iac calls `nimbus.configure({ namespacePolicies: { apps: { ... } } })` once at the top of the stack file. Zero plumbing through function signatures.
 
 ## iac Consumption
 
@@ -162,31 +183,29 @@ Verified inventory of large-disk workloads (2026-04-15):
 
 The `apps` namespace hosts Laravel deployments built via `reyemtech/sail`. The current sail Helm chart does not set `LOG_CHANNEL=stderr` or default `resources` blocks, so Laravel pods write logs and file-cache to the ephemeral overlay unbounded. **Until `reyemtech/sail` resource hygiene ships (separate spec, see "Deferred"), the `apps` namespace gets a temporary override.**
 
-Single addition in `iac/src/index.ts`, near the existing `createPlatformStack` call:
+Single addition in `iac/src/index.ts`, near the existing `nimbus.configure(...)` call:
 
 ```ts
 // TEMPORARY — remove once reyemtech/sail ships LOG_CHANNEL=stderr default
 // + explicit ephemeral-storage resource block. See: nimbus spec
 // 2026-04-XX-sail-resource-hygiene-design.md (TBD).
-const namespacePolicies = {
-  apps: {
-    limitRange: {
-      defaultRequest: { ephemeralStorage: "1Gi" },
-      defaultLimit:   { ephemeralStorage: "5Gi" },
+nimbus.configure({
+  namespacePolicies: {
+    apps: {
+      limitRange: {
+        defaultRequest: { ephemeralStorage: "1Gi" },
+        defaultLimit:   { ephemeralStorage: "5Gi" },
+      },
     },
   },
-};
-
-const platform = createPlatformStack("reyemtech", {
-  cluster,
-  domain,
-  // ...existing config unchanged...
-  namespacePolicies,
-  // imagePruner intentionally omitted — defaults to enabled @ 6h
 });
 ```
 
-All other namespaces use the default `2Gi` cap. Apps in `iac/src/apps/*.ts` that already call `ensureNamespace` pick up the default policy automatically without change.
+This must run BEFORE any `ensureNamespace` call (i.e., before app deployments). The existing `nimbus.configure({ notifications: ... })` call in `iac/src/index.ts` already establishes this ordering — the `namespacePolicies` config can be merged into the same call or co-located.
+
+All other namespaces use the default `2Gi` cap. Apps in `iac/src/apps/*.ts` that already call `ensureNamespace` pick up the default policy (or the singleton override if their namespace name matches a key) automatically — no per-app changes.
+
+The `createPlatformStack` call itself is unchanged except optionally for `imagePruner` (which defaults to enabled).
 
 **Reactive overrides** — if any pod outside `apps` is evicted post-rollout for `ephemeral local storage usage exceeds 2Gi`, the operational fix is a one-line addition to the `namespacePolicies` map, then `pulumi up`. The override mechanism is in place from v1.
 
@@ -257,7 +276,11 @@ Both reversals are zero-downtime.
 **`tests/unit/platform/stack.test.ts`** (extended):
 - `imagePruner` defaults to enabled when not passed
 - `imagePruner: { enabled: false }` skips the component
-- `namespacePolicies` map plumbed through to internal `ensureNamespace` calls
+
+**`tests/unit/utils/ensure-namespace.test.ts`** (additional cases for singleton):
+- `nimbus.configure({ namespacePolicies: { foo: { ... } } })` is read by `ensureNamespace("foo", ...)` as override
+- Explicit `opts.policy` overrides singleton override
+- Singleton override of `false` skips the LimitRange
 
 ### Manual cluster verification (post-`pulumi up`)
 
@@ -305,8 +328,10 @@ These do not change the design but need resolution before code lands:
 
 | File                                                       | Change          | Approx LOC |
 |------------------------------------------------------------|-----------------|-----------:|
-| `nimbus/src/platform/interfaces.ts`                        | Add 2 types + constant | +30 |
-| `nimbus/src/utils/ensure-namespace.ts`                     | Extend signature, add policy logic, system-NS check | +40 |
+| `nimbus/src/platform/interfaces.ts`                        | Add 2 types + constants + IImagePrunerConfig + imagePruner field | +30 |
+| `nimbus/src/nimbus/interfaces.ts`                          | Extend INimbusConfig with namespacePolicies | +3 |
+| `nimbus/src/nimbus/index.ts`                               | Add namespacePolicies getter on Nimbus class | +5 |
+| `nimbus/src/utils/ensure-namespace.ts`                     | Extend signature, read singleton override, system-NS check | +50 |
 | `nimbus/src/platform/components/image-pruner.ts`           | New file        | +90 |
 | `nimbus/src/platform/components/index.ts`                  | Re-export       | +1 |
 | `nimbus/src/platform/stack.ts`                             | Wire imagePruner + namespacePolicies | +20 |

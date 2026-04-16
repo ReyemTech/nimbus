@@ -49,8 +49,8 @@ describe("ensureNamespace", () => {
     expect(createdLimitRanges[0]?.args.metadata.name).toBe("default-limits");
     const limit = createdLimitRanges[0]?.args.spec.limits[0];
     expect(limit.type).toBe("Container");
-    expect(limit.defaultRequest.ephemeralStorage).toBe("500Mi");
-    expect(limit.default.ephemeralStorage).toBe("2Gi");
+    expect(limit.defaultRequest["ephemeral-storage"]).toBe("500Mi");
+    expect(limit.default["ephemeral-storage"]).toBe("2Gi");
   });
 
   it("memoizes namespace creation", async () => {
@@ -89,8 +89,8 @@ describe("ensureNamespace", () => {
       },
     });
     const limit = createdLimitRanges[0]?.args.spec.limits[0];
-    expect(limit.defaultRequest.ephemeralStorage).toBe("1Gi");
-    expect(limit.default.ephemeralStorage).toBe("5Gi");
+    expect(limit.defaultRequest["ephemeral-storage"]).toBe("1Gi");
+    expect(limit.default["ephemeral-storage"]).toBe("5Gi");
   });
 
   it("does NOT create LimitRange for SYSTEM_NAMESPACES even when policy passed", async () => {
@@ -122,8 +122,8 @@ describe("ensureNamespace", () => {
     const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
     ensureNamespace("from-singleton", mockProvider());
     const limit = createdLimitRanges[0]?.args.spec.limits[0];
-    expect(limit.defaultRequest.ephemeralStorage).toBe("750Mi");
-    expect(limit.default.ephemeralStorage).toBe("3Gi");
+    expect(limit.defaultRequest["ephemeral-storage"]).toBe("750Mi");
+    expect(limit.default["ephemeral-storage"]).toBe("3Gi");
   });
 
   it("opts.policy takes precedence over singleton override", async () => {
@@ -148,8 +148,8 @@ describe("ensureNamespace", () => {
       },
     });
     const limit = createdLimitRanges[0]?.args.spec.limits[0];
-    expect(limit.defaultRequest.ephemeralStorage).toBe("2Gi");
-    expect(limit.default.ephemeralStorage).toBe("10Gi");
+    expect(limit.defaultRequest["ephemeral-storage"]).toBe("2Gi");
+    expect(limit.default["ephemeral-storage"]).toBe("10Gi");
   });
 
   it("singleton override of false skips the LimitRange", async () => {

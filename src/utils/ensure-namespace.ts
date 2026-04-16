@@ -73,8 +73,8 @@ export function ensureNamespace(
         limits: [
           {
             type: "Container",
-            defaultRequest: policy.limitRange.defaultRequest,
-            default: policy.limitRange.defaultLimit,
+            defaultRequest: toK8sResources(policy.limitRange.defaultRequest),
+            default: toK8sResources(policy.limitRange.defaultLimit),
           },
         ],
       },
@@ -83,4 +83,21 @@ export function ensureNamespace(
   );
 
   return ns;
+}
+
+/**
+ * Convert TypeScript camelCase resource keys (`ephemeralStorage`) to the
+ * hyphenated form Kubernetes requires (`ephemeral-storage`). `cpu` and
+ * `memory` are passed through unchanged. Undefined fields are omitted.
+ */
+function toK8sResources(input: {
+  cpu?: string;
+  memory?: string;
+  ephemeralStorage?: string;
+}): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (input.cpu !== undefined) out.cpu = input.cpu;
+  if (input.memory !== undefined) out.memory = input.memory;
+  if (input.ephemeralStorage !== undefined) out["ephemeral-storage"] = input.ephemeralStorage;
+  return out;
 }

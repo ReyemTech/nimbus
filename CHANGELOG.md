@@ -1,3 +1,10 @@
+## [2.11.2](https://github.com/ReyemTech/nimbus/compare/v2.11.1...v2.11.2) (2026-04-16)
+
+
+### Bug Fixes
+
+* **utils:** convert ephemeralStorage → ephemeral-storage for K8s API ([3b00d5d](https://github.com/ReyemTech/nimbus/commit/3b00d5deb42e8f9d08fc07e893d19dbda6f077d4))
+
 ## [2.11.1](https://github.com/ReyemTech/nimbus/compare/v2.11.0...v2.11.1) (2026-04-16)
 
 

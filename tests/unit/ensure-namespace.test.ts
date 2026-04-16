@@ -13,12 +13,14 @@ let createdNamespaces: Array<{ name: string; args: any }>;
 let createdLimitRanges: Array<{ name: string; args: any }>;
 
 vi.mock("@pulumi/kubernetes", () => {
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockNamespace = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(name: string, args: any, _opts?: any) {
       createdNamespaces.push({ name, args });
     }
   };
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockLimitRange = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(name: string, args: any, _opts?: any) {
@@ -38,7 +40,7 @@ beforeEach(() => {
 
 describe("ensureNamespace", () => {
   it("creates Namespace + default LimitRange when no policy passed", async () => {
-    const { ensureNamespace } = await import("../../src/utils/ensure-namespace");
+    const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
     ensureNamespace("test-ns", mockProvider());
     expect(createdNamespaces).toHaveLength(1);
     expect(createdNamespaces[0]?.args.metadata.name).toBe("test-ns");
@@ -52,7 +54,7 @@ describe("ensureNamespace", () => {
   });
 
   it("memoizes namespace creation", async () => {
-    const { ensureNamespace } = await import("../../src/utils/ensure-namespace");
+    const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
     const provider = mockProvider();
     const ns1 = ensureNamespace("memo-ns", provider);
     const ns2 = ensureNamespace("memo-ns", provider);
@@ -61,14 +63,14 @@ describe("ensureNamespace", () => {
   });
 
   it("creates Namespace only (no LimitRange) when policy is false", async () => {
-    const { ensureNamespace } = await import("../../src/utils/ensure-namespace");
+    const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
     ensureNamespace("opt-out-ns", mockProvider(), { policy: false });
     expect(createdNamespaces).toHaveLength(1);
     expect(createdLimitRanges).toHaveLength(0);
   });
 
   it("creates Namespace only when policy.limitRange is false", async () => {
-    const { ensureNamespace } = await import("../../src/utils/ensure-namespace");
+    const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
     ensureNamespace("opt-out-lr", mockProvider(), {
       policy: { limitRange: false },
     });
@@ -77,7 +79,7 @@ describe("ensureNamespace", () => {
   });
 
   it("uses override values when policy.limitRange is provided", async () => {
-    const { ensureNamespace } = await import("../../src/utils/ensure-namespace");
+    const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
     ensureNamespace("custom-ns", mockProvider(), {
       policy: {
         limitRange: {
@@ -92,7 +94,7 @@ describe("ensureNamespace", () => {
   });
 
   it("does NOT create LimitRange for SYSTEM_NAMESPACES even when policy passed", async () => {
-    const { ensureNamespace } = await import("../../src/utils/ensure-namespace");
+    const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
     ensureNamespace("kube-system", mockProvider(), {
       policy: {
         limitRange: {
@@ -106,7 +108,7 @@ describe("ensureNamespace", () => {
   });
 
   it("reads override from nimbus singleton when no opts.policy passed", async () => {
-    const { nimbus } = await import("../../src/nimbus");
+    const { nimbus } = await import("../../src/nimbus/index.js");
     nimbus.configure({
       namespacePolicies: {
         "from-singleton": {
@@ -117,7 +119,7 @@ describe("ensureNamespace", () => {
         },
       },
     });
-    const { ensureNamespace } = await import("../../src/utils/ensure-namespace");
+    const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
     ensureNamespace("from-singleton", mockProvider());
     const limit = createdLimitRanges[0]?.args.spec.limits[0];
     expect(limit.defaultRequest.ephemeralStorage).toBe("750Mi");
@@ -125,7 +127,7 @@ describe("ensureNamespace", () => {
   });
 
   it("opts.policy takes precedence over singleton override", async () => {
-    const { nimbus } = await import("../../src/nimbus");
+    const { nimbus } = await import("../../src/nimbus/index.js");
     nimbus.configure({
       namespacePolicies: {
         "precedence-test": {
@@ -136,7 +138,7 @@ describe("ensureNamespace", () => {
         },
       },
     });
-    const { ensureNamespace } = await import("../../src/utils/ensure-namespace");
+    const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
     ensureNamespace("precedence-test", mockProvider(), {
       policy: {
         limitRange: {
@@ -151,13 +153,13 @@ describe("ensureNamespace", () => {
   });
 
   it("singleton override of false skips the LimitRange", async () => {
-    const { nimbus } = await import("../../src/nimbus");
+    const { nimbus } = await import("../../src/nimbus/index.js");
     nimbus.configure({
       namespacePolicies: {
         "skip-from-singleton": false,
       },
     });
-    const { ensureNamespace } = await import("../../src/utils/ensure-namespace");
+    const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
     ensureNamespace("skip-from-singleton", mockProvider());
     expect(createdNamespaces).toHaveLength(1);
     expect(createdLimitRanges).toHaveLength(0);

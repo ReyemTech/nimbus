@@ -98,7 +98,7 @@ export function ensureNamespace(
 |-----------------------------------------|---------------------------------------------------------------------|
 | omitted                                 | Apply `DEFAULT_NAMESPACE_POLICY` (universal coverage)               |
 | `false`                                 | Namespace only, no LimitRange (escape hatch)                        |
-| `{ limitRange: { ... } }`               | Use overrides (Loki, Prometheus, Vault)                             |
+| `{ limitRange: { ... } }`               | Use overrides (e.g., `apps` stop-gap override; reactive future tweaks) |
 | `{ limitRange: false }`                 | Namespace + explicit no-LimitRange                                  |
 | (any) when `name ∈ SYSTEM_NAMESPACES`   | Forced no-LimitRange regardless of caller                           |
 
@@ -151,13 +151,30 @@ When `imagePruner` is omitted, the platform enables it by default (zero iac chan
 
 ## iac Consumption
 
+Verified inventory of large-disk workloads (2026-04-15):
+
+| Namespace        | Largest workload                | Storage approach              | Default OK? |
+|------------------|---------------------------------|-------------------------------|-------------|
+| `observability`  | Loki, Prometheus                | PVCs (75Gi `sata-large` / 20Gi `sata`) | ✓ |
+| `data`           | Postgres / MariaDB / Neo4j / MinIO / Redis | All on PVCs (5–20Gi `ssd`/`sata`) | ✓ |
+| `vault`          | Vault server                    | 5Gi PVC (`ssd`)               | ✓ |
+| **`apps`**       | **Laravel-via-sail (booklet, gta-events, reyemtech)** | **Mostly ephemeral — `storage/logs/`, `storage/framework/{cache,sessions,views}`, `bootstrap/cache/`** | **No (stop-gap override)** |
+
+The `apps` namespace hosts Laravel deployments built via `reyemtech/sail`. The current sail Helm chart does not set `LOG_CHANNEL=stderr` or default `resources` blocks, so Laravel pods write logs and file-cache to the ephemeral overlay unbounded. **Until `reyemtech/sail` resource hygiene ships (separate spec, see "Deferred"), the `apps` namespace gets a temporary override.**
+
 Single addition in `iac/src/index.ts`, near the existing `createPlatformStack` call:
 
 ```ts
+// TEMPORARY — remove once reyemtech/sail ships LOG_CHANNEL=stderr default
+// + explicit ephemeral-storage resource block. See: nimbus spec
+// 2026-04-XX-sail-resource-hygiene-design.md (TBD).
 const namespacePolicies = {
-  observability: { limitRange: { defaultLimit: { ephemeralStorage: "10Gi" }, defaultRequest: { ephemeralStorage: "1Gi" } } },
-  vault:         { limitRange: { defaultLimit: { ephemeralStorage: "5Gi" },  defaultRequest: { ephemeralStorage: "500Mi" } } },
-  data:          { limitRange: { defaultLimit: { ephemeralStorage: "5Gi" },  defaultRequest: { ephemeralStorage: "500Mi" } } },
+  apps: {
+    limitRange: {
+      defaultRequest: { ephemeralStorage: "1Gi" },
+      defaultLimit:   { ephemeralStorage: "5Gi" },
+    },
+  },
 };
 
 const platform = createPlatformStack("reyemtech", {
@@ -169,7 +186,9 @@ const platform = createPlatformStack("reyemtech", {
 });
 ```
 
-Apps in `iac/src/apps/*.ts` that already call `ensureNamespace` pick up the default policy automatically without change.
+All other namespaces use the default `2Gi` cap. Apps in `iac/src/apps/*.ts` that already call `ensureNamespace` pick up the default policy automatically without change.
+
+**Reactive overrides** — if any pod outside `apps` is evicted post-rollout for `ephemeral local storage usage exceeds 2Gi`, the operational fix is a one-line addition to the `namespacePolicies` map, then `pulumi up`. The override mechanism is in place from v1.
 
 ## Behavior
 
@@ -199,15 +218,15 @@ Effectiveness depends on container churn. Sticky nodes may see negligible reclai
 | Failure mode                                                        | Impact                                       | Mitigation                                                                                       |
 |---------------------------------------------------------------------|----------------------------------------------|--------------------------------------------------------------------------------------------------|
 | Pruner removes an in-use image                                      | Container crash on next start                | `crictl rmi --prune` is reference-counted by design; cannot remove in-use images                 |
-| LimitRange chokes a legitimate workload                             | Pod evicted with `ephemeral local storage usage exceeds 2Gi` | Stage rollout (see below); per-namespace overrides for known-large workloads pre-populated       |
+| LimitRange chokes a legitimate workload                             | Pod evicted with `ephemeral local storage usage exceeds 2Gi` | Stage rollout (see below); inventoried large-disk workloads — all on PVCs, none rely on ephemeral; reactive override mechanism in place if eviction occurs |
 | Pruner pod itself causes pressure                                   | Negligible (4 pods × 100Mi)                  | Bounded by pruner's own resource limits                                                          |
 | Helm chart auto-creates namespace, bypassing `ensureNamespace`      | That namespace gets no LimitRange            | Plan-phase audit of all `k8s.helm.v3.Release` usages; either set `createNamespace: false` or add explicit LimitRange resource |
 
 ### Staged rollout (operational)
 
-1. **Wave 1** — ship code with `imagePruner.enabled: true` AND `ensureNamespace` extended, AND `iac` override map pre-populated for observability/vault/data. Run `pulumi preview`, confirm diff matches expectation.
-2. **Wave 2** — `pulumi up`. Watch `kubectl --context reyemtech-iad-1 get events -A -w` for 30 minutes for `Evicted` reasons. Watch pruner logs.
-3. **Wave 3 (24h later)** — confirm node disk usage trending down via `kubectl top nodes` + Grafana node-exporter dashboard. If yes, done. If no, adjust pruner interval and/or per-namespace overrides.
+1. **Wave 1** — ship code with `imagePruner.enabled: true`, `ensureNamespace` extended, and the `apps` namespace stop-gap override. Run `pulumi preview`, confirm diff matches expectation (~18 LimitRanges + 1 DaemonSet, with `apps` showing the override values).
+2. **Wave 2** — `pulumi up`. Watch `kubectl --context reyemtech-iad-1 get events -A -w` for 30 minutes for `Evicted` reasons. Watch pruner logs. Any eviction outside `apps` triggers a one-line override addition + immediate re-`pulumi up`.
+3. **Wave 3 (24h later)** — confirm node disk usage trending down via `kubectl top nodes` + Grafana node-exporter dashboard. If yes, done. If no, adjust pruner interval.
 
 ### Rollback
 
@@ -244,15 +263,29 @@ Both reversals are zero-downtime.
 
 1. `kubectl --context reyemtech-iad-1 get limitrange -A` → expect ~18 entries
 2. `kubectl describe limitrange default-limits -n n8n` → confirm `ephemeral-storage 500Mi/2Gi`
-3. `kubectl describe limitrange default-limits -n observability` → confirm override (`1Gi/10Gi`)
-4. `kubectl get daemonset -n kube-system image-pruner` → 4/4 ready
-5. `kubectl logs -n kube-system -l app=image-pruner --tail=20` → see prune log lines
-6. Exec into one pruner pod, run prune manually, confirm no errors against containerd socket
-7. **24h later**: `kubectl top nodes` shows ephemeral storage stable or trending down vs pre-rollout baseline
+3. `kubectl describe limitrange default-limits -n observability` → confirm default values (`500Mi/2Gi`)
+4. `kubectl describe limitrange default-limits -n apps` → confirm stop-gap override (`1Gi/5Gi`)
+5. `kubectl get daemonset -n kube-system image-pruner` → 4/4 ready
+6. `kubectl logs -n kube-system -l app=image-pruner --tail=20` → see prune log lines
+7. Exec into one pruner pod, run prune manually, confirm no errors against containerd socket
+8. **24h later**: `kubectl top nodes` shows ephemeral storage stable or trending down vs pre-rollout baseline
 
 ## Deferred (Explicit v2 Items)
 
-**ResourceQuota at namespace level.** Audit on 2026-04-15 found zero ResourceQuotas cluster-wide. Skipping in v1 because:
+### `reyemtech/sail` resource hygiene (separate spec, parallel track)
+
+The `apps` namespace stop-gap override (5Gi/1Gi) exists because `reyemtech/sail`'s Helm chart does not currently:
+
+- Default `LOG_CHANNEL=stderr` (Laravel logs go to `storage/logs/laravel.log`, unbounded)
+- Set a default `resources` block (no requests/limits unless caller provides)
+- Default `CACHE_DRIVER=redis` / `SESSION_DRIVER=redis` when redis is plumbed
+- Mount an `emptyDir` with `sizeLimit` at `storage/`
+
+Each gap independently contributes to ephemeral bloat in Laravel pods. **A separate brainstorming + spec session for `reyemtech/sail` will follow this one.** Once sail-side fixes ship and propagate to all Laravel deployments, the `apps` namespace override should be deleted from `iac/src/index.ts` (verification: `kubectl describe limitrange default-limits -n apps` falls back to default `500Mi/2Gi`).
+
+### ResourceQuota at namespace level
+
+Audit on 2026-04-15 found zero ResourceQuotas cluster-wide. Skipping in v1 because:
 
 - LimitRange `defaultLimit.ephemeralStorage: 2Gi` solves the actual disk-pressure root cause (unbounded pods). Per-pod cap × ~30 pods/node keeps max ephemeral usage well under 40Gi.
 - ResourceQuota is a namespace-wide cap with very different blast radius — wrong number breaks legitimate scaling bursts.
@@ -280,5 +313,5 @@ These do not change the design but need resolution before code lands:
 | `nimbus/tests/unit/utils/ensure-namespace.test.ts`         | Extend          | +60 |
 | `nimbus/tests/unit/platform/components/image-pruner.test.ts` | New             | +80 |
 | `nimbus/tests/unit/platform/stack.test.ts`                 | Extend          | +30 |
-| `iac/src/index.ts`                                         | Add policy override map | +10 |
+| `iac/src/index.ts`                                         | Add stop-gap `apps` override | +12 |
 | **Total**                                                  |                 | **~360** |

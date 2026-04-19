@@ -1,3 +1,10 @@
+# [2.12.0](https://github.com/ReyemTech/nimbus/compare/v2.11.3...v2.12.0) (2026-04-19)
+
+
+### Features
+
+* add cache memory config + ArgoCD valuesFiles support ([55fbe10](https://github.com/ReyemTech/nimbus/commit/55fbe101d94d8db2c52bf49afbb337aaa0221f65))
+
 ## [2.11.3](https://github.com/ReyemTech/nimbus/compare/v2.11.2...v2.11.3) (2026-04-16)
 
 

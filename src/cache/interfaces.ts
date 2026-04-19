@@ -80,6 +80,8 @@ export interface ICacheConfig {
   readonly storageGb?: number;
   /** Storage performance tier mapped to cluster storage class. */
   readonly storageTier?: StorageTier;
+  /** Memory limit for cache instances (e.g., "512Mi", "1Gi"). Default: "256Mi". */
+  readonly memory?: string;
   /** Enable Prometheus metrics exporter. */
   readonly metrics?: boolean;
   /** Resource tags applied to the cache and child resources. */

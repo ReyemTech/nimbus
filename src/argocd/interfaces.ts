@@ -64,6 +64,8 @@ export interface IArgoRepoSource {
   readonly version?: string;
   readonly revision?: string;
   readonly values?: Record<string, unknown>;
+  /** Additional Helm values files to use from within the chart (e.g., ["values.production.yaml"]). */
+  readonly valuesFiles?: ReadonlyArray<string>;
   readonly releaseName?: string;
 }
 
@@ -75,6 +77,8 @@ export interface IArgoPublicSource {
   readonly version?: string;
   readonly revision?: string;
   readonly values?: Record<string, unknown>;
+  /** Additional Helm values files to use from within the chart (e.g., ["values.production.yaml"]). */
+  readonly valuesFiles?: ReadonlyArray<string>;
   readonly releaseName?: string;
 }
 

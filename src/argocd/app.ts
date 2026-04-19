@@ -57,13 +57,18 @@ function buildSourceSpec(source: IArgoAppSource): Record<string, unknown> {
   if (source.path) {
     spec["path"] = source.path;
   }
-  if (source.values) {
-    spec["helm"] = {
-      valuesObject: source.values,
-      ...(source.releaseName ? { releaseName: source.releaseName } : {}),
-    };
-  } else if (source.releaseName) {
-    spec["helm"] = { releaseName: source.releaseName };
+  if (source.values || source.valuesFiles || source.releaseName) {
+    const helm: Record<string, unknown> = {};
+    if (source.values) {
+      helm["valuesObject"] = source.values;
+    }
+    if (source.valuesFiles) {
+      helm["valueFiles"] = source.valuesFiles;
+    }
+    if (source.releaseName) {
+      helm["releaseName"] = source.releaseName;
+    }
+    spec["helm"] = helm;
   }
 
   return spec;

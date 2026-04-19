@@ -31,6 +31,28 @@ const SENTINEL_PORT = 26379;
 const REDIS_PORT = 6379;
 
 /**
+ * Parse a Kubernetes memory string and return half the value (for requests).
+ *
+ * Supports "Mi" and "Gi" suffixes. Falls back to "128Mi" on parse failure.
+ */
+function parseMemoryRequest(limit: string): string {
+  const match = limit.match(/^(\d+)(Mi|Gi)$/);
+  if (!match) {
+    return "128Mi";
+  }
+  const value = parseInt(match[1]!, 10);
+  const unit = match[2]!;
+  if (unit === "Gi") {
+    // Convert to Mi, halve, then use the most natural unit
+    const halfMi = (value * 1024) / 2;
+    return halfMi >= 1024 && halfMi % 1024 === 0
+      ? `${halfMi / 1024}Gi`
+      : `${halfMi}Mi`;
+  }
+  return `${Math.max(1, Math.floor(value / 2))}Mi`;
+}
+
+/**
  * Deploy a Redis cache using the Bitnami Redis Helm chart.
  *
  * Defaults to `replication` architecture with Sentinel for HA.
@@ -66,6 +88,8 @@ export function createCache(
   const architecture = config.architecture ?? "replication";
   const storageGb = config.storageGb ?? 8;
   const replicas = config.replicas ?? 2;
+  const memoryLimit = config.memory ?? "256Mi";
+  const memoryRequest = parseMemoryRequest(memoryLimit);
 
   // Ensure the data namespace exists
   const ns = ensureNamespace(CACHE_NAMESPACE, provider);
@@ -85,6 +109,10 @@ export function createCache(
         size: `${storageGb}Gi`,
         ...(storageClass ? { storageClass } : {}),
       },
+      resources: {
+        requests: { cpu: "100m", memory: memoryRequest },
+        limits: { memory: memoryLimit },
+      },
     },
   };
 
@@ -98,6 +126,10 @@ export function createCache(
         enabled: true,
         size: `${storageGb}Gi`,
         ...(storageClass ? { storageClass } : {}),
+      },
+      resources: {
+        requests: { cpu: "100m", memory: memoryRequest },
+        limits: { memory: memoryLimit },
       },
     };
   }

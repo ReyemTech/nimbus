@@ -37,11 +37,11 @@ const REDIS_PORT = 6379;
  */
 function parseMemoryRequest(limit: string): string {
   const match = limit.match(/^(\d+)(Mi|Gi)$/);
-  if (!match) {
+  if (!match || match.length < 3) {
     return "128Mi";
   }
-  const value = parseInt(match[1]!, 10);
-  const unit = match[2]!;
+  const [, rawValue, unit] = match as [string, string, string];
+  const value = parseInt(rawValue, 10);
   if (unit === "Gi") {
     // Convert to Mi, halve, then use the most natural unit
     const halfMi = (value * 1024) / 2;

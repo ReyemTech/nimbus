@@ -1,3 +1,10 @@
+## [2.12.1](https://github.com/ReyemTech/nimbus/compare/v2.12.0...v2.12.1) (2026-04-19)
+
+
+### Bug Fixes
+
+* replace non-null assertions with destructuring in parseMemoryRequest ([d606c98](https://github.com/ReyemTech/nimbus/commit/d606c98e282a5dc5bfd747020f60da705f992bf2))
+
 # [2.12.0](https://github.com/ReyemTech/nimbus/compare/v2.11.3...v2.12.0) (2026-04-19)
 
 

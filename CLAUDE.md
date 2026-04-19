@@ -77,7 +77,15 @@ Dual ESM/CJS output via separate tsconfig files (`tsconfig.esm.json` → `dist/e
 
 ## CI
 
-GitHub Actions runs: lint → format:check → typecheck → test:coverage → build on Node 20 + 22. Releases via semantic-release on main. `[skip release]` in commit message skips publishing.
+GitHub Actions runs: lint → format:check → typecheck → test:coverage → build on Node 20 + 22. Releases via semantic-release on main (only after CI passes). `[skip release]` in commit message skips publishing.
+
+**IMPORTANT: Always run CI checks locally before pushing:**
+
+```bash
+npm run format:check && npm run lint && npm run typecheck && npm run test:coverage
+```
+
+Fix any issues before pushing. Do not push code that hasn't passed all four checks locally.
 
 ## Branching
 

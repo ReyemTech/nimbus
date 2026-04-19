@@ -45,9 +45,7 @@ function parseMemoryRequest(limit: string): string {
   if (unit === "Gi") {
     // Convert to Mi, halve, then use the most natural unit
     const halfMi = (value * 1024) / 2;
-    return halfMi >= 1024 && halfMi % 1024 === 0
-      ? `${halfMi / 1024}Gi`
-      : `${halfMi}Mi`;
+    return halfMi >= 1024 && halfMi % 1024 === 0 ? `${halfMi / 1024}Gi` : `${halfMi}Mi`;
   }
   return `${Math.max(1, Math.floor(value / 2))}Mi`;
 }

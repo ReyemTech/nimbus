@@ -1,3 +1,10 @@
+## [2.12.2](https://github.com/ReyemTech/nimbus/compare/v2.12.1...v2.12.2) (2026-04-21)
+
+
+### Bug Fixes
+
+* **external-secrets:** default webhook to failurePolicy: Ignore, timeout: 15s ([0185875](https://github.com/ReyemTech/nimbus/commit/01858752abd166be531681ad0a642f0760f4e5d5))
+
 ## [2.12.1](https://github.com/ReyemTech/nimbus/compare/v2.12.0...v2.12.1) (2026-04-19)
 
 

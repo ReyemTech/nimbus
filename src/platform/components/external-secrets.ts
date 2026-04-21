@@ -32,6 +32,10 @@ export function deployExternalSecrets(
           createClusterExternalSecret: true,
           createClusterSecretStore: true,
         },
+        webhook: {
+          failurePolicy: "Ignore",
+          timeoutSeconds: 15,
+        },
         ...config.values,
       },
     },

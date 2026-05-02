@@ -46,7 +46,9 @@ describe("createImagePruner", () => {
 
     const container = ds.spec.template.spec.containers[0];
     expect(container.securityContext.privileged).toBe(true);
-    expect(container.args.join(" ")).toContain("21600");
+    expect(container.args.join(" ")).toContain("sleep 300");
+    expect(container.args.join(" ")).toContain("HIGH=70");
+    expect(container.args.join(" ")).toContain("LOW=60");
 
     const volumeMount = container.volumeMounts.find(
       (v: { name: string }) => v.name === "containerd-sock"
@@ -67,12 +69,14 @@ describe("createImagePruner", () => {
     expect(tolerations).toContainEqual({ operator: "Exists", effect: "NoSchedule" });
   });
 
-  it("uses custom intervalSeconds when provided", async () => {
+  it("uses custom intervalSeconds and thresholds when provided", async () => {
     const { createImagePruner } = await import("../../src/platform/components/image-pruner.js");
-    createImagePruner("test", { intervalSeconds: 3600 }, mockProvider());
+    createImagePruner("test", { intervalSeconds: 3600, highThresholdPercent: 80, lowThresholdPercent: 65 }, mockProvider());
     const args = createdDaemonSets[0]?.args.spec.template.spec.containers[0].args.join(" ");
-    expect(args).toContain("3600");
-    expect(args).not.toContain("21600");
+    expect(args).toContain("sleep 3600");
+    expect(args).toContain("HIGH=80");
+    expect(args).toContain("LOW=65");
+    expect(args).not.toContain("sleep 300");
   });
 
   it("uses custom namespace when provided", async () => {

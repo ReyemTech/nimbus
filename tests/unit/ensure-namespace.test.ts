@@ -49,8 +49,8 @@ describe("ensureNamespace", () => {
     expect(createdLimitRanges[0]?.args.metadata.name).toBe("default-limits");
     const limit = createdLimitRanges[0]?.args.spec.limits[0];
     expect(limit.type).toBe("Container");
-    expect(limit.defaultRequest["ephemeral-storage"]).toBe("500Mi");
-    expect(limit.default["ephemeral-storage"]).toBe("2Gi");
+    expect(limit.defaultRequest["ephemeral-storage"]).toBe("50Mi");
+    expect(limit.default["ephemeral-storage"]).toBe("256Mi");
   });
 
   it("memoizes namespace creation", async () => {

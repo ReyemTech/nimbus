@@ -1,3 +1,11 @@
+## [2.12.3](https://github.com/ReyemTech/nimbus/compare/v2.12.2...v2.12.3) (2026-05-02)
+
+
+### Bug Fixes
+
+* disk-pressure-aware image pruner + lower ephemeral defaults ([94839e1](https://github.com/ReyemTech/nimbus/commit/94839e16d80106012d278eda4e5af41604c2e4eb))
+* update image-pruner tests for disk-pressure-aware script ([24ddd01](https://github.com/ReyemTech/nimbus/commit/24ddd01f847f883a8b99557675802d91c582a1e7))
+
 ## [2.12.2](https://github.com/ReyemTech/nimbus/compare/v2.12.1...v2.12.2) (2026-04-21)
 
 

@@ -1,13 +1,13 @@
 /**
- * Image-cache pruner DaemonSet.
+ * Disk-pressure-aware image pruner DaemonSet.
  *
- * Runs `crictl rmi --prune` on each node every N seconds to reclaim
- * disk space from unused container images. Safe by design — crictl
- * never removes images with active references.
+ * Checks node disk usage every N seconds. When usage exceeds the high
+ * threshold, prunes stopped containers (freeing image refs) then removes
+ * unused images until usage drops below the low threshold or no more
+ * images can be removed.
  *
- * Image strategy: alpine base + crictl downloaded from kubernetes-sigs/cri-tools
- * GitHub releases at pod start. Cached in container fs after first start.
- * Multi-arch supported via $(uname -m) → amd64/arm64 mapping.
+ * Runs well below kubelet's imageGC (85%) and eviction (90%) thresholds
+ * to prevent DiskPressure cascades on small root disks (e.g. 38Gi).
  *
  * @module platform/components/image-pruner
  */
@@ -17,7 +17,9 @@ import type { IImagePrunerConfig } from "../interfaces";
 
 const CRICTL_VERSION = "v1.30.0";
 const DEFAULT_IMAGE = "alpine:3.20";
-const DEFAULT_INTERVAL = 21600; // 6 hours
+const DEFAULT_INTERVAL = 300; // 5 minutes
+const DEFAULT_HIGH_THRESHOLD = 70; // prune when disk >= 70%
+const DEFAULT_LOW_THRESHOLD = 60; // prune until disk <= 60%
 const DEFAULT_NAMESPACE = "kube-system";
 
 export function createImagePruner(
@@ -30,6 +32,8 @@ export function createImagePruner(
   }
 
   const interval = config.intervalSeconds ?? DEFAULT_INTERVAL;
+  const highPct = config.highThresholdPercent ?? DEFAULT_HIGH_THRESHOLD;
+  const lowPct = config.lowThresholdPercent ?? DEFAULT_LOW_THRESHOLD;
   const image = config.image ?? DEFAULT_IMAGE;
   const namespace = config.namespace ?? DEFAULT_NAMESPACE;
 
@@ -45,9 +49,46 @@ if [ ! -x /usr/local/bin/crictl ]; then
   curl -fsSL https://github.com/kubernetes-sigs/cri-tools/releases/download/${CRICTL_VERSION}/crictl-${CRICTL_VERSION}-linux-\${ARCH}.tar.gz \\
     | tar -xz -C /usr/local/bin
 fi
+
+CRI="--runtime-endpoint unix:///run/containerd/containerd.sock"
+HIGH=${highPct}
+LOW=${lowPct}
+
+get_disk_pct() {
+  df /run/containerd | awk 'NR==2 {gsub(/%/,""); print $5}'
+}
+
 while true; do
-  echo "[$(date -Iseconds)] pruning unused images..."
-  crictl --runtime-endpoint unix:///run/containerd/containerd.sock rmi --prune || echo "prune failed (will retry)"
+  PCT=$(get_disk_pct)
+  if [ "$PCT" -ge "$HIGH" ]; then
+    echo "[$(date -Iseconds)] disk at \${PCT}% (>= \${HIGH}%), pruning..."
+
+    # 1. Remove stopped containers first — frees image references
+    STOPPED=$(crictl $CRI ps -a --state exited -q 2>/dev/null || true)
+    if [ -n "$STOPPED" ]; then
+      echo "$STOPPED" | xargs -r crictl $CRI rm 2>/dev/null || true
+      echo "[$(date -Iseconds)] cleaned stopped containers"
+    fi
+
+    # 2. Prune all fully-unreferenced images
+    crictl $CRI rmi --prune 2>/dev/null || true
+    PCT=$(get_disk_pct)
+    echo "[$(date -Iseconds)] after prune: \${PCT}%"
+
+    # 3. If still above low threshold, remove oldest unused images one by one
+    if [ "$PCT" -ge "$LOW" ]; then
+      echo "[$(date -Iseconds)] still at \${PCT}%, removing oldest images..."
+      crictl $CRI images -q 2>/dev/null | while read -r IMG_ID; do
+        crictl $CRI rmi "$IMG_ID" 2>/dev/null || continue
+        PCT=$(get_disk_pct)
+        echo "[$(date -Iseconds)] removed $IMG_ID, now \${PCT}%"
+        [ "$PCT" -lt "$LOW" ] && break
+      done
+    fi
+
+    PCT=$(get_disk_pct)
+    echo "[$(date -Iseconds)] done, disk at \${PCT}%"
+  fi
   sleep ${interval}
 done`;
 

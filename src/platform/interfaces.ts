@@ -220,8 +220,8 @@ export interface INamespacePolicy {
  */
 export const DEFAULT_NAMESPACE_POLICY: INamespacePolicy = {
   limitRange: {
-    defaultRequest: { ephemeralStorage: "500Mi" },
-    defaultLimit: { ephemeralStorage: "2Gi" },
+    defaultRequest: { ephemeralStorage: "50Mi" },
+    defaultLimit: { ephemeralStorage: "256Mi" },
   },
 };
 
@@ -244,8 +244,12 @@ export const SYSTEM_NAMESPACES: ReadonlySet<string> = new Set([
 export interface IImagePrunerConfig {
   /** Enable the pruner DaemonSet. Default: true. */
   readonly enabled?: boolean;
-  /** Prune interval in seconds. Default: 21600 (6h). */
+  /** Check interval in seconds. Default: 300 (5 min). */
   readonly intervalSeconds?: number;
+  /** Disk usage % threshold to trigger pruning. Default: 70. */
+  readonly highThresholdPercent?: number;
+  /** Disk usage % target after pruning. Default: 60. */
+  readonly lowThresholdPercent?: number;
   /** Base image. Default: "alpine:3.20" (crictl downloaded at pod start). */
   readonly image?: string;
   /** Namespace for the DaemonSet. Default: "kube-system". */

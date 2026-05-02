@@ -71,7 +71,11 @@ describe("createImagePruner", () => {
 
   it("uses custom intervalSeconds and thresholds when provided", async () => {
     const { createImagePruner } = await import("../../src/platform/components/image-pruner.js");
-    createImagePruner("test", { intervalSeconds: 3600, highThresholdPercent: 80, lowThresholdPercent: 65 }, mockProvider());
+    createImagePruner(
+      "test",
+      { intervalSeconds: 3600, highThresholdPercent: 80, lowThresholdPercent: 65 },
+      mockProvider()
+    );
     const args = createdDaemonSets[0]?.args.spec.template.spec.containers[0].args.join(" ");
     expect(args).toContain("sleep 3600");
     expect(args).toContain("HIGH=80");

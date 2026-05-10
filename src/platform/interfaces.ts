@@ -220,8 +220,8 @@ export interface INamespacePolicy {
  */
 export const DEFAULT_NAMESPACE_POLICY: INamespacePolicy = {
   limitRange: {
-    defaultRequest: { ephemeralStorage: "50Mi" },
-    defaultLimit: { ephemeralStorage: "256Mi" },
+    defaultRequest: { ephemeralStorage: "100Mi" },
+    defaultLimit: { ephemeralStorage: "512Mi" },
   },
 };
 

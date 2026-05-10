@@ -354,6 +354,10 @@ function createSingleMariadbCluster(
             suspend: false,
           },
           maxRetention: `${(backup.retentionDays ?? 7) * 24}h`,
+          resources: {
+            requests: { "ephemeral-storage": "1Gi" },
+            limits: { "ephemeral-storage": "4Gi" },
+          },
           storage: {
             s3: {
               bucket: backup.target.bucket,

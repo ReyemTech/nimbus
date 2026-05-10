@@ -8,6 +8,7 @@
  *
  * Runs well below kubelet's imageGC (85%) and eviction (90%) thresholds
  * to prevent DiskPressure cascades on small root disks (e.g. 38Gi).
+ * Defaults: trigger at 55%, target 40% — gives ~30% buffer before eviction.
  *
  * @module platform/components/image-pruner
  */
@@ -18,8 +19,8 @@ import type { IImagePrunerConfig } from "../interfaces";
 const CRICTL_VERSION = "v1.30.0";
 const DEFAULT_IMAGE = "alpine:3.20";
 const DEFAULT_INTERVAL = 300; // 5 minutes
-const DEFAULT_HIGH_THRESHOLD = 70; // prune when disk >= 70%
-const DEFAULT_LOW_THRESHOLD = 60; // prune until disk <= 60%
+const DEFAULT_HIGH_THRESHOLD = 55; // prune when disk >= 55%
+const DEFAULT_LOW_THRESHOLD = 40; // prune until disk <= 40%
 const DEFAULT_NAMESPACE = "kube-system";
 
 export function createImagePruner(
@@ -70,7 +71,10 @@ while true; do
       echo "[$(date -Iseconds)] cleaned stopped containers"
     fi
 
-    # 2. Prune all fully-unreferenced images
+    # Resolve our own image ID so we never remove it
+    SELF_IMG=$(crictl $CRI images --no-trunc 2>/dev/null | grep -F '${image.split(":")[0]}' | awk '{print $3}' | head -1)
+
+    # 2. Prune unreferenced images (skip our own)
     crictl $CRI rmi --prune 2>/dev/null || true
     PCT=$(get_disk_pct)
     echo "[$(date -Iseconds)] after prune: \${PCT}%"
@@ -79,6 +83,7 @@ while true; do
     if [ "$PCT" -ge "$LOW" ]; then
       echo "[$(date -Iseconds)] still at \${PCT}%, removing oldest images..."
       crictl $CRI images -q 2>/dev/null | while read -r IMG_ID; do
+        [ "$IMG_ID" = "$SELF_IMG" ] && continue
         crictl $CRI rmi "$IMG_ID" 2>/dev/null || continue
         PCT=$(get_disk_pct)
         echo "[$(date -Iseconds)] removed $IMG_ID, now \${PCT}%"

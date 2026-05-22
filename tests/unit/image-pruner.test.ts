@@ -47,8 +47,8 @@ describe("createImagePruner", () => {
     const container = ds.spec.template.spec.containers[0];
     expect(container.securityContext.privileged).toBe(true);
     expect(container.args.join(" ")).toContain("sleep 300");
-    expect(container.args.join(" ")).toContain("HIGH=70");
-    expect(container.args.join(" ")).toContain("LOW=60");
+    expect(container.args.join(" ")).toContain("HIGH=55");
+    expect(container.args.join(" ")).toContain("LOW=40");
 
     const volumeMount = container.volumeMounts.find(
       (v: { name: string }) => v.name === "containerd-sock"

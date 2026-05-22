@@ -170,10 +170,10 @@ export class ArgoCD {
         metadata: { name: "argocd-notifications-cm", namespace: "argocd" },
         data: {
           "service.email": pulumi
-            .all([transport.host, transport.port, transport.username])
+            .all([transport.host, transport.port, transport.username, notifications.email.to])
             .apply(
-              ([host, port, username]) =>
-                `host: ${host}\nport: ${port}\nusername: ${username}\nfrom: ${transport.fromAddress}\n`
+              ([host, port, username, to]) =>
+                `host: ${host}\nport: ${port}\nusername: ${username}\nfrom: ${transport.fromAddress}\nto: ${Array.isArray(to) ? to.join(",") : to}\n`
             ),
           "trigger.on-sync-failed":
             "- when: app.status.sync.status == 'OutOfSync' and app.status.operationState.phase == 'Failed'\n  send: [app-sync-failed]",

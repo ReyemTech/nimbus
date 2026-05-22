@@ -21,6 +21,7 @@ import type { ICluster } from "../cluster";
 import { createAppSecrets } from "./secrets";
 import { createExternalSecrets } from "./external-secrets";
 import { createArgoAppDashboard } from "../observability/dashboards/argocd-app";
+import { nimbus } from "../nimbus";
 
 const ARGOCD_NAMESPACE = "argocd";
 
@@ -134,15 +135,17 @@ export class ArgoApp {
     }
 
     // Notification annotations
+    const rawEmailTo = nimbus.notifications?.email?.to;
+    const emailTo = Array.isArray(rawEmailTo) ? rawEmailTo.join(",") : (rawEmailTo ?? "");
     const annotations: Record<string, string> = {};
     if (config.notifications?.onSyncFailed !== false) {
-      annotations["notifications.argoproj.io/subscribe.on-sync-failed.email"] = "";
+      annotations["notifications.argoproj.io/subscribe.on-sync-failed.email"] = emailTo;
     }
     if (config.notifications?.onHealthDegraded !== false) {
-      annotations["notifications.argoproj.io/subscribe.on-health-degraded.email"] = "";
+      annotations["notifications.argoproj.io/subscribe.on-health-degraded.email"] = emailTo;
     }
     if (config.notifications?.onSyncSucceeded) {
-      annotations["notifications.argoproj.io/subscribe.on-sync-succeeded.email"] = "";
+      annotations["notifications.argoproj.io/subscribe.on-sync-succeeded.email"] = emailTo;
     }
 
     this.resource = new k8s.apiextensions.CustomResource(

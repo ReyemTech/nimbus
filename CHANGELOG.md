@@ -1,3 +1,12 @@
+## [2.12.4](https://github.com/ReyemTech/nimbus/compare/v2.12.3...v2.12.4) (2026-05-22)
+
+
+### Bug Fixes
+
+* also disable notifications.secret.create to avoid Helm/nimbus conflict ([454731f](https://github.com/ReyemTech/nimbus/commit/454731fcbd3c1018b8a255109cbb6892a8af6b8a))
+* enable ArgoCD notifications controller in Helm deployment ([9da32b4](https://github.com/ReyemTech/nimbus/commit/9da32b41635080d61e809f641b85702235126ae5))
+* image pruner self-image protection, lower thresholds, mariadb backup ephemeral storage ([5967b0d](https://github.com/ReyemTech/nimbus/commit/5967b0d78a85a442010f65207b31e89ac38f05bd))
+
 ## [2.12.3](https://github.com/ReyemTech/nimbus/compare/v2.12.2...v2.12.3) (2026-05-02)
 
 

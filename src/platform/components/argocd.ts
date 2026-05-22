@@ -53,6 +53,10 @@ export function deployArgocd(
         repoServer: {
           metrics: { enabled: true, serviceMonitor: { enabled: true } },
         },
+        notifications: {
+          enabled: true,
+          cm: { create: false },
+        },
         ...config.values,
       },
     },

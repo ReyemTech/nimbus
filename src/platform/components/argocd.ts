@@ -56,6 +56,7 @@ export function deployArgocd(
         notifications: {
           enabled: true,
           cm: { create: false },
+          secret: { create: false },
         },
         ...config.values,
       },

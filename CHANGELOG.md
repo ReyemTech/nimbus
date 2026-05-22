@@ -1,3 +1,10 @@
+## [2.12.5](https://github.com/ReyemTech/nimbus/compare/v2.12.4...v2.12.5) (2026-05-22)
+
+
+### Bug Fixes
+
+* populate ArgoCD notification recipient email in app annotations and ConfigMap ([813c993](https://github.com/ReyemTech/nimbus/commit/813c9936b2267bf850fc16a65d2c28a73d04c0a3))
+
 ## [2.12.4](https://github.com/ReyemTech/nimbus/compare/v2.12.3...v2.12.4) (2026-05-22)
 
 

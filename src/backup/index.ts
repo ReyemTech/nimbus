@@ -118,7 +118,12 @@ export function createBackupTarget(name: string, config: IBackupTargetConfig): I
       region: replicaRegion as aws.Region,
     });
 
-    const replicaBucketName = `${bucketName}-replica`;
+    // Suffix with the account ID: S3 bucket names are global, and a plain
+    // "<name>-replica" can be claimed by any other AWS account (this happened
+    // to reyem-backups-replica — replication silently dead-ended against a
+    // foreign bucket). The account ID guarantees uniqueness and ownership.
+    const accountId = aws.getCallerIdentityOutput({}, providerOpts).accountId;
+    const replicaBucketName = pulumi.interpolate`${bucketName}-replica-${accountId}`;
     const replicaBucketResource = new aws.s3.Bucket(
       `${name}-replica-bucket`,
       {

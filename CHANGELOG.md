@@ -1,3 +1,11 @@
+## [2.12.6](https://github.com/ReyemTech/nimbus/compare/v2.12.5...v2.12.6) (2026-07-24)
+
+
+### Bug Fixes
+
+* **backup:** make replica bucket name globally unique with account ID suffix ([44da6c5](https://github.com/ReyemTech/nimbus/commit/44da6c5f081edd8b1885f04186287b75ebb1a403))
+* **image-pruner:** repair crashloop and self-deletion in pruner script ([f711429](https://github.com/ReyemTech/nimbus/commit/f7114292e5036d433bca734cacc249c6f6d57176))
+
 ## [2.12.5](https://github.com/ReyemTech/nimbus/compare/v2.12.4...v2.12.5) (2026-05-22)
 
 

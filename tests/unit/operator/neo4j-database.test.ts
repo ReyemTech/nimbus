@@ -54,6 +54,39 @@ async function awaitRegistered(...names: string[]): Promise<void> {
   throw new Error(`timed out waiting for registrations: ${missing.join(", ")}`);
 }
 
+/**
+ * Role name used only to anchor a registration flush; never a test's subject.
+ *
+ * Every "provisions nothing" assertion below is made after an *expected throw*,
+ * and Pulumi registers resources asynchronously — so the recorded list is empty
+ * at that instant whether the guard ran before provisioning or after it. Such
+ * an assertion cannot fail and proves nothing. Adding a role that does succeed
+ * and waiting for its last resource gives the queue a deterministic anchor: the
+ * rejected call started earlier and has the same dependency depth, so anything
+ * it leaked has arrived by the time the anchor's has. No fixed sleep for a slow
+ * runner to outrun.
+ */
+const ANCHOR = "anchor-role";
+
+/**
+ * Provision a role that is expected to succeed, and wait for all of it.
+ *
+ * @param db - Database to add the anchor role to
+ */
+async function flushBehindAnchorRole(db: IDatabaseInstance): Promise<void> {
+  db.addRole(ANCHOR, { namespaces: ["app"] });
+  await awaitRegistered(
+    `shared-neo4j-graph-role-${ANCHOR}-neo4j-password`,
+    `neo4j-init-user-shared-neo4j-graph-role-${ANCHOR}`,
+    `shared-neo4j-graph-role-${ANCHOR}-neo4j-secret-app`
+  );
+}
+
+/** Everything registered so far except the anchor role's own resources. */
+function registeredWithoutAnchor(): string[] {
+  return registered.filter((name) => !name.includes(ANCHOR));
+}
+
 /** Every logical name one call to `makeDatabase({ namespaces: ["app"] })` registers. */
 const OWNER_RESOURCES = [
   "shared-neo4j-graph-neo4j-password",
@@ -334,8 +367,9 @@ describe("addRole", () => {
     const before = [...registered];
 
     expect(() => db.addRole("graph")).toThrow(AnyCloudError);
+    await flushBehindAnchorRole(db);
 
-    expect(registered).toEqual(before);
+    expect(registeredWithoutAnchor()).toEqual(before);
   });
 
   // Neo4j Community has no RBAC at all. Accepting `grants` so the call succeeds
@@ -383,8 +417,9 @@ describe("addRole", () => {
     expect(() => db.addRole("reader", { grants: [{ privileges: ["SELECT"] }] })).toThrow(
       AnyCloudError
     );
+    await flushBehindAnchorRole(db);
 
-    expect(registered).toEqual(before);
+    expect(registeredWithoutAnchor()).toEqual(before);
   });
 
   // A grant with no privileges is malformed regardless of engine, and
@@ -437,8 +472,9 @@ describe("addRole", () => {
     const before = [...registered];
 
     expect(() => db.addRole("read`er")).toThrow(AnyCloudError);
+    await flushBehindAnchorRole(db);
 
-    expect(registered).toEqual(before);
+    expect(registeredWithoutAnchor()).toEqual(before);
   });
 
   it("returns the role with its replicated Secrets", async () => {

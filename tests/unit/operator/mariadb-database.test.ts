@@ -55,6 +55,39 @@ async function awaitRegistered(...names: string[]): Promise<void> {
   throw new Error(`timed out waiting for registrations: ${missing.join(", ")}`);
 }
 
+/**
+ * Name used only to anchor a registration flush; never the subject of a test.
+ *
+ * Every "provisions nothing" assertion below is made after an *expected throw*,
+ * and Pulumi registers resources asynchronously — so the recorded list is empty
+ * at that instant whether the guard ran before provisioning or after it. Such
+ * an assertion cannot fail and proves nothing. Provisioning something that does
+ * succeed and waiting for its last resource gives the queue a deterministic
+ * anchor: the rejected call started earlier and has the same dependency depth,
+ * so anything it leaked has arrived by the time the anchor's has. No fixed
+ * sleep for a slow runner to outrun.
+ */
+const ANCHOR = "anchor-role";
+
+/**
+ * Provision a role that is expected to succeed, and wait for all of it.
+ *
+ * @param db - Database to add the anchor role to
+ */
+async function flushBehindAnchorRole(db: IDatabaseInstance): Promise<void> {
+  addRoleOf(db)(ANCHOR, { namespaces: ["app"] });
+  await awaitRegistered(
+    `shared-maria-analytics-role-${ANCHOR}-secret`,
+    `shared-maria-analytics-role-${ANCHOR}-user`,
+    `shared-maria-analytics-role-${ANCHOR}-connection-app`
+  );
+}
+
+/** Everything registered so far except the anchor's own resources. */
+function registeredWithoutAnchor(): string[] {
+  return registered.filter((name) => !name.includes(ANCHOR));
+}
+
 /** Every logical name one call to `makeDatabase({ namespaces: ["app"] })` registers. */
 const OWNER_RESOURCES = [
   "shared-maria-analytics-database",
@@ -281,7 +314,7 @@ describe("config.owner", () => {
     expect(() =>
       createSingleMariadbDatabaseInstance({
         clusterName: "shared-maria",
-        dbName: "analytics",
+        dbName: "guarded",
         config: { namespaces: ["app"], owner: "etl" },
         endpoint: pulumi.output("shared-maria.data.svc.cluster.local"),
         port: pulumi.output(3306),
@@ -290,7 +323,24 @@ describe("config.owner", () => {
       })
     ).toThrow(AnyCloudError);
 
-    expect(registered).toEqual(before);
+    // Anchor the flush on a database that does provision — see ANCHOR above.
+    createSingleMariadbDatabaseInstance({
+      clusterName: "shared-maria",
+      dbName: ANCHOR,
+      config: { namespaces: ["app"] },
+      endpoint: pulumi.output("shared-maria.data.svc.cluster.local"),
+      port: pulumi.output(3306),
+      mariadb,
+      provider,
+    });
+    await awaitRegistered(
+      `shared-maria-${ANCHOR}-password-secret`,
+      `shared-maria-${ANCHOR}-user`,
+      `shared-maria-${ANCHOR}-grant`,
+      `shared-maria-${ANCHOR}-secret-app`
+    );
+
+    expect(registeredWithoutAnchor()).toEqual(before);
   });
 
   // An owner spelled out redundantly is the same owner, so it must be accepted.
@@ -330,13 +380,14 @@ describe("addRole", () => {
   });
 
   it("provisions nothing before rejecting the owner", async () => {
-    const addRole = addRoleOf(makeDatabase());
+    const db = makeDatabase();
     await awaitRegistered(...OWNER_RESOURCES);
     const before = [...registered];
 
-    expect(() => addRole("analytics")).toThrow(AnyCloudError);
+    expect(() => addRoleOf(db)("analytics")).toThrow(AnyCloudError);
+    await flushBehindAnchorRole(db);
 
-    expect(registered).toEqual(before);
+    expect(registeredWithoutAnchor()).toEqual(before);
   });
 
   // Every MariaDB account is a login account, so silently accepting

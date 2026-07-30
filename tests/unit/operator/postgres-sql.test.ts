@@ -342,6 +342,14 @@ describe("compileGrantSql", () => {
       { privileges: "USAGE, SELECT", target: "SEQUENCES" },
     ]);
 
+    // revokedTargets() only recognises three target shapes. Pin the count of
+    // *every* REVOKE keyword in the script to the count it found, so a REVOKE
+    // shape the helper's regex cannot parse (e.g. `ON DATABASE ...` or
+    // `ON FUNCTION ...`) fails this test by going uncounted here, rather than
+    // silently passing the invariant check above unseen.
+    const revokeKeywordCount = (sql.match(/REVOKE\b/g) ?? []).length;
+    expect(revokeKeywordCount).toBe(revokedTargets(sql).length);
+
     // ...and each of those five is put back by the maximal spec.
     expect(sql).toContain('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA "public" TO "app";');
     expect(sql).toContain('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "public" TO "app";');

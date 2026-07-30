@@ -242,8 +242,10 @@ export interface IDatabaseInstance {
    * Create an additional role/user on this database with a generated password,
    * replicating a connection Secret into the given namespaces.
    *
-   * Optional until every backend (CloudNativePG, MariaDB, Neo4j) implements it;
-   * it becomes required once all three do.
+   * Implemented by every backend — CloudNativePG, MariaDB, and Neo4j — though
+   * not by the same mechanism: CNPG and MariaDB reconcile the account through a
+   * CRD, while Neo4j (which has no operator) creates it with a one-shot
+   * `cypher-shell` Job. The API is uniform; the guarantees behind it are not.
    *
    * `grants` are reconciled, not merely applied: every privilege the role holds
    * is revoked before the requested grants are re-applied, so removing a grant
@@ -256,10 +258,12 @@ export interface IDatabaseInstance {
    * @param config - Namespaces, login flag, grants, and engine-specific options
    * @returns The provisioned role with its replicated Secret references
    * @throws {AnyCloudError} with code `UNSUPPORTED_ROLE_OPTION` when `grants` is
-   *   passed to an engine that cannot express privileges (Neo4j Community), or
-   *   when `name` is the database owner's own role name.
+   *   passed to an engine that cannot express privileges (Neo4j Community),
+   *   when `login: false` is passed to an engine whose every account is a login
+   *   account (MariaDB, Neo4j), or when `name` is the database owner's own role
+   *   name.
    */
-  addRole?(name: string, config?: IDatabaseRoleConfig): IDatabaseRole;
+  addRole(name: string, config?: IDatabaseRoleConfig): IDatabaseRole;
 }
 
 /** A database cluster instance created by an operator. */

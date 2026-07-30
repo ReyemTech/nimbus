@@ -93,6 +93,146 @@ Routes traffic across clusters using DNS-based health checks.
 | `active-passive` | Failover — primary cluster, secondary on failure         |
 | `geo`            | Geolocation — route by client continent                  |
 
+### `createOperator(type, config)`
+
+Deploys a Kubernetes database operator via Helm — CloudNativePG, MariaDB Operator,
+Neo4j (single-instance, no separate operator release), or MinIO. Returns
+`IOperator` (the first three) or `IMinIOOperator` (MinIO's `createBucket()` API
+differs and is out of scope here).
+
+```typescript
+import { createOperator } from "@reyemtech/nimbus";
+import type { ICluster, IOperator } from "@reyemtech/nimbus";
+
+const operator = createOperator("cloudnative-pg", { cluster });
+const pg = operator.createCluster("pgsql-main", { replicas: 2, storageGb: 20 });
+```
+
+`IOperator.createCluster(name, config?)` returns `IClusterInstance`, whose
+`createDatabase(name, config)` provisions a database and its owner and returns
+`IDatabaseInstance`. See `docs/migrations/v3.md` for the full migration story if
+you're upgrading from a version where `createDatabase()` did not use these CRDs.
+
+### `db.addRole(name, config?)`
+
+Every `IDatabaseInstance` — regardless of engine — implements `addRole()`:
+creates an additional login role/user on the database, generates its password,
+and replicates a connection Secret into the given namespaces. The API is uniform
+across engines; the mechanism and the guarantees behind it are not:
+
+| Engine | Mechanism |
+| --- | --- |
+| CloudNativePG | `DatabaseRole` CR for the role itself. Grants have no CRD, so they are applied by a `psql` Job that authenticates as the **database owner**, never superuser — one transaction that revokes every privilege the role currently holds and re-grants the requested set, so removing a grant from config actually revokes it. |
+| MariaDB | `User` CR for the account, one `Grant` CR per requested grant. Fully declarative — no SQL, no Job. |
+| Neo4j (Community) | a one-shot `cypher-shell` Job running `CREATE USER ... IF NOT EXISTS`. There is no RBAC to reconcile — `grants` throws. |
+
+```typescript
+interface IDatabaseRoleConfig {
+  namespaces?: string[]; // Secret replication targets. Default: none.
+  login?: boolean; // Default: true. false throws on MariaDB and Neo4j.
+  grants?: IDatabaseGrant[]; // Throws on Neo4j (no RBAC in Community edition).
+  reclaimPolicy?: "retain" | "delete"; // CloudNativePG only; ignored elsewhere. Default: "retain".
+  engineOptions?: {
+    postgresql?: { inRoles?: string[]; connectionLimit?: number; validUntil?: string };
+    mariadb?: { host?: string; maxUserConnections?: number };
+  };
+}
+
+interface IDatabaseGrant {
+  privileges: string[]; // e.g. ["SELECT"], ["SELECT", "INSERT"]
+  schema?: string; // PostgreSQL only. Default: "public". Dropped on MariaDB (no schema concept).
+  objects?: string; // A table/object name, or "all" for current + future objects. Default: "all".
+}
+
+interface IDatabaseRole {
+  name: string;
+  databaseName: string;
+  clusterName: string;
+  secrets: Record<string, pulumi.Output<string>>; // namespace → Secret name
+  nativeResource: pulumi.Resource;
+}
+```
+
+`addRole()` throws an `AnyCloudError` with code `UNSUPPORTED_ROLE_OPTION` when:
+
+- `name` equals the database's owner — the owner's role already exists (created by
+  `createDatabase()`); a second CR/Job for the same account would fight the first
+  over its password.
+- `grants` is passed on Neo4j (no RBAC in Community edition).
+- `login: false` is passed on MariaDB or Neo4j (every account there is a login
+  account).
+- `name` contains a backtick, single quote, double quote, backslash, or NUL byte,
+  on any engine.
+
+It throws code `INVALID_GRANT` when a grant lists zero privileges, and code
+`UNSUPPORTED_PRIVILEGE` (CloudNativePG only) when a grant names a privilege the SQL
+compiler cannot emit — the allowed set is `SELECT`, `INSERT`, `UPDATE`, `DELETE`,
+`TRUNCATE`, `REFERENCES`, `TRIGGER`, `USAGE`, `CREATE`, `ALL PRIVILEGES`.
+
+`objects: "all"` is the portable "current and future objects" form. On PostgreSQL
+it emits both `GRANT ... ON ALL TABLES IN SCHEMA ...` and
+`ALTER DEFAULT PRIVILEGES FOR ROLE <owner> ...`, so tables created after the grant
+runs are covered too. On MariaDB it becomes `table: "*"`, which already covers
+later tables without a separate default-privileges concept.
+
+#### CloudNativePG example
+
+```typescript
+const pg = operator.createCluster("pgsql-main", { replicas: 2, storageGb: 20 });
+const db = pg.createDatabase("warehouse", { namespaces: ["etl"] });
+
+// Read-only role, scoped to the "marts" schema, current and future tables.
+db.addRole("reporting", {
+  namespaces: ["bi"],
+  grants: [{ privileges: ["SELECT"], schema: "marts", objects: "all" }],
+  engineOptions: { postgresql: { connectionLimit: 20 } },
+});
+```
+
+#### MariaDB example
+
+```typescript
+const maria = operator.createCluster("mariadb-main", { replicas: 3, storageGb: 20 });
+const db = maria.createDatabase("kimai", { namespaces: ["timetracking"] });
+
+// Read-only role over the whole database — no schema field, MariaDB has none.
+db.addRole("kimai-readonly", {
+  namespaces: ["reporting"],
+  grants: [{ privileges: ["SELECT"], objects: "all" }],
+  engineOptions: { mariadb: { maxUserConnections: 20 } },
+});
+```
+
+#### Neo4j example
+
+```typescript
+const graph = operator.createCluster("graph-main", { storageGb: 50 });
+const db = graph.createDatabase("catalog", { namespaces: ["search"] });
+
+// grants would throw UNSUPPORTED_ROLE_OPTION — Community edition has no RBAC.
+// A role added here is a plain login account, nothing more.
+db.addRole("catalog-etl", { namespaces: ["ingest"] });
+```
+
+### `IOperatorDatabaseConfig.sql`
+
+Raw SQL statements applied to a CloudNativePG database as its owner, after the
+database and owner role exist. Ignored by MariaDB and Neo4j. Intended for one-off
+setup a CRD cannot express:
+
+```typescript
+pg.createDatabase("warehouse", {
+  namespaces: ["etl"],
+  sql: ["CREATE EXTENSION IF NOT EXISTS pgcrypto;"],
+});
+```
+
+Statements must be idempotent (the underlying Job re-runs whenever the SQL's
+checksum changes, and may run again against a database that already has the
+result of a previous run) and transaction-safe (they run inside the same
+transaction as the rest of the applying script, so `CREATE INDEX CONCURRENTLY`,
+`VACUUM`, and a stray `COMMIT;` will all error or truncate the script early).
+
 ## Provider Options
 
 ```typescript

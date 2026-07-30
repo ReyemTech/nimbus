@@ -45,6 +45,14 @@ db.createDatabase("n8n", {
 });
 ```
 
+`createDatabase()` creates the database and its owner role only. Additional roles —
+with their own grants, reconciled by a `psql` Job running as the owner rather than
+superuser — are provisioned afterward via `db.addRole(name, config)`, and one-off
+setup a CRD cannot express (`CREATE EXTENSION`, seeding a schema) via
+`config.sql`. Both are documented in full, with worked examples for every engine,
+in [the API reference](./api-reference.md#dbaddrolename-config) and
+[the v3 migration guide](./migrations/v3.md).
+
 ## Migrating an existing cluster
 
 Adoption is non-destructive. The operator's `Database` reconciler calls `detectDatabase`

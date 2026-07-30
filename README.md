@@ -145,6 +145,7 @@ pulumi stack output           # View stack outputs
 - [Examples](docs/examples.md) — Single-cloud, multi-cloud, standalone resources, BCDR
 - [Utilities](docs/utilities.md) — CIDR helpers, validation, tags, error handling
 - [CNPG Declarative Databases](docs/cnpg-declarative-databases.md) — Migrating PostgreSQL databases from bootstrap Jobs to `Database`/`DatabaseRole` CRDs
+- [v3 Migration Guide](docs/migrations/v3.md) — Upgrading to `addRole()`, the `superuserAccess` default change, and the `migrate v3` pre-flight check
 
 ## Development
 

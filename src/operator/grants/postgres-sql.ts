@@ -13,7 +13,20 @@
 import { AnyCloudError, ERROR_CODES } from "../../types/errors.js";
 import type { IDatabaseGrant } from "../interfaces.js";
 
-/** Privileges accepted in {@link IDatabaseGrant.privileges}. */
+/**
+ * Privileges accepted in {@link IDatabaseGrant.privileges}.
+ *
+ * Deliberately narrow: every entry here is either a privilege PostgreSQL
+ * allows in a `GRANT ... ON ALL TABLES IN SCHEMA` / `GRANT ... ON <table>`
+ * statement (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`,
+ * `REFERENCES`, `TRIGGER`, `ALL PRIVILEGES`), or `CREATE`/`USAGE` for the
+ * schema-scoped grant this compiler always emits alongside a table grant.
+ * `EXECUTE`, `CONNECT`, and `TEMPORARY` are real PostgreSQL privileges but
+ * apply to functions, databases, and tablespaces respectively — this
+ * compiler has no emission path for them, so accepting them would pass
+ * validation here and then fail (or silently do nothing useful) when the
+ * script runs. Rejecting them at compile time surfaces the mistake early.
+ */
 const ALLOWED_PRIVILEGES: ReadonlySet<string> = new Set([
   "SELECT",
   "INSERT",
@@ -24,15 +37,15 @@ const ALLOWED_PRIVILEGES: ReadonlySet<string> = new Set([
   "TRIGGER",
   "USAGE",
   "CREATE",
-  "CONNECT",
-  "TEMPORARY",
-  "EXECUTE",
   "ALL PRIVILEGES",
 ]);
 
 /** Sentinel meaning "every current and future object in the schema". */
 const ALL_OBJECTS = "all";
+/** Schema used for a grant when {@link IDatabaseGrant.schema} is omitted. */
 const DEFAULT_SCHEMA = "public";
+/** Base tag for the `DO $tag$ ... $tag$;` block; bumped on collision. See {@link chooseDollarTag}. */
+const BASE_DOLLAR_TAG = "nimbus";
 
 /** Options for {@link compileGrantSql}. */
 export interface ICompileOptions {
@@ -42,7 +55,16 @@ export interface ICompileOptions {
   readonly owner: string;
   /** Desired grants. An empty list revokes everything the role holds. */
   readonly grants: ReadonlyArray<IDatabaseGrant>;
-  /** Raw SQL appended after the grants. Must be idempotent. */
+  /**
+   * Raw SQL appended after the grants and before `COMMIT;` — it runs inside
+   * the same surrounding transaction as everything else in the script, not
+   * in a transaction of its own. It must therefore be both idempotent and
+   * transaction-safe: statements that PostgreSQL refuses to run inside a
+   * transaction block (e.g. `CREATE INDEX CONCURRENTLY`, `VACUUM`) will
+   * error, and a stray `COMMIT;` here would close the transaction early and
+   * leave the script's real trailing `COMMIT;` erroring outside any
+   * transaction.
+   */
   readonly extraSql?: ReadonlyArray<string>;
 }
 
@@ -91,12 +113,47 @@ function quoteLiteral(value: string): string {
 }
 
 /**
+ * Derive a dollar-quote tag for a `DO $tag$ ... $tag$;` block that cannot
+ * collide with any of the given values.
+ *
+ * PostgreSQL's dollar-quoting has no escape mechanism: whichever `$tag$`
+ * appears first inside the body — even embedded in what the author intended
+ * as inert string data — closes the block early, and everything after is
+ * parsed as top-level SQL. Hardcoding a tag is therefore an injection hole
+ * whenever a role or owner name is attacker-influenced. This starts at
+ * `nimbus` and, on collision, tries `nimbus0`, `nimbus1`, ... until the
+ * candidate tag does not appear (as `$tag$`) in any supplied value.
+ *
+ * @param values - Every string that will be embedded inside the DO block body
+ * @returns A tag guaranteed not to appear as `$tag$` in any of `values`
+ */
+function chooseDollarTag(values: ReadonlyArray<string>): string {
+  let candidate = BASE_DOLLAR_TAG;
+  let suffix = 0;
+  while (values.some((value) => value.includes(`$${candidate}$`))) {
+    candidate = `${BASE_DOLLAR_TAG}${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+/**
  * Compile a grant spec into an idempotent, transactional SQL script.
  *
  * @param options - Role, owner, desired grants, and optional trailing SQL
  * @returns A complete SQL script beginning with `BEGIN;` and ending `COMMIT;`
  * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a privilege is not
  *   in the allowlist
+ *
+ * @example Read-only access to every current and future table in a schema
+ * ```typescript
+ * const sql = compileGrantSql({
+ *   role: "reader",
+ *   owner: "etl",
+ *   grants: [{ privileges: ["SELECT"], schema: "marts", objects: "all" }],
+ * });
+ * // sql === "BEGIN;\nDO $nimbus$ ... GRANT SELECT ON ALL TABLES IN SCHEMA \"marts\" TO \"reader\";\n...\nCOMMIT;"
+ * ```
  */
 export function compileGrantSql(options: ICompileOptions): string {
   const { role, owner, grants, extraSql = [] } = options;
@@ -104,22 +161,26 @@ export function compileGrantSql(options: ICompileOptions): string {
   const qOwner = quoteIdentifier(owner);
   const lRole = quoteLiteral(role);
   const lOwner = quoteLiteral(owner);
+  const tag = chooseDollarTag([role, owner]);
 
   const statements: string[] = ["BEGIN;"];
 
   // Revoke every privilege the role currently holds, discovered at runtime.
-  // format(%I) quotes identifiers; the role/owner names are passed as literal
-  // parameters to has_schema_privilege/format rather than concatenated into DDL.
+  // Every non-system schema is visited unconditionally (not just ones the
+  // role currently has USAGE on) so that privileges surviving under a
+  // separately-revoked schema are still caught — REVOKE against a schema the
+  // role holds nothing in is a harmless no-op. format(%I) quotes
+  // identifiers; the role/owner names are passed as literal parameters to
+  // format rather than concatenated into DDL.
   statements.push(
     [
-      "DO $nimbus$",
+      `DO $${tag}$`,
       "DECLARE s record;",
       "BEGIN",
       "  FOR s IN",
       "    SELECT nspname FROM pg_namespace",
       "    WHERE nspname NOT LIKE 'pg\\_%'",
       "      AND nspname <> 'information_schema'",
-      `      AND has_schema_privilege(${lRole}, nspname, 'USAGE')`,
       "  LOOP",
       `    EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM %I', s.nspname, ${lRole});`,
       `    EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM %I', s.nspname, ${lRole});`,
@@ -127,7 +188,7 @@ export function compileGrantSql(options: ICompileOptions): string {
       `    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I REVOKE ALL ON TABLES FROM %I', ${lOwner}, s.nspname, ${lRole});`,
       "  END LOOP;",
       "END",
-      "$nimbus$;",
+      `$${tag}$;`,
     ].join("\n")
   );
 

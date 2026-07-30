@@ -6,6 +6,15 @@ import {
 } from "../../../src/operator/grants/postgres-sql.js";
 import { AnyCloudError, ERROR_CODES } from "../../../src/types/errors.js";
 
+/** Extract the `$tag$` used to open the compiled script's `DO` block. */
+function extractDollarTag(sql: string): string {
+  const tag = sql.match(/DO (\$nimbus\d*\$)/)?.[1];
+  if (!tag) {
+    throw new Error("expected a DO $nimbus...$ block in the compiled SQL");
+  }
+  return tag;
+}
+
 describe("quoteIdentifier", () => {
   it("wraps a plain identifier in double quotes", () => {
     expect(quoteIdentifier("marts")).toBe('"marts"');
@@ -46,6 +55,17 @@ describe("normalizePrivilege", () => {
       expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_PRIVILEGE);
     }
   });
+
+  // EXECUTE, CONNECT, and TEMPORARY are real PostgreSQL privileges, but this
+  // compiler only ever emits GRANT ... ON ALL TABLES / ON <table> / ON SCHEMA
+  // statements, none of which can carry them. Accepting them here would pass
+  // validation and then fail (or silently do nothing) when the script runs.
+  it.each(["EXECUTE", "CONNECT", "TEMPORARY"])(
+    "rejects %s because this compiler has no emission path for it",
+    (privilege) => {
+      expect(() => normalizePrivilege(privilege)).toThrow(/unsupported privilege/i);
+    }
+  );
 });
 
 describe("compileGrantSql", () => {
@@ -159,5 +179,45 @@ describe("compileGrantSql", () => {
   it("excludes system schemas from the runtime revoke scan", () => {
     const sql = compileGrantSql({ role: "reader", owner: "etl", grants: [] });
     expect(sql).toContain("AND nspname <> 'information_schema'");
+  });
+
+  it("scans every non-system schema unconditionally, not gated on has_schema_privilege", () => {
+    const sql = compileGrantSql({ role: "reader", owner: "etl", grants: [] });
+    expect(sql).not.toContain("has_schema_privilege");
+  });
+
+  it("derives a collision-free dollar-quote tag when a role contains $nimbus$", () => {
+    const injected = "x$nimbus$; DROP DATABASE prod; --";
+    const sql = compileGrantSql({ role: injected, owner: "etl", grants: [] });
+
+    const tag = extractDollarTag(sql);
+
+    // The chosen tag must not be the colliding "$nimbus$" the injected value
+    // contains, and it must not appear anywhere inside the injected value —
+    // otherwise the DO block would be terminated early by attacker data.
+    expect(tag).not.toBe("$nimbus$");
+    expect(injected.includes(tag)).toBe(false);
+
+    // Opening and closing delimiters must match, and the tag must occur
+    // exactly twice in the whole script (open + close). A third occurrence
+    // would mean the tag leaked into — or collided with — embedded data.
+    expect(sql).toContain(`END\n${tag};`);
+    expect(sql.split(tag).length - 1).toBe(2);
+
+    // The injected payload is present only as inert data inside a quoted
+    // string literal (the has_schema_privilege/format argument), never as a
+    // standalone top-level statement introduced by an early-terminated block.
+    expect(sql).toContain(`, 'x$nimbus$; DROP DATABASE prod; --');`);
+  });
+
+  it("still avoids collision when both role and owner contain the base tag", () => {
+    const sql = compileGrantSql({
+      role: "$nimbus$",
+      owner: "$nimbus0$",
+      grants: [],
+    });
+    const tag = extractDollarTag(sql);
+    expect(tag).not.toBe("$nimbus$");
+    expect(tag).not.toBe("$nimbus0$");
   });
 });

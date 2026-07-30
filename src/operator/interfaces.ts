@@ -37,7 +37,12 @@ export type ReclaimPolicy = "retain" | "delete";
 export interface IDatabaseGrant {
   /** Privileges to grant (e.g. ["SELECT"], ["SELECT", "INSERT"]). */
   readonly privileges: string[];
-  /** Schema to scope the grant to. PostgreSQL only; ignored by engines without schemas. */
+  /**
+   * Schema to scope the grant to. PostgreSQL only; ignored by engines without
+   * schemas. MariaDB in particular has no schema concept distinct from the
+   * database, so this field is dropped there and the grant applies to the
+   * database named by the {@link IDatabaseInstance} it was added to.
+   */
   readonly schema?: string;
   /** A specific object name, or every current and future object when "all". Default: "all". */
   readonly objects?: string;
@@ -165,7 +170,15 @@ export interface IOperatorClusterConfig {
 export interface IOperatorDatabaseConfig {
   /** Namespaces to replicate the connection secret into. */
   readonly namespaces: string[];
-  /** Database owner/username. Default: same as database name. */
+  /**
+   * Database owner/username. Default: same as database name.
+   *
+   * Honoured by CloudNativePG and Neo4j. **Ignored by MariaDB**, whose owner is
+   * always the database name: mariadb-operator treats `User.spec.name` and
+   * `Grant.spec.username` as immutable, so honouring it would rename only the
+   * replicated connection Secrets and leave applications authenticating as an
+   * account that was never created.
+   */
   readonly owner?: string;
   /**
    * What happens to the PostgreSQL database and its owning role when the

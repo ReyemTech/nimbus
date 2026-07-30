@@ -8,7 +8,6 @@
  * @module operator/mariadb
  */
 
-import * as crypto from "node:crypto";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { ensureNamespace } from "../utils/ensure-namespace";
@@ -23,189 +22,17 @@ import type {
 import { createMariadbClusterDashboard } from "../observability/dashboards";
 import { createPrometheusRule } from "../observability/alerts";
 import { nimbus } from "../nimbus";
+import {
+  BACKUP_KIND,
+  DATA_NAMESPACE,
+  MARIADB_API_VERSION,
+  MARIADB_KIND,
+} from "./mariadb-common.js";
+import { createSingleMariadbDatabaseInstance } from "./mariadb-database.js";
 
-const DATA_NAMESPACE = "data";
 const DEFAULT_MARIADB_VERSION = "11.7";
 const DEFAULT_REPLICAS = 1;
 const DEFAULT_STORAGE_GB = 10;
-
-/**
- * Create a single database instance within a MariaDB cluster using
- * operator CRDs (Database, User, Grant) for proper lifecycle management.
- */
-function createSingleMariadbDatabaseInstance(
-  clusterName: string,
-  dbName: string,
-  dbConfig: Omit<IOperatorDatabaseConfig, "environments">,
-  endpoint: pulumi.Output<string>,
-  port: pulumi.Output<number>,
-  mariadb: k8s.apiextensions.CustomResource,
-  provider: k8s.Provider
-): IDatabaseInstance {
-  // Use dbName as the actual MySQL username (matching CNPG convention).
-  // K8s resource names stay prefixed with clusterName for uniqueness.
-  const username = dbName;
-  const userSecretName = `${clusterName}-${dbName}-user`;
-
-  // 1. Database CRD — creates the database on the MariaDB instance
-  const database = new k8s.apiextensions.CustomResource(
-    `${clusterName}-${dbName}-database`,
-    {
-      apiVersion: "k8s.mariadb.com/v1alpha1",
-      kind: "Database",
-      metadata: {
-        name: `${clusterName}-${dbName}`,
-        namespace: DATA_NAMESPACE,
-        labels: {
-          "app.kubernetes.io/managed-by": "nimbus",
-          "nimbus/cluster": clusterName,
-          "nimbus/database": dbName,
-        },
-      },
-      spec: {
-        mariaDbRef: { name: clusterName },
-        name: dbName,
-        characterSet: "utf8mb4",
-        collate: "utf8mb4_unicode_ci",
-      },
-    },
-    { provider, dependsOn: [mariadb], ignoreChanges: ["spec.name"] }
-  );
-
-  // 2. Generate a password and store it in a Secret for the User CRD to reference
-  const generatedPassword = pulumi.secret(crypto.randomBytes(24).toString("base64url"));
-  const passwordSecret = new k8s.core.v1.Secret(
-    `${clusterName}-${dbName}-password-secret`,
-    {
-      metadata: {
-        name: userSecretName,
-        namespace: DATA_NAMESPACE,
-        labels: {
-          "app.kubernetes.io/managed-by": "nimbus",
-          "nimbus/cluster": clusterName,
-          "nimbus/database": dbName,
-        },
-      },
-      stringData: {
-        password: generatedPassword,
-      },
-    },
-    { provider, dependsOn: [mariadb], ignoreChanges: ["data", "stringData"] }
-  );
-
-  // User CRD — creates a user referencing the password Secret
-  const user = new k8s.apiextensions.CustomResource(
-    `${clusterName}-${dbName}-user`,
-    {
-      apiVersion: "k8s.mariadb.com/v1alpha1",
-      kind: "User",
-      metadata: {
-        name: `${clusterName}-${dbName}`,
-        namespace: DATA_NAMESPACE,
-        labels: {
-          "app.kubernetes.io/managed-by": "nimbus",
-          "nimbus/cluster": clusterName,
-          "nimbus/database": dbName,
-        },
-      },
-      spec: {
-        mariaDbRef: { name: clusterName },
-        name: dbName,
-        passwordSecretKeyRef: {
-          name: userSecretName,
-          key: "password",
-        },
-        maxUserConnections: 100,
-      },
-    },
-    { provider, dependsOn: [mariadb, passwordSecret], ignoreChanges: ["spec.name"] }
-  );
-
-  // 3. Grant CRD — grants ALL PRIVILEGES on the database to the user
-  const grant = new k8s.apiextensions.CustomResource(
-    `${clusterName}-${dbName}-grant`,
-    {
-      apiVersion: "k8s.mariadb.com/v1alpha1",
-      kind: "Grant",
-      metadata: {
-        name: `${clusterName}-${dbName}`,
-        namespace: DATA_NAMESPACE,
-        labels: {
-          "app.kubernetes.io/managed-by": "nimbus",
-          "nimbus/cluster": clusterName,
-          "nimbus/database": dbName,
-        },
-      },
-      spec: {
-        mariaDbRef: { name: clusterName },
-        privileges: ["ALL PRIVILEGES"],
-        database: dbName,
-        table: "*",
-        username: dbName,
-        grantOption: true,
-      },
-    },
-    { provider, dependsOn: [database, user], ignoreChanges: ["spec.database", "spec.username"] }
-  );
-
-  // 4. Read password back from the stored secret (stable across deploys)
-  const storedSecret = k8s.core.v1.Secret.get(
-    `${clusterName}-${dbName}-password-read`,
-    pulumi.interpolate`${DATA_NAMESPACE}/${userSecretName}`,
-    { provider, dependsOn: [passwordSecret] }
-  );
-  const stablePassword = storedSecret.data.apply((d) =>
-    Buffer.from(d?.["password"] ?? "", "base64").toString()
-  );
-
-  // Replicate connection secrets with per-user credentials to target namespaces
-  const secrets: Record<string, pulumi.Output<string>> = {};
-  const dbHost = endpoint;
-  const dbPort = port;
-
-  for (const targetNs of dbConfig.namespaces) {
-    const nsResource = ensureNamespace(targetNs, provider);
-    const secretName = `${clusterName}-${dbName}-mariadb`;
-
-    new k8s.core.v1.Secret(
-      `${clusterName}-${dbName}-secret-${targetNs}`,
-      {
-        metadata: {
-          name: secretName,
-          namespace: targetNs,
-          labels: {
-            "app.kubernetes.io/managed-by": "nimbus",
-            "nimbus/cluster": clusterName,
-            "nimbus/database": dbName,
-          },
-        },
-        stringData: {
-          host: dbHost,
-          port: dbPort.apply((p) => String(p)),
-          username,
-          password: stablePassword,
-          database: dbName,
-          uri: pulumi
-            .all([dbHost, dbPort, stablePassword])
-            .apply(([h, p, pw]) => `mysql://${username}:${pw}@${h}:${p}/${dbName}`),
-        },
-      },
-      { provider, dependsOn: [grant, nsResource] }
-    );
-
-    secrets[targetNs] = pulumi.output(secretName);
-  }
-
-  return {
-    name: dbName,
-    clusterName,
-    host: endpoint,
-    port,
-    database: pulumi.output(dbName),
-    secrets,
-    nativeResource: database,
-  };
-}
 
 /**
  * Create a single MariaDB instance via the MariaDB Operator (no environment awareness).
@@ -299,8 +126,8 @@ function createSingleMariadbCluster(
   const mariadb = new k8s.apiextensions.CustomResource(
     `${name}-mariadb`,
     {
-      apiVersion: "k8s.mariadb.com/v1alpha1",
-      kind: "MariaDB",
+      apiVersion: MARIADB_API_VERSION,
+      kind: MARIADB_KIND,
       metadata: {
         name,
         namespace: DATA_NAMESPACE,
@@ -341,8 +168,8 @@ function createSingleMariadbCluster(
     new k8s.apiextensions.CustomResource(
       `${name}-mariadb-backup`,
       {
-        apiVersion: "k8s.mariadb.com/v1alpha1",
-        kind: "Backup",
+        apiVersion: MARIADB_API_VERSION,
+        kind: BACKUP_KIND,
         metadata: {
           name: `${name}-scheduled-backup`,
           namespace: DATA_NAMESPACE,
@@ -412,28 +239,28 @@ function createSingleMariadbCluster(
             ...baseConfig,
             ...envOverrides,
           };
-          envResult[env] = createSingleMariadbDatabaseInstance(
-            `${name}`,
-            `${dbName}-${env}`,
-            mergedConfig,
+          envResult[env] = createSingleMariadbDatabaseInstance({
+            clusterName: name,
+            dbName: `${dbName}-${env}`,
+            config: mergedConfig,
             endpoint,
             port,
             mariadb,
-            provider
-          );
+            provider,
+          });
         }
         result = envResult;
       } else {
         const { environments: _, ...cleanConfig } = dbConfig;
-        result = createSingleMariadbDatabaseInstance(
-          name,
+        result = createSingleMariadbDatabaseInstance({
+          clusterName: name,
           dbName,
-          cleanConfig,
+          config: cleanConfig,
           endpoint,
           port,
           mariadb,
-          provider
-        );
+          provider,
+        });
       }
       // Runtime: environments → Record, otherwise → IDatabaseInstance.
       // Overload signatures on IClusterInstance narrow the type for callers.

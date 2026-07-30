@@ -28,10 +28,10 @@ describe("ownerRoleNaming", () => {
   });
 
   // The owner holds exactly one grant, and its pre-existing names carry no
-  // index suffix — so the index must not leak into either name.
+  // suffix — so the table must not leak into either name.
   it("pins the owner's single grant to its unsuffixed names", () => {
-    expect(naming.grantNaming(0).resource).toBe("shared-maria-analytics-grant");
-    expect(naming.grantNaming(0).metadataName).toBe("shared-maria-analytics");
+    expect(naming.grantNaming("*").resource).toBe("shared-maria-analytics-grant");
+    expect(naming.grantNaming("*").metadataName).toBe("shared-maria-analytics");
   });
 
   // `metadata.name` was never sanitized for the owner. Sanitizing it now would
@@ -48,7 +48,7 @@ const pulumiNames = (naming: IMariadbRoleNaming): string[] => [
   naming.credentialResource,
   naming.userResource,
   naming.connectionResourcePrefix,
-  naming.grantNaming(0).resource,
+  naming.grantNaming("*").resource,
 ];
 
 /** The subset of names Kubernetes objects are created under. */
@@ -56,7 +56,7 @@ const kubernetesNames = (naming: IMariadbRoleNaming): string[] => [
   naming.credentialSecret,
   naming.userMetadataName,
   naming.connectionSecret,
-  naming.grantNaming(0).metadataName,
+  naming.grantNaming("*").metadataName,
 ];
 
 describe("additionalRoleNaming", () => {
@@ -71,12 +71,39 @@ describe("additionalRoleNaming", () => {
     expect(role.connectionSecret).toBe("shared-maria-analytics-role-reader-mariadb");
   });
 
-  it("indexes every grant so a role may hold more than one", () => {
+  // Keying grants on the table rather than on their position is what makes
+  // reordering a role's `grants` array a no-op. A positional name would rewrite
+  // `spec.table` on live Grant CRs — a field the operator's webhook may refuse,
+  // turning a harmless reorder into a permanently failing apply.
+  it("names each grant for the table it covers, not its position", () => {
     const role = additionalRoleNaming("shared-maria", "analytics", "reader");
 
-    expect(role.grantNaming(0).resource).toBe("shared-maria-analytics-role-reader-grant-0");
-    expect(role.grantNaming(1).resource).toBe("shared-maria-analytics-role-reader-grant-1");
-    expect(role.grantNaming(1).metadataName).toBe("shared-maria-analytics-role-reader-grant-1");
+    expect(role.grantNaming("events").resource).toBe(
+      "shared-maria-analytics-role-reader-grant-events"
+    );
+    expect(role.grantNaming("events").metadataName).toBe(
+      "shared-maria-analytics-role-reader-grant-events"
+    );
+  });
+
+  it("renders the whole-database table as `all`", () => {
+    const role = additionalRoleNaming("shared-maria", "analytics", "reader");
+
+    expect(role.grantNaming("*").resource).toBe("shared-maria-analytics-role-reader-grant-all");
+  });
+
+  it("sanitizes table names that are not valid DNS-1123 labels", () => {
+    const role = additionalRoleNaming("c", "d", "reader");
+
+    expect(role.grantNaming("Order_Items").resource).toBe("c-d-role-reader-grant-order-items");
+  });
+
+  // Two grants on the same table would derive one shared logical name. That is
+  // a hard duplicate-URN error at preview, before anything is applied.
+  it("gives the same name to two grants on the same table", () => {
+    const role = additionalRoleNaming("c", "d", "reader");
+
+    expect(role.grantNaming("events").resource).toBe(role.grantNaming("events").resource);
   });
 
   // A role literally named "user", "grant", or "secret" is the case most likely

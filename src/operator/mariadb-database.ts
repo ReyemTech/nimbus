@@ -75,22 +75,37 @@ export interface IMariadbDatabaseOptions {
  * @param options - Instance, database name, configuration, and provider
  * @returns The database instance, with `addRole()` bound to it
  * @throws {AnyCloudError} code `INVALID_GRANT` when a role's grant lists no privileges
- * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `addRole()` is
- *   called with the database owner's own name, or with `login: false`
+ * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `config.owner` is
+ *   set to anything but the database name, when `addRole()` is called with the
+ *   database owner's own name, or when `addRole()` is passed `login: false`
  */
 export function createSingleMariadbDatabaseInstance(
   options: IMariadbDatabaseOptions
 ): IDatabaseInstance {
   const { clusterName, dbName, config, endpoint, port, mariadb, provider } = options;
 
-  // The owner's MariaDB username is always the database name. `config.owner` is
-  // deliberately NOT honoured here, and this is not an oversight: the live
-  // `User` and `Grant` CRs carry `ignoreChanges` on `spec.name` / `spec.username`
-  // because mariadb-operator's webhook rejects updates to them, so switching to
-  // `config.owner ?? dbName` would leave the account itself named after the
-  // database while flipping `username` and `uri` in every already-replicated
-  // connection Secret — applications would then authenticate as a user that was
-  // never created. Kubernetes object names stay prefixed with clusterName.
+  // MariaDB cannot honour `owner`, and rejects it rather than ignoring it.
+  //
+  // The live `User` and `Grant` CRs carry `ignoreChanges` on `spec.name` /
+  // `spec.username` because mariadb-operator's webhook refuses updates to them.
+  // `ignoreChanges` suppresses diffs only on resources that already exist, so
+  // honouring `owner` would in fact work on a greenfield stack and break only on
+  // upgrade: the existing account would stay named after the database while
+  // `username` and `uri` flipped in every already-replicated connection Secret,
+  // leaving applications authenticating as a user that was never created. An
+  // option whose correctness depends on how old the stack is, is worse than one
+  // that is refused outright — so this fails at preview, before anything is
+  // registered. The owner's username is always the database name.
+  if (config.owner !== undefined && config.owner !== dbName) {
+    throw new AnyCloudError(
+      `Database "${dbName}" cannot set owner "${config.owner}" on MariaDB — the owner is ` +
+        `always the database name. mariadb-operator treats User.spec.name and ` +
+        `Grant.spec.username as immutable, so an owner that differs would rename only the ` +
+        `replicated connection Secrets. Remove "owner", or use addRole("${config.owner}") ` +
+        `to create it as an additional role.`,
+      ERROR_CODES.UNSUPPORTED_ROLE_OPTION
+    );
+  }
   const username = dbName;
   const labels = {
     [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,

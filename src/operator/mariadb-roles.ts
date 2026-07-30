@@ -71,16 +71,20 @@ export interface IMariadbRoleNaming {
   /** Kubernetes name of each replicated connection Secret. */
   readonly connectionSecret: string;
   /**
-   * Names for the `Grant` custom resource at `index`.
+   * Names for the `Grant` custom resource covering `table`.
    *
-   * A user may hold any number of grants, so these cannot be plain fields. The
-   * owner holds exactly one and ignores the index entirely, which is how its
-   * pre-existing unsuffixed name survives.
+   * A user may hold any number of grants, so these cannot be plain fields.
+   * Keying on the table rather than the grant's position makes reordering a
+   * role's `grants` array a no-op and an edit to its privileges an in-place
+   * update; only changing the table forces a replace, which is the one case
+   * where a replace is correct. The owner holds exactly one grant and ignores
+   * the argument entirely, which is how its pre-existing unsuffixed name
+   * survives.
    *
-   * @param index - Position of the grant in the user's grant list
+   * @param table - The grant's `spec.table`, `"*"` for the whole database
    * @returns The grant's Pulumi logical and Kubernetes names
    */
-  grantNaming(index: number): IMariadbGrantNaming;
+  grantNaming(table: string): IMariadbGrantNaming;
 }
 
 /**
@@ -116,6 +120,9 @@ export function ownerRoleNaming(clusterName: string, dbName: string): IMariadbRo
  * collide with the owner's pinned names above — the owner's names have no
  * `-role-` segment following `{cluster}-{database}`.
  *
+ * Grants are named for the table they cover (`*` renders as `all`), never for
+ * their position, so reordering a role's `grants` array changes nothing.
+ *
  * @param clusterName - MariaDB instance name
  * @param dbName - Database name
  * @param roleName - Role name as it exists in MariaDB
@@ -134,10 +141,13 @@ export function additionalRoleNaming(
     userMetadataName: toResourceName(base),
     connectionResourcePrefix: `${base}-connection`,
     connectionSecret: `${base}-mariadb`,
-    grantNaming: (index: number) => ({
-      resource: `${base}-grant-${index}`,
-      metadataName: toResourceName(`${base}-grant-${index}`),
-    }),
+    grantNaming: (table: string) => {
+      const suffix = toResourceName(table === ALL_TABLES ? ALL_OBJECTS : table);
+      return {
+        resource: `${base}-grant-${suffix}`,
+        metadataName: toResourceName(`${base}-grant-${suffix}`),
+      };
+    },
   };
 }
 
@@ -271,8 +281,8 @@ export function provisionMariadbRole(options: IMariadbRoleOptions): IMariadbProv
     }
   );
 
-  const grants = options.grants.map((grant, index) => {
-    const grantNames = naming.grantNaming(index);
+  const grants = options.grants.map((grant) => {
+    const grantNames = naming.grantNaming(grant.table);
     return new k8s.apiextensions.CustomResource(
       grantNames.resource,
       {

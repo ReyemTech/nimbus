@@ -56,7 +56,14 @@ export interface IDatabaseRoleConfig {
   readonly login?: boolean;
   /** Privileges granted to this role on the owning database. */
   readonly grants?: IDatabaseGrant[];
-  /** End-of-life policy for the role. Default: "retain". */
+  /**
+   * End-of-life policy for the role. Default: "retain".
+   *
+   * CloudNativePG only — it becomes `DatabaseRole.spec.databaseRoleReclaimPolicy`.
+   * MariaDB drops it: the equivalent would be mariadb-operator's
+   * `spec.cleanupPolicy`, and adding that field to the `User` and `Grant` CRs of
+   * existing databases could change their deletion semantics on the next apply.
+   */
   readonly reclaimPolicy?: ReclaimPolicy;
   /** Engine-specific options that do not port across engines. */
   readonly engineOptions?: {
@@ -173,11 +180,12 @@ export interface IOperatorDatabaseConfig {
   /**
    * Database owner/username. Default: same as database name.
    *
-   * Honoured by CloudNativePG and Neo4j. **Ignored by MariaDB**, whose owner is
-   * always the database name: mariadb-operator treats `User.spec.name` and
-   * `Grant.spec.username` as immutable, so honouring it would rename only the
-   * replicated connection Secrets and leave applications authenticating as an
-   * account that was never created.
+   * Honoured by CloudNativePG and Neo4j. **Rejected by MariaDB** unless it
+   * equals the database name: mariadb-operator treats `User.spec.name` and
+   * `Grant.spec.username` as immutable, so on an existing database honouring it
+   * would rename only the replicated connection Secrets and leave applications
+   * authenticating as an account that was never created. Use `addRole()` to
+   * create additional MariaDB accounts.
    */
   readonly owner?: string;
   /**

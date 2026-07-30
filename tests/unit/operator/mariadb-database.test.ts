@@ -30,10 +30,40 @@ beforeEach(() => {
   inputsByName = {};
 });
 
-/** Wait for Pulumi's asynchronous resource registrations to reach the mock. */
-async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 250));
+/** How often to re-check whether Pulumi's registrations have reached the mock. */
+const POLL_INTERVAL_MS = 5;
+/** How long to keep polling before declaring a registration lost. */
+const POLL_TIMEOUT_MS = 15_000;
+
+/**
+ * Wait until every named resource has been registered.
+ *
+ * Pulumi registers resources asynchronously, so assertions have to wait for the
+ * mock to see them. Polling for the specific names a test cares about is what
+ * keeps this from being a fixed sleep that a slow CI runner can outrun, and it
+ * reports exactly which registration never arrived.
+ */
+async function awaitRegistered(...names: string[]): Promise<void> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (names.every((name) => registered.includes(name))) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+  const missing = names.filter((name) => !registered.includes(name));
+  throw new Error(`timed out waiting for registrations: ${missing.join(", ")}`);
 }
+
+/** Every logical name one call to `makeDatabase({ namespaces: ["app"] })` registers. */
+const OWNER_RESOURCES = [
+  "shared-maria-analytics-database",
+  "shared-maria-analytics-password-secret",
+  "shared-maria-analytics-password-secret-read",
+  "shared-maria-analytics-user",
+  "shared-maria-analytics-grant",
+  "shared-maria-analytics-secret-app",
+];
 
 /** Build a database instance against mocked Pulumi resources. */
 function makeDatabase(
@@ -114,7 +144,7 @@ describe("createSingleMariadbDatabaseInstance", () => {
     "shared-maria-analytics-secret-app",
   ])("registers %s under its pre-refactor logical name", async (name) => {
     makeDatabase();
-    await settle();
+    await awaitRegistered(name);
 
     expect(registered).toContain(name);
   });
@@ -126,7 +156,7 @@ describe("createSingleMariadbDatabaseInstance", () => {
   // without issuing any Delete against the live Secret — no alias needed.
   it("derives the read-back name from the credential resource", async () => {
     makeDatabase();
-    await settle();
+    await awaitRegistered(...OWNER_RESOURCES);
 
     expect(registered).toContain("shared-maria-analytics-password-secret-read");
     expect(registered).not.toContain("shared-maria-analytics-password-read");
@@ -137,7 +167,7 @@ describe("createSingleMariadbDatabaseInstance", () => {
   // applications already read.
   it("keeps the owner credential Secret password-only", async () => {
     makeDatabase();
-    await settle();
+    await awaitRegistered("shared-maria-analytics-password-secret");
 
     const stringData = inputsByName["shared-maria-analytics-password-secret"]?.["stringData"];
     expect(Object.keys(unwrapSecret(stringData))).toEqual(["password"]);
@@ -145,7 +175,7 @@ describe("createSingleMariadbDatabaseInstance", () => {
 
   it("keeps the owner's pre-refactor Grant spec", async () => {
     makeDatabase();
-    await settle();
+    await awaitRegistered("shared-maria-analytics-grant");
 
     expect(specOf("shared-maria-analytics-grant")).toMatchObject({
       privileges: ["ALL PRIVILEGES"],
@@ -162,23 +192,82 @@ describe("createSingleMariadbDatabaseInstance", () => {
     "omits spec.host from the owner's %s",
     async (name) => {
       makeDatabase();
-      await settle();
+      await awaitRegistered(name);
 
       expect(specOf(name)).not.toHaveProperty("host");
     }
   );
 
-  // `config.owner` is not honoured on MariaDB: the account name is immutable in
-  // the operator, so honouring it would flip only the replicated Secret and
-  // leave applications authenticating as a user that was never created.
-  it("names the owner after the database even when owner is set", async () => {
-    const db = makeDatabase({ namespaces: ["app"], owner: "etl" });
-    await settle();
+  it("names the owner after the database", async () => {
+    const db = makeDatabase();
+    await awaitRegistered(...OWNER_RESOURCES);
 
     expect(specOf("shared-maria-analytics-user")).toMatchObject({ name: "analytics" });
     await expect(unwrap(pulumi.output(db.secrets["app"]))).resolves.toBe(
       "shared-maria-analytics-mariadb"
     );
+  });
+});
+
+// `ignoreChanges` suppresses diffs only on resources that already exist, so
+// honouring `owner` would work on a greenfield stack and break only on upgrade:
+// the account would keep the database's name while `username` and `uri` flipped
+// in every replicated connection Secret. An option whose correctness depends on
+// how old the stack is is worse than one that is refused, so it is refused.
+describe("config.owner", () => {
+  it("rejects an owner that differs from the database name", () => {
+    expect(() => makeDatabase({ namespaces: ["app"], owner: "etl" })).toThrow(AnyCloudError);
+    expect(() => makeDatabase({ namespaces: ["app"], owner: "etl" })).toThrow(
+      /always the database name/
+    );
+  });
+
+  it("reports UNSUPPORTED_ROLE_OPTION and points at addRole()", () => {
+    try {
+      makeDatabase({ namespaces: ["app"], owner: "etl" });
+      expect.unreachable("createDatabase should have thrown for a differing owner");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AnyCloudError);
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
+      expect((error as AnyCloudError).message).toContain('addRole("etl")');
+    }
+  });
+
+  it("provisions nothing before rejecting the owner", async () => {
+    const provider = new k8s.Provider("owner-guard-provider", {});
+    const mariadb = new k8s.apiextensions.CustomResource(
+      "owner-guard-mariadb",
+      {
+        apiVersion: "k8s.mariadb.com/v1alpha1",
+        kind: "MariaDB",
+        metadata: { name: "shared-maria" },
+      },
+      { provider }
+    );
+    await awaitRegistered("owner-guard-mariadb");
+    const before = [...registered];
+
+    expect(() =>
+      createSingleMariadbDatabaseInstance({
+        clusterName: "shared-maria",
+        dbName: "analytics",
+        config: { namespaces: ["app"], owner: "etl" },
+        endpoint: pulumi.output("shared-maria.data.svc.cluster.local"),
+        port: pulumi.output(3306),
+        mariadb,
+        provider,
+      })
+    ).toThrow(AnyCloudError);
+
+    expect(registered).toEqual(before);
+  });
+
+  // An owner spelled out redundantly is the same owner, so it must be accepted.
+  it("accepts an owner equal to the database name", async () => {
+    makeDatabase({ namespaces: ["app"], owner: "analytics" });
+    await awaitRegistered(...OWNER_RESOURCES);
+
+    expect(specOf("shared-maria-analytics-user")).toMatchObject({ name: "analytics" });
   });
 });
 
@@ -209,21 +298,12 @@ describe("addRole", () => {
     }
   });
 
-  // The owner is the database name even when `owner` is configured, so the
-  // guard must key off the database name, not off `config.owner`.
-  it("rejects the database name when an unrelated owner is configured", () => {
-    const addRole = addRoleOf(makeDatabase({ namespaces: ["app"], owner: "etl" }));
-
-    expect(() => addRole("analytics")).toThrow(AnyCloudError);
-  });
-
   it("provisions nothing before rejecting the owner", async () => {
     const addRole = addRoleOf(makeDatabase());
-    await settle();
+    await awaitRegistered(...OWNER_RESOURCES);
     const before = [...registered];
 
     expect(() => addRole("analytics")).toThrow(AnyCloudError);
-    await settle();
 
     expect(registered).toEqual(before);
   });
@@ -254,7 +334,7 @@ describe("addRole", () => {
       namespaces: ["app"],
       grants: [{ privileges: ["select"], schema: "marts" }],
     });
-    await settle();
+    await awaitRegistered("shared-maria-analytics-role-reader-connection-app");
 
     expect(role.name).toBe("reader");
     expect(role.databaseName).toBe("analytics");
@@ -266,7 +346,9 @@ describe("addRole", () => {
     expect(registered).toContain("shared-maria-analytics-role-reader-connection-app");
   });
 
-  it("maps each grant onto its own Grant CR", async () => {
+  // Grant CRs are named for the table they cover, so the pair below lands on
+  // `-grant-all` and `-grant-events` regardless of the order they are listed in.
+  it("maps each grant onto its own Grant CR, named for its table", async () => {
     const db = makeDatabase();
     addRoleOf(db)("reader", {
       grants: [
@@ -274,9 +356,12 @@ describe("addRole", () => {
         { privileges: ["insert", "update"], objects: "events" },
       ],
     });
-    await settle();
+    await awaitRegistered(
+      "shared-maria-analytics-role-reader-grant-all",
+      "shared-maria-analytics-role-reader-grant-events"
+    );
 
-    expect(specOf("shared-maria-analytics-role-reader-grant-0")).toMatchObject({
+    expect(specOf("shared-maria-analytics-role-reader-grant-all")).toMatchObject({
       privileges: ["SELECT"],
       database: "analytics",
       table: "*",
@@ -284,10 +369,35 @@ describe("addRole", () => {
       host: "%",
       grantOption: false,
     });
-    expect(specOf("shared-maria-analytics-role-reader-grant-1")).toMatchObject({
+    expect(specOf("shared-maria-analytics-role-reader-grant-events")).toMatchObject({
       privileges: ["INSERT", "UPDATE"],
       table: "events",
       grantOption: false,
+    });
+  });
+
+  // Reordering the array must not move a grant onto a different logical name —
+  // that would rewrite `spec.table` on a live CR, which the operator's webhook
+  // may refuse outright.
+  it("gives a reordered grants array the identical set of logical names", async () => {
+    addRoleOf(makeDatabase())("reader", {
+      grants: [
+        { privileges: ["insert"], objects: "events" },
+        { privileges: ["select"], objects: "all" },
+      ],
+    });
+    await awaitRegistered(
+      "shared-maria-analytics-role-reader-grant-all",
+      "shared-maria-analytics-role-reader-grant-events"
+    );
+
+    expect(specOf("shared-maria-analytics-role-reader-grant-events")).toMatchObject({
+      privileges: ["INSERT"],
+      table: "events",
+    });
+    expect(specOf("shared-maria-analytics-role-reader-grant-all")).toMatchObject({
+      privileges: ["SELECT"],
+      table: "*",
     });
   });
 
@@ -297,20 +407,25 @@ describe("addRole", () => {
       grants: [{ privileges: ["SELECT"] }],
       engineOptions: { mariadb: { host: "10.0.%", maxUserConnections: 5 } },
     });
-    await settle();
+    await awaitRegistered(
+      "shared-maria-analytics-role-reader-user",
+      "shared-maria-analytics-role-reader-grant-all"
+    );
 
     expect(specOf("shared-maria-analytics-role-reader-user")).toMatchObject({
       name: "reader",
       host: "10.0.%",
       maxUserConnections: 5,
     });
-    expect(specOf("shared-maria-analytics-role-reader-grant-0")).toMatchObject({ host: "10.0.%" });
+    expect(specOf("shared-maria-analytics-role-reader-grant-all")).toMatchObject({
+      host: "10.0.%",
+    });
   });
 
   it("creates no Grant CR for a role with no grants", async () => {
     const db = makeDatabase();
     addRoleOf(db)("reader", { namespaces: ["app"] });
-    await settle();
+    await awaitRegistered("shared-maria-analytics-role-reader-connection-app");
 
     expect(registered).toContain("shared-maria-analytics-role-reader-user");
     expect(registered.some((name) => name.includes("role-reader-grant"))).toBe(false);

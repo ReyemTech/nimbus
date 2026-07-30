@@ -180,6 +180,18 @@ it emits both `GRANT ... ON ALL TABLES IN SCHEMA ...` and
 runs are covered too. On MariaDB it becomes `table: "*"`, which already covers
 later tables without a separate default-privileges concept.
 
+**Sequences (PostgreSQL).** A grant that includes `INSERT`, `UPDATE`, or
+`ALL PRIVILEGES` also grants `USAGE, SELECT` on every current and future
+sequence in the grant's schema. Inserting into a `serial`/`identity` column
+calls `nextval()` on a separate object with its own ACL, so without this every
+such `INSERT` fails with `permission denied for sequence`. The sequence grant is
+schema-wide even when `objects` names one table — a sequence's link to its table
+lives in the catalog and the compiler emits static SQL. Sequence `UPDATE`
+(`setval()`) is never granted, and correspondingly never revoked: the grant
+Job's revoke-then-grant preamble is scoped to exactly the privileges a grant spec
+can ask back, so reconciliation can never strip access that no configuration
+restores. Read-only grants get no sequence privileges.
+
 #### CloudNativePG example
 
 ```typescript

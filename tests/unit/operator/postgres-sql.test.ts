@@ -6,6 +6,30 @@ import {
 } from "../../../src/operator/grants/postgres-sql.js";
 import { AnyCloudError, ERROR_CODES } from "../../../src/types/errors.js";
 
+/** One `REVOKE` the preamble emits: the privileges it strips, and from what. */
+interface IRevokedTarget {
+  /** Privilege list as written, e.g. `"ALL"` or `"USAGE, SELECT"`. */
+  readonly privileges: string;
+  /** Object class the privileges are stripped from, e.g. `"ALL SEQUENCES IN SCHEMA %I"`. */
+  readonly target: string;
+}
+
+/**
+ * Collect every `REVOKE <privileges> ON <target>` the compiled script contains.
+ *
+ * The preamble builds its statements with `format()`, so the targets come back
+ * with `%I` placeholders still in them — which is what makes them comparable
+ * against a fixed expected set regardless of role or schema names.
+ */
+function revokedTargets(sql: string): IRevokedTarget[] {
+  const pattern =
+    /REVOKE ([A-Z][A-Z, ]*?) ON ((?:ALL \w+ IN SCHEMA %I)|(?:SCHEMA %I)|(?:\w+)) FROM/g;
+  return [...sql.matchAll(pattern)].map((match) => ({
+    privileges: match[1] as string,
+    target: match[2] as string,
+  }));
+}
+
 /** Extract the `$tag$` used to open the compiled script's `DO` block. */
 function extractDollarTag(sql: string): string {
   const tag = sql.match(/DO (\$nimbus\d*\$)/)?.[1];
@@ -240,6 +264,106 @@ describe("compileGrantSql", () => {
 
     expect(sql).not.toContain("REVOKE");
     expect(sql).toContain('GRANT SELECT ON ALL TABLES IN SCHEMA "marts" TO "app";');
+  });
+
+  // A write grant is useless on a table with a serial/identity column unless
+  // the column's owning sequence is usable: nextval() checks the sequence's own
+  // ACL, so INSERT alone fails with "permission denied for sequence".
+  it("grants sequence USAGE, SELECT alongside an INSERT grant", () => {
+    const sql = compileGrantSql({
+      role: "app",
+      owner: "etl",
+      grants: [{ privileges: ["SELECT", "INSERT"], schema: "marts", objects: "all" }],
+    });
+
+    expect(sql).toContain('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "marts" TO "app";');
+    expect(sql).toContain(
+      'ALTER DEFAULT PRIVILEGES FOR ROLE "etl" IN SCHEMA "marts" ' +
+        'GRANT USAGE, SELECT ON SEQUENCES TO "app";'
+    );
+  });
+
+  it.each(["UPDATE", "ALL PRIVILEGES"])("grants sequences for a %s grant too", (privilege) => {
+    const sql = compileGrantSql({
+      role: "app",
+      owner: "etl",
+      grants: [{ privileges: [privilege], schema: "marts" }],
+    });
+
+    expect(sql).toContain('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "marts" TO "app";');
+  });
+
+  // A read-only role has no use for a sequence and must not be silently widened.
+  it.each(["SELECT", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"])(
+    "grants no sequence privileges for a %s-only grant",
+    (privilege) => {
+      const sql = compileGrantSql({
+        role: "reader",
+        owner: "etl",
+        grants: [{ privileges: [privilege], schema: "marts" }],
+      });
+
+      expect(sql).not.toContain("GRANT USAGE, SELECT ON ALL SEQUENCES");
+    }
+  );
+
+  it("grants a schema's sequences once even for several write grants in it", () => {
+    const sql = compileGrantSql({
+      role: "app",
+      owner: "etl",
+      grants: [
+        { privileges: ["INSERT"], schema: "marts", objects: "orders" },
+        { privileges: ["UPDATE"], schema: "marts", objects: "invoices" },
+      ],
+    });
+
+    const occurrences = sql.split('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "marts"').length;
+    expect(occurrences - 1).toBe(1);
+  });
+
+  // The invariant that makes reconciliation safe: convergence works by revoking
+  // everything first, so a privilege the preamble strips but no grant spec can
+  // ask back is lost permanently the first time any grant is reconciled. This
+  // pins the revoked set to exactly the privileges the grant path can restore —
+  // adding a REVOKE without a matching GRANT fails here.
+  it("never revokes a privilege the grant path cannot restore", () => {
+    // A maximal spec: every privilege the API accepts, on every object.
+    const sql = compileGrantSql({
+      role: "app",
+      owner: "etl",
+      grants: [{ privileges: ["ALL PRIVILEGES"], schema: "public", objects: "all" }],
+    });
+
+    expect(revokedTargets(sql)).toEqual([
+      { privileges: "ALL", target: "ALL TABLES IN SCHEMA %I" },
+      { privileges: "USAGE, SELECT", target: "ALL SEQUENCES IN SCHEMA %I" },
+      { privileges: "USAGE", target: "SCHEMA %I" },
+      { privileges: "ALL", target: "TABLES" },
+      { privileges: "USAGE, SELECT", target: "SEQUENCES" },
+    ]);
+
+    // ...and each of those five is put back by the maximal spec.
+    expect(sql).toContain('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA "public" TO "app";');
+    expect(sql).toContain('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "public" TO "app";');
+    expect(sql).toContain('GRANT USAGE ON SCHEMA "public" TO "app";');
+    expect(sql).toContain(
+      'ALTER DEFAULT PRIVILEGES FOR ROLE "etl" IN SCHEMA "public" ' +
+        'GRANT ALL PRIVILEGES ON TABLES TO "app";'
+    );
+    expect(sql).toContain(
+      'ALTER DEFAULT PRIVILEGES FOR ROLE "etl" IN SCHEMA "public" ' +
+        'GRANT USAGE, SELECT ON SEQUENCES TO "app";'
+    );
+  });
+
+  // Schema CREATE and sequence UPDATE (setval) are the two privileges no grant
+  // spec can express, so the preamble deliberately leaves them alone rather
+  // than stripping access nothing can hand back.
+  it("leaves schema CREATE and sequence UPDATE untouched", () => {
+    const sql = compileGrantSql({ role: "reader", owner: "etl", grants: [] });
+
+    expect(sql).not.toContain("REVOKE ALL ON SCHEMA");
+    expect(sql).not.toContain("REVOKE ALL ON ALL SEQUENCES");
   });
 
   it("still avoids collision when both role and owner contain the base tag", () => {

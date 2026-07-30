@@ -47,6 +47,33 @@ const ALLOWED_PRIVILEGES: ReadonlySet<string> = new Set([
   "ALL PRIVILEGES",
 ]);
 
+/**
+ * Privileges whose holder needs the schema's sequences to be usable.
+ *
+ * Inserting into a `serial`/`identity` column calls `nextval()` on the column's
+ * owning sequence, which is a separate object with its own ACL: without
+ * `USAGE` on it every such `INSERT` fails with `permission denied for
+ * sequence`. `UPDATE` is included because updating a key column can call
+ * `nextval()` the same way, and `ALL PRIVILEGES` because it subsumes both.
+ * `SELECT`, `DELETE`, `TRUNCATE`, `REFERENCES`, and `TRIGGER` never consume a
+ * sequence value, so a read-only role is not silently widened.
+ */
+const SEQUENCE_IMPLYING_PRIVILEGES: ReadonlySet<string> = new Set([
+  "INSERT",
+  "UPDATE",
+  "ALL PRIVILEGES",
+]);
+
+/**
+ * Privileges granted on sequences for a role that holds a write grant.
+ *
+ * `USAGE` is what `nextval()` requires; `SELECT` allows reading the current
+ * value (`currval`). `UPDATE` — which would let the role `setval()` a sequence
+ * to an arbitrary value — is deliberately excluded, and correspondingly never
+ * revoked. See {@link compileGrantSql} for the invariant that ties the two.
+ */
+const SEQUENCE_PRIVILEGES = "USAGE, SELECT";
+
 /** Sentinel meaning "every current and future object in the schema". */
 const ALL_OBJECTS = "all";
 /** Schema used for a grant when {@link IDatabaseGrant.schema} is omitted. */
@@ -150,6 +177,17 @@ function chooseDollarTag(values: ReadonlyArray<string>): string {
 /**
  * Compile a grant spec into an idempotent, transactional SQL script.
  *
+ * **Invariant: the revoke preamble never strips a privilege the grant path
+ * cannot restore.** Convergence only works if every privilege the preamble
+ * removes can be put back by some grant this compiler is able to emit —
+ * otherwise a role loses access permanently the first time any grant is
+ * reconciled, with no configuration that brings it back. The preamble is
+ * therefore scoped to exactly three things: all privileges on tables (restored
+ * by `ALL PRIVILEGES`), `USAGE, SELECT` on sequences (restored alongside any
+ * write grant, see {@link SEQUENCE_IMPLYING_PRIVILEGES}), and `USAGE` on the
+ * schema (restored for every grant). Schema `CREATE` and sequence `UPDATE` are
+ * left alone precisely because nothing here can grant them.
+ *
  * When `role` and `owner` name the same role the revoke preamble is omitted:
  * an owner's rights over its own objects are ordinary ACL entries it is
  * allowed to revoke from itself, so reconciling "the owner holds exactly these
@@ -178,13 +216,18 @@ export function compileGrantSql(options: ICompileOptions): string {
 
   const statements: string[] = ["BEGIN;"];
 
-  // Revoke every privilege the role currently holds, discovered at runtime.
+  // Revoke the privileges the role currently holds, discovered at runtime.
   // Every non-system schema is visited unconditionally (not just ones the
   // role currently has USAGE on) so that privileges surviving under a
   // separately-revoked schema are still caught — REVOKE against a schema the
   // role holds nothing in is a harmless no-op. format(%I) quotes
   // identifiers; the role/owner names are passed as literal parameters to
   // format rather than concatenated into DDL.
+  //
+  // What is revoked is bounded by what the grant loop below can emit: tables
+  // (any privilege), sequences (USAGE, SELECT), and schema USAGE. Schema
+  // CREATE and sequence UPDATE are untouched because no grant spec can ask
+  // for them back — see the invariant documented on this function.
   //
   // Skipped entirely when the role IS the owner. PostgreSQL records an owner's
   // rights over its own objects as ordinary entries in the object's ACL, and a
@@ -210,9 +253,10 @@ export function compileGrantSql(options: ICompileOptions): string {
         "      AND nspname <> 'information_schema'",
         "  LOOP",
         `    EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM %I', s.nspname, ${lRole});`,
-        `    EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM %I', s.nspname, ${lRole});`,
-        `    EXECUTE format('REVOKE ALL ON SCHEMA %I FROM %I', s.nspname, ${lRole});`,
+        `    EXECUTE format('REVOKE ${SEQUENCE_PRIVILEGES} ON ALL SEQUENCES IN SCHEMA %I FROM %I', s.nspname, ${lRole});`,
+        `    EXECUTE format('REVOKE USAGE ON SCHEMA %I FROM %I', s.nspname, ${lRole});`,
         `    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I REVOKE ALL ON TABLES FROM %I', ${lOwner}, s.nspname, ${lRole});`,
+        `    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I REVOKE ${SEQUENCE_PRIVILEGES} ON SEQUENCES FROM %I', ${lOwner}, s.nspname, ${lRole});`,
         "  END LOOP;",
         "END",
         `$${tag}$;`,
@@ -220,8 +264,13 @@ export function compileGrantSql(options: ICompileOptions): string {
     );
   }
 
+  // Schemas whose sequences have already been granted, so two write grants in
+  // the same schema emit the sequence statements once rather than twice.
+  const sequenceGrantedSchemas = new Set<string>();
+
   for (const grant of grants) {
-    const privileges = grant.privileges.map(normalizePrivilege).join(", ");
+    const normalized = grant.privileges.map(normalizePrivilege);
+    const privileges = normalized.join(", ");
     const schema = grant.schema ?? DEFAULT_SCHEMA;
     const qSchema = quoteIdentifier(schema);
     const objects = grant.objects ?? ALL_OBJECTS;
@@ -236,6 +285,27 @@ export function compileGrantSql(options: ICompileOptions): string {
       );
     } else {
       statements.push(`GRANT ${privileges} ON ${qSchema}.${quoteIdentifier(objects)} TO ${qRole};`);
+    }
+
+    // A write grant is useless on a table with a serial/identity column unless
+    // the column's sequence is usable too, so the sequences of the grant's
+    // schema come with it. They are granted schema-wide even for an
+    // object-scoped grant: a sequence is a separate object whose link to its
+    // table lives in pg_depend, and this compiler emits static SQL rather than
+    // introspecting the catalog. The privileges are the narrow
+    // read-and-advance pair, never sequence UPDATE (`setval`).
+    if (
+      !sequenceGrantedSchemas.has(schema) &&
+      normalized.some((privilege) => SEQUENCE_IMPLYING_PRIVILEGES.has(privilege))
+    ) {
+      sequenceGrantedSchemas.add(schema);
+      statements.push(
+        `GRANT ${SEQUENCE_PRIVILEGES} ON ALL SEQUENCES IN SCHEMA ${qSchema} TO ${qRole};`
+      );
+      statements.push(
+        `ALTER DEFAULT PRIVILEGES FOR ROLE ${qOwner} IN SCHEMA ${qSchema} ` +
+          `GRANT ${SEQUENCE_PRIVILEGES} ON SEQUENCES TO ${qRole};`
+      );
     }
   }
 

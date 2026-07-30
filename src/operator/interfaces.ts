@@ -35,7 +35,22 @@ export type ReclaimPolicy = "retain" | "delete";
  * ```
  */
 export interface IDatabaseGrant {
-  /** Privileges to grant (e.g. ["SELECT"], ["SELECT", "INSERT"]). */
+  /**
+   * Privileges to grant (e.g. ["SELECT"], ["SELECT", "INSERT"]).
+   *
+   * On PostgreSQL a grant that includes `INSERT`, `UPDATE`, or
+   * `ALL PRIVILEGES` additionally grants `USAGE, SELECT` on **every current
+   * and future sequence in the grant's schema**, because inserting into a
+   * `serial`/`identity` column calls `nextval()` on a separate object with its
+   * own ACL — without it every such `INSERT` fails with
+   * `permission denied for sequence`. The sequence grant is schema-wide even
+   * when `objects` names a single table: a sequence's link to its table lives
+   * in the catalog, and the compiler emits static SQL. Sequence `UPDATE`
+   * (`setval()`) is never granted, and correspondingly never revoked.
+   *
+   * A read-only grant (`SELECT` alone, `DELETE`, `TRUNCATE`, `REFERENCES`,
+   * `TRIGGER`) gets no sequence privileges.
+   */
   readonly privileges: string[];
   /**
    * Schema to scope the grant to. PostgreSQL only; ignored by engines without

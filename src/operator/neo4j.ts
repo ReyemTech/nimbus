@@ -26,11 +26,14 @@ import type {
 } from "./interfaces";
 import { createNeo4jClusterDashboard } from "../observability/dashboards";
 import { createPrometheusRule } from "../observability/alerts";
-
-const DATA_NAMESPACE = "data";
-const NEO4J_BOLT_PORT = 7687;
-const NEO4J_HTTP_PORT = 7474;
-const NEO4J_METRICS_PORT = 2004;
+import {
+  DATA_NAMESPACE,
+  MANAGED_BY_LABEL,
+  MANAGED_BY_VALUE,
+  NEO4J_BOLT_PORT,
+  NEO4J_METRICS_PORT,
+} from "./neo4j-common.js";
+import { createSingleNeo4jDatabaseInstance } from "./neo4j-database.js";
 
 /** Neo4j-specific cluster config. */
 export interface INeo4jClusterConfig {
@@ -156,7 +159,7 @@ export function createNeo4jCluster(
       metadata: {
         name: passwordSecretName,
         namespace: DATA_NAMESPACE,
-        labels: { "app.kubernetes.io/managed-by": "nimbus" },
+        labels: { [MANAGED_BY_LABEL]: MANAGED_BY_VALUE },
       },
       stringData: {
         NEO4J_AUTH: pulumi.interpolate`neo4j/${neo4jPassword}`,
@@ -205,7 +208,7 @@ export function createNeo4jCluster(
         metadata: {
           name: backupCredsName,
           namespace: DATA_NAMESPACE,
-          labels: { "app.kubernetes.io/managed-by": "nimbus" },
+          labels: { [MANAGED_BY_LABEL]: MANAGED_BY_VALUE },
         },
         stringData: {
           AWS_ACCESS_KEY_ID: backupDefaults.target.credentials.accessKeyId,
@@ -223,7 +226,7 @@ export function createNeo4jCluster(
         metadata: {
           name: `${name}-neo4j-backup`,
           namespace: DATA_NAMESPACE,
-          labels: { "app.kubernetes.io/managed-by": "nimbus" },
+          labels: { [MANAGED_BY_LABEL]: MANAGED_BY_VALUE },
         },
         spec: {
           schedule: backupSchedule,
@@ -237,7 +240,7 @@ export function createNeo4jCluster(
               template: {
                 metadata: {
                   labels: {
-                    "app.kubernetes.io/managed-by": "nimbus",
+                    [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
                     "nimbus/cluster": name,
                     "nimbus/backup": "neo4j",
                   },
@@ -363,149 +366,23 @@ export function createNeo4jCluster(
       dbName: string,
       dbConfig: IOperatorDatabaseConfig
     ): IDatabaseInstance & Record<string, IDatabaseInstance> {
-      const username = dbConfig.owner ?? dbName;
-      const userSecretName = `${name}-${dbName}-neo4j-user`;
-
-      // Generate per-database user password
-      const userPassword = pulumi.secret(crypto.randomBytes(24).toString("base64url"));
-      const userPasswordSecret = new k8s.core.v1.Secret(
-        `${name}-${dbName}-neo4j-password`,
-        {
-          metadata: {
-            name: userSecretName,
-            namespace: DATA_NAMESPACE,
-            labels: {
-              "app.kubernetes.io/managed-by": "nimbus",
-              "nimbus/cluster": name,
-              "nimbus/database": dbName,
-            },
-          },
-          stringData: { username, password: userPassword },
-        },
-        { provider, dependsOn: [release], ignoreChanges: ["data", "stringData"] }
-      );
-
-      // Read stored password for stability across deploys
-      const storedUserSecret = k8s.core.v1.Secret.get(
-        `${name}-${dbName}-neo4j-user-read`,
-        pulumi.interpolate`${DATA_NAMESPACE}/${userSecretName}`,
-        { provider, dependsOn: [userPasswordSecret] }
-      );
-      const stablePassword = storedUserSecret.data.apply((d) =>
-        Buffer.from(d?.["password"] ?? "", "base64").toString()
-      );
-
-      // Job: create user via cypher-shell
-      const jobName = `neo4j-init-user-${name}-${dbName}`;
-      const initJob = new k8s.batch.v1.Job(
-        jobName,
-        {
-          metadata: {
-            name: jobName,
-            namespace: DATA_NAMESPACE,
-            labels: {
-              "app.kubernetes.io/managed-by": "nimbus",
-              "nimbus/cluster": name,
-              "nimbus/database": dbName,
-            },
-          },
-          spec: {
-            ttlSecondsAfterFinished: 300,
-            backoffLimit: 5,
-            template: {
-              metadata: { labels: { "nimbus/database": dbName } },
-              spec: {
-                restartPolicy: "Never",
-                containers: [
-                  {
-                    name: "cypher-shell",
-                    image: "neo4j:community",
-                    command: [
-                      "sh",
-                      "-c",
-                      [
-                        `cypher-shell -a "bolt://$NEO4J_HOST:${NEO4J_BOLT_PORT}" -u neo4j -p "$NEO4J_ADMIN_PASSWORD" "CREATE USER \\\`$DB_USER\\\` IF NOT EXISTS SET PLAINTEXT PASSWORD '$DB_PASSWORD' SET PASSWORD CHANGE NOT REQUIRED"`,
-                        // GRANT ROLE is Enterprise-only; gracefully skip on Community
-                        `cypher-shell -a "bolt://$NEO4J_HOST:${NEO4J_BOLT_PORT}" -u neo4j -p "$NEO4J_ADMIN_PASSWORD" "GRANT ROLE reader, editor TO \\\`$DB_USER\\\`" || true`,
-                      ].join(" && "),
-                    ],
-                    env: [
-                      { name: "NEO4J_HOST", value: endpoint },
-                      {
-                        name: "NEO4J_ADMIN_PASSWORD",
-                        valueFrom: {
-                          secretKeyRef: { name: passwordSecretName, key: "password" },
-                        },
-                      },
-                      { name: "DB_USER", value: username },
-                      {
-                        name: "DB_PASSWORD",
-                        valueFrom: {
-                          secretKeyRef: { name: userSecretName, key: "password" },
-                        },
-                      },
-                    ],
-                  },
-                ],
-              },
-            },
-          },
-        },
-        { provider, dependsOn: [release, userPasswordSecret] }
-      );
-
-      // Replicate connection secrets to target namespaces
-      const secrets: Record<string, pulumi.Output<string>> = {};
-
-      for (const targetNs of dbConfig.namespaces) {
-        const nsResource = ensureNamespace(targetNs, provider);
-        const secretName = `${name}-${dbName}-neo4j`;
-
-        new k8s.core.v1.Secret(
-          `${name}-${dbName}-neo4j-secret-${targetNs}`,
-          {
-            metadata: {
-              name: secretName,
-              namespace: targetNs,
-              labels: {
-                "app.kubernetes.io/managed-by": "nimbus",
-                "nimbus/cluster": name,
-                "nimbus/database": dbName,
-              },
-            },
-            stringData: {
-              host: endpoint,
-              port: String(NEO4J_BOLT_PORT),
-              httpPort: String(NEO4J_HTTP_PORT),
-              username,
-              password: stablePassword,
-              database: dbName,
-              uri: pulumi
-                .all([endpoint, stablePassword])
-                .apply(([h, pw]) => `bolt://${username}:${pw}@${h}:${NEO4J_BOLT_PORT}`),
-              // App-friendly keys (mountable as envFrom without key remapping)
-              NEO4J_URI: pulumi.interpolate`neo4j://${endpoint}:${NEO4J_BOLT_PORT}`,
-              NEO4J_USERNAME: username,
-              NEO4J_PASSWORD: stablePassword,
-              NEO4J_DATABASE: dbName,
-            },
-          },
-          { provider, dependsOn: [initJob, nsResource] }
-        );
-
-        secrets[targetNs] = pulumi.output(secretName);
-      }
-
-      return {
-        name: dbName,
+      // Neo4j has never supported per-environment databases: the Community
+      // edition allows exactly one user database, so `environments` is dropped
+      // here rather than fanned out the way CNPG and MariaDB fan it out.
+      const { environments: _environments, ...cleanConfig } = dbConfig;
+      const instance = createSingleNeo4jDatabaseInstance({
         clusterName: name,
-        host: endpoint,
+        dbName,
+        config: cleanConfig,
+        endpoint,
         port,
-        database: pulumi.output(dbName),
-        secrets,
-        nativeResource: initJob,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any;
+        adminSecretName: passwordSecretName,
+        release,
+        provider,
+      });
+      // Runtime: always a single instance. The overload signatures on
+      // IClusterInstance narrow the type for callers.
+      return instance as IDatabaseInstance & Record<string, IDatabaseInstance>;
     },
   };
 }

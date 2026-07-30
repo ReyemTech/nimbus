@@ -1,7 +1,10 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import * as pulumi from "@pulumi/pulumi";
 import * as k8s from "@pulumi/kubernetes";
-import { createSingleNeo4jDatabaseInstance } from "../../../src/operator/neo4j-database.js";
+import {
+  assertNoEnvironments,
+  createSingleNeo4jDatabaseInstance,
+} from "../../../src/operator/neo4j-database.js";
 import type { IDatabaseInstance } from "../../../src/operator/interfaces.js";
 import { AnyCloudError, ERROR_CODES } from "../../../src/types/errors.js";
 
@@ -195,6 +198,13 @@ describe("createSingleNeo4jDatabaseInstance", () => {
     expect(jobScriptOf("neo4j-init-user-shared-neo4j-graph")).toContain("CREATE USER");
   });
 
+  // config.owner was the only way an unsafe identifier could reach the Cypher
+  // statement before addRole() existed; it is validated on the same choke point.
+  it("rejects a config.owner that would break out of Cypher identifier quoting", () => {
+    expect(() => makeDatabase({ namespaces: ["app"], owner: "et`l" })).toThrow(AnyCloudError);
+    expect(() => makeDatabase({ namespaces: ["app"], owner: "et`l" })).toThrow(/backtick/);
+  });
+
   it("replicates a connection Secret naming the database", async () => {
     const db = makeDatabase();
     await awaitRegistered(...OWNER_RESOURCES);
@@ -221,6 +231,38 @@ describe("provisioning Job script", () => {
     expect(script).not.toContain("GRANT ROLE");
     expect(script).not.toContain("|| true");
     expect(script.match(/cypher-shell/g)).toHaveLength(1);
+  });
+});
+
+// Accepting `environments` and dropping it returned one instance where the
+// caller's types promised a Record keyed by environment, so `db["prod"]` was
+// undefined at runtime with nothing to explain it.
+describe("assertNoEnvironments", () => {
+  it("rejects environments, which Neo4j cannot fan a database out across", () => {
+    expect(() =>
+      assertNoEnvironments("graph", {
+        namespaces: ["app"],
+        environments: { prod: { namespaces: ["prod"] } },
+      })
+    ).toThrow(AnyCloudError);
+  });
+
+  it("reports UNSUPPORTED_ROLE_OPTION and names the database", () => {
+    try {
+      assertNoEnvironments("graph", {
+        namespaces: ["app"],
+        environments: { prod: {} },
+      });
+      expect.unreachable("assertNoEnvironments should have thrown");
+    } catch (error) {
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
+      expect((error as AnyCloudError).message).toContain('"graph"');
+      expect((error as AnyCloudError).message).toContain("single user database");
+    }
+  });
+
+  it("accepts a config without environments", () => {
+    expect(() => assertNoEnvironments("graph", { namespaces: ["app"] })).not.toThrow();
   });
 });
 
@@ -335,6 +377,26 @@ describe("addRole", () => {
     } catch (error) {
       expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
     }
+  });
+
+  // The role name lands between escaped backticks in the Job's Cypher
+  // `CREATE USER` statement, so a backtick in it would close the identifier and
+  // let the rest of the name run as Cypher.
+  it("rejects a role name that would break out of Cypher identifier quoting", () => {
+    const db = makeDatabase();
+
+    expect(() => db.addRole("x` SET PASSWORD 'pwned' //")).toThrow(AnyCloudError);
+    expect(() => db.addRole("x` SET PASSWORD 'pwned' //")).toThrow(/backtick/);
+  });
+
+  it("provisions nothing before rejecting an unsafe role name", async () => {
+    const db = makeDatabase();
+    await awaitRegistered(...OWNER_RESOURCES);
+    const before = [...registered];
+
+    expect(() => db.addRole("read`er")).toThrow(AnyCloudError);
+
+    expect(registered).toEqual(before);
   });
 
   it("returns the role with its replicated Secrets", async () => {

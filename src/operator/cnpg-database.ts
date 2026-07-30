@@ -27,7 +27,7 @@ import {
   replicateCnpgConnectionSecrets,
 } from "./cnpg-roles.js";
 import { createPostgresGrantJob } from "./grants/postgres-job.js";
-import { resolveRoleConfig } from "./grants/role-config.js";
+import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type {
   IDatabaseInstance,
@@ -84,6 +84,7 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
   const { clusterName, dbName, config, endpoint, port, pgVersion, cluster, provider } = options;
 
   const username = config.owner ?? dbName;
+  assertValidRoleName(username, dbName);
   const labels = {
     [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
     "nimbus/cluster": clusterName,
@@ -175,6 +176,8 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
     nativeResource: database,
 
     addRole(roleName: string, roleConfig?: IDatabaseRoleConfig): IDatabaseRole {
+      assertValidRoleName(roleName, dbName);
+
       // The owner already has a DatabaseRole CR from createDatabase(). Adding
       // it again would create a SECOND CR for the same PostgreSQL role, bound
       // to a different basic-auth Secret, and the two controllers would then

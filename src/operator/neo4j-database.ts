@@ -24,7 +24,7 @@ import {
   provisionNeo4jRole,
   replicateNeo4jConnectionSecrets,
 } from "./neo4j-roles.js";
-import { resolveRoleConfig } from "./grants/role-config.js";
+import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type {
   IDatabaseInstance,
@@ -32,6 +32,30 @@ import type {
   IDatabaseRoleConfig,
   IOperatorDatabaseConfig,
 } from "./interfaces.js";
+
+/**
+ * Reject `environments`, which Neo4j cannot fan a database out across.
+ *
+ * CNPG and MariaDB create one database per environment named `{db}-{env}` and
+ * return a Record of them. Neo4j Community allows a single user database, so
+ * there is nothing to fan out. The option used to be accepted and silently
+ * dropped, which returned one instance where the caller's types promised a
+ * Record — leaving `db["prod"]` undefined at runtime with nothing to explain it.
+ *
+ * @param dbName - Database the configuration belongs to
+ * @param config - Raw per-database configuration
+ * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `environments` is set
+ */
+export function assertNoEnvironments(dbName: string, config: IOperatorDatabaseConfig): void {
+  if (config.environments) {
+    throw new AnyCloudError(
+      `Database "${dbName}" cannot use "environments" on Neo4j — the Community edition ` +
+        "allows a single user database, so there is nothing to fan out. Create one Neo4j " +
+        "cluster per environment instead.",
+      ERROR_CODES.UNSUPPORTED_ROLE_OPTION
+    );
+  }
+}
 
 /** Inputs for {@link createSingleNeo4jDatabaseInstance}. */
 export interface INeo4jDatabaseOptions {
@@ -74,6 +98,7 @@ export function createSingleNeo4jDatabaseInstance(
     options;
 
   const username = config.owner ?? dbName;
+  assertValidRoleName(username, dbName);
   const labels = {
     [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
     "nimbus/cluster": clusterName,
@@ -117,6 +142,11 @@ export function createSingleNeo4jDatabaseInstance(
     nativeResource: owner.initJob,
 
     addRole(roleName: string, roleConfig?: IDatabaseRoleConfig): IDatabaseRole {
+      // The name lands between escaped backticks in the Job's Cypher
+      // `CREATE USER` statement, so a backtick in it would break out of the
+      // identifier quoting.
+      assertValidRoleName(roleName, dbName);
+
       // The owner's account is already created by createDatabase(). Adding it
       // again would create a SECOND Job issuing `CREATE USER ... IF NOT EXISTS`
       // for the same username, bound to a different password Secret. `IF NOT

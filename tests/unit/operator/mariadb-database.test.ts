@@ -430,4 +430,14 @@ describe("addRole", () => {
     expect(registered).toContain("shared-maria-analytics-role-reader-user");
     expect(registered.some((name) => name.includes("role-reader-grant"))).toBe(false);
   });
+  // Validation lives in one shared choke point (`assertValidRoleName`) rather
+  // than being argued separately per engine. MariaDB routes privileges through
+  // Grant CRs rather than SQL, so this is defence in depth here — but the guard
+  // must be wired in, and that is what this asserts.
+  it("rejects a role name containing an identifier quote character", () => {
+    const addRole = addRoleOf(makeDatabase());
+
+    expect(() => addRole("read`er")).toThrow(AnyCloudError);
+    expect(() => addRole("read`er")).toThrow(/backtick/);
+  });
 });

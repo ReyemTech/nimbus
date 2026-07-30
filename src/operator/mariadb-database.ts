@@ -27,7 +27,7 @@ import {
   replicateMariadbConnectionSecrets,
   toMariadbGrants,
 } from "./mariadb-roles.js";
-import { resolveRoleConfig } from "./grants/role-config.js";
+import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type {
   IDatabaseInstance,
@@ -107,6 +107,7 @@ export function createSingleMariadbDatabaseInstance(
     );
   }
   const username = dbName;
+  assertValidRoleName(username, dbName);
   const labels = {
     [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
     "nimbus/cluster": clusterName,
@@ -176,6 +177,8 @@ export function createSingleMariadbDatabaseInstance(
     nativeResource: database,
 
     addRole(roleName: string, roleConfig?: IDatabaseRoleConfig): IDatabaseRole {
+      assertValidRoleName(roleName, dbName);
+
       // The owner already has a User CR from createDatabase(). Adding it again
       // would create a SECOND CR for the same MariaDB account, bound to a
       // different password Secret, and the two would then reconcile that

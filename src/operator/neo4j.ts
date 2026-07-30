@@ -33,7 +33,7 @@ import {
   NEO4J_BOLT_PORT,
   NEO4J_METRICS_PORT,
 } from "./neo4j-common.js";
-import { createSingleNeo4jDatabaseInstance } from "./neo4j-database.js";
+import { assertNoEnvironments, createSingleNeo4jDatabaseInstance } from "./neo4j-database.js";
 
 /** Neo4j-specific cluster config. */
 export interface INeo4jClusterConfig {
@@ -366,9 +366,7 @@ export function createNeo4jCluster(
       dbName: string,
       dbConfig: IOperatorDatabaseConfig
     ): IDatabaseInstance & Record<string, IDatabaseInstance> {
-      // Neo4j has never supported per-environment databases: the Community
-      // edition allows exactly one user database, so `environments` is dropped
-      // here rather than fanned out the way CNPG and MariaDB fan it out.
+      assertNoEnvironments(dbName, dbConfig);
       const { environments: _environments, ...cleanConfig } = dbConfig;
       const instance = createSingleNeo4jDatabaseInstance({
         clusterName: name,

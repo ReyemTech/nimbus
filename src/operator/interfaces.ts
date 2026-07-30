@@ -26,6 +26,66 @@ export type EnvironmentOverrides<T> = Record<string, Partial<T>>;
  */
 export type ReclaimPolicy = "retain" | "delete";
 
+/**
+ * A privilege grant on a database, portable across engines that model privileges.
+ *
+ * @example Read-only access to every current and future table in a schema
+ * ```typescript
+ * { privileges: ["SELECT"], schema: "marts", objects: "all" }
+ * ```
+ */
+export interface IDatabaseGrant {
+  /** Privileges to grant (e.g. ["SELECT"], ["SELECT", "INSERT"]). */
+  readonly privileges: string[];
+  /** Schema to scope the grant to. PostgreSQL only; ignored by engines without schemas. */
+  readonly schema?: string;
+  /** A specific object name, or every current and future object when "all". Default: "all". */
+  readonly objects?: string;
+}
+
+/** Configuration for a role created via {@link IDatabaseInstance.addRole}. */
+export interface IDatabaseRoleConfig {
+  /** Namespaces to replicate the credential Secret into. */
+  readonly namespaces?: string[];
+  /** Whether the role can log in. Default: true. */
+  readonly login?: boolean;
+  /** Privileges granted to this role on the owning database. */
+  readonly grants?: IDatabaseGrant[];
+  /** End-of-life policy for the role. Default: "retain". */
+  readonly reclaimPolicy?: ReclaimPolicy;
+  /** Engine-specific options that do not port across engines. */
+  readonly engineOptions?: {
+    readonly postgresql?: {
+      /** Existing roles this role becomes a member of (e.g. ["pg_read_all_data"]). */
+      readonly inRoles?: string[];
+      /** Maximum concurrent connections. Default: unlimited. */
+      readonly connectionLimit?: number;
+      /** Timestamp after which the password expires. */
+      readonly validUntil?: string;
+    };
+    readonly mariadb?: {
+      /** Host pattern the user may connect from. Default: "%". */
+      readonly host?: string;
+      /** Maximum concurrent connections. Default: 100. */
+      readonly maxUserConnections?: number;
+    };
+  };
+}
+
+/** A role provisioned within a database. */
+export interface IDatabaseRole {
+  /** Role name as it exists in the database engine. */
+  readonly name: string;
+  /** Database this role was created for. */
+  readonly databaseName: string;
+  /** Cluster the database belongs to. */
+  readonly clusterName: string;
+  /** Secrets created in target namespaces (namespace → secret name). */
+  readonly secrets: Record<string, pulumi.Output<string>>;
+  /** Underlying Pulumi resource for dependency wiring. */
+  readonly nativeResource: pulumi.Resource;
+}
+
 /** Supported Kubernetes database operators. */
 export type OperatorType = "cloudnative-pg" | "mariadb-operator" | "minio" | "neo4j";
 
@@ -136,6 +196,20 @@ export interface IDatabaseInstance {
   readonly secrets: Record<string, pulumi.Output<string>>;
   /** Underlying Pulumi resource for dependency wiring. */
   readonly nativeResource: pulumi.Resource;
+  /**
+   * Create an additional role/user on this database with a generated password,
+   * replicating a connection Secret into the given namespaces.
+   *
+   * Optional until every backend (CloudNativePG, MariaDB, Neo4j) implements it;
+   * it becomes required once all three do.
+   *
+   * @param name - Role name as it will exist in the database engine
+   * @param config - Namespaces, login flag, grants, and engine-specific options
+   * @returns The provisioned role with its replicated Secret references
+   * @throws {AnyCloudError} with code `UNSUPPORTED_ROLE_OPTION` when `grants` is
+   *   passed to an engine that cannot express privileges (Neo4j Community).
+   */
+  addRole?(name: string, config?: IDatabaseRoleConfig): IDatabaseRole;
 }
 
 /** A database cluster instance created by an operator. */

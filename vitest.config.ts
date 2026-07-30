@@ -17,7 +17,7 @@ export default defineConfig({
         "src/observability/stack.ts",
         "src/observability/dashboards.ts",
         "src/backup/**",
-        "src/operator/**",
+        "src/operator/*.ts",
         "src/cache/cache.ts",
         "src/cli.ts",
         "src/cli/**",

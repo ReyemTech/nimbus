@@ -4,7 +4,7 @@
  * @module operator/grants/role-config
  */
 
-import { AnyCloudError } from "../../types/errors.js";
+import { AnyCloudError, ERROR_CODES } from "../../types/errors.js";
 import type { IDatabaseGrant, IDatabaseRoleConfig, ReclaimPolicy } from "../interfaces.js";
 
 /** Role configuration with all defaults applied. */
@@ -30,7 +30,10 @@ export function resolveRoleConfig(config?: IDatabaseRoleConfig): IResolvedRoleCo
 
   for (const grant of grants) {
     if (grant.privileges.length === 0) {
-      throw new AnyCloudError("Each grant must list at least one privilege.", "INVALID_GRANT");
+      throw new AnyCloudError(
+        "Each grant must list at least one privilege.",
+        ERROR_CODES.INVALID_GRANT
+      );
     }
   }
 

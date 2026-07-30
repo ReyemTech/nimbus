@@ -33,7 +33,7 @@ describe("resolveRoleConfig", () => {
     expect(resolved.grants).toHaveLength(1);
   });
 
-  it("rejects an empty role name at the call boundary", () => {
+  it("rejects a grant that lists no privileges", () => {
     expect(() => resolveRoleConfig({ grants: [{ privileges: [] }] })).toThrow(
       /at least one privilege/i
     );

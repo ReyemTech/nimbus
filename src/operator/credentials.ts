@@ -23,14 +23,18 @@ export interface IRoleCredentialOptions {
   readonly secretName: string;
   /** Namespace to create the Secret in. */
   readonly namespace: string;
-  /** Database username stored alongside the password. */
-  readonly username: string;
+  /**
+   * Database username stored alongside the password. Omit to produce a
+   * password-only Secret (no `username` key in `stringData`) — MariaDB's
+   * primary credential Secret stores only `password` and relies on this.
+   */
+  readonly username?: string;
   /** Labels applied to the Secret. */
   readonly labels: Record<string, string>;
   /** Kubernetes provider. */
   readonly provider: k8s.Provider;
   /** Resources the Secret must be created after. */
-  readonly dependsOn: pulumi.Resource[];
+  readonly dependsOn: ReadonlyArray<pulumi.Resource>;
   /** Optional Secret type (e.g. "kubernetes.io/basic-auth"). */
   readonly type?: string;
 }
@@ -65,13 +69,13 @@ export function createRoleCredentials(options: IRoleCredentialOptions): IRoleCre
       },
       ...(options.type ? { type: options.type } : {}),
       stringData: {
-        username: options.username,
+        ...(options.username ? { username: options.username } : {}),
         password: generatedPassword,
       },
     },
     {
       provider: options.provider,
-      dependsOn: options.dependsOn,
+      dependsOn: [...options.dependsOn],
       ignoreChanges: ["data", "stringData"],
     }
   );
@@ -104,7 +108,7 @@ export interface IReplicationOptions {
   /** Kubernetes provider. */
   readonly provider: k8s.Provider;
   /** Resources each Secret must be created after. */
-  readonly dependsOn: pulumi.Resource[];
+  readonly dependsOn: ReadonlyArray<pulumi.Resource>;
   /** Optional per-resource aliases, keyed by namespace. */
   readonly aliasesByNamespace?: Record<string, string>;
 }

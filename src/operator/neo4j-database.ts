@@ -10,7 +10,8 @@
  * place because `neo4j:community` has no RBAC.
  *
  * Everything that RBAC would express is therefore refused rather than ignored:
- * `grants` and `login: false` both throw.
+ * `grants` and `login: false` both throw. So does `config.sql` — the only
+ * statements this backend can run are the Cypher its provisioning Job carries.
  *
  * @module operator/neo4j-database
  */
@@ -25,6 +26,7 @@ import {
   replicateNeo4jConnectionSecrets,
 } from "./neo4j-roles.js";
 import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
+import { assertNoSql } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type {
   IDatabaseInstance,
@@ -32,6 +34,9 @@ import type {
   IDatabaseRoleConfig,
   IOperatorDatabaseConfig,
 } from "./interfaces.js";
+
+/** Engine name used in errors about options Neo4j cannot honour. */
+const NEO4J_ENGINE_NAME = "Neo4j";
 
 /**
  * Reject `environments`, which Neo4j cannot fan a database out across.
@@ -87,15 +92,20 @@ export interface INeo4jDatabaseOptions {
  * @param options - Deployment, database name, configuration, and provider
  * @returns The database instance, with `addRole()` bound to it
  * @throws {AnyCloudError} code `INVALID_GRANT` when a role's grant lists no privileges
- * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `addRole()` is
- *   called with the database owner's own name, is passed `grants` (Neo4j
- *   Community has no RBAC), or is passed `login: false`
+ * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `config.sql` is
+ *   set (Neo4j runs no SQL), or when `addRole()` is called with the database
+ *   owner's own name, is passed `grants` (Neo4j Community has no RBAC), or is
+ *   passed `login: false`
  */
 export function createSingleNeo4jDatabaseInstance(
   options: INeo4jDatabaseOptions
 ): IDatabaseInstance {
   const { clusterName, dbName, config, endpoint, port, adminSecretName, release, provider } =
     options;
+
+  // The provisioning Job speaks Cypher, not SQL, and there is no second Job to
+  // put statements in — so `sql` is refused rather than dropped on the floor.
+  assertNoSql(dbName, config, NEO4J_ENGINE_NAME);
 
   const username = config.owner ?? dbName;
   assertValidRoleName(username, dbName);

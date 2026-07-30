@@ -209,6 +209,37 @@ describe("createSingleMariadbDatabaseInstance", () => {
   });
 });
 
+// Nothing in the MariaDB backend executes SQL — provisioning is Database/User/
+// Grant CRs all the way down — so `sql` cannot be honoured. This branch refuses
+// every option it cannot honour (`owner`, `login: false`, `environments`,
+// `grants`); accepting `sql` and dropping it would be the one exception, and a
+// silently skipped `CREATE EXTENSION` is exactly the kind of gap nothing in the
+// Pulumi diff would explain.
+describe("config.sql", () => {
+  it("rejects sql, which MariaDB cannot apply", () => {
+    expect(() => makeDatabase({ namespaces: ["app"], sql: ["SELECT 1;"] })).toThrow(AnyCloudError);
+    expect(() => makeDatabase({ namespaces: ["app"], sql: ["SELECT 1;"] })).toThrow(
+      /cannot use "sql" on MariaDB/
+    );
+  });
+
+  it("reports UNSUPPORTED_ROLE_OPTION and names the database", () => {
+    try {
+      makeDatabase({ namespaces: ["app"], sql: ["SELECT 1;"] });
+      expect.unreachable("createDatabase should have thrown for sql");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AnyCloudError);
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
+      expect((error as AnyCloudError).message).toContain('"analytics"');
+    }
+  });
+
+  // An empty list still asks for SQL to be applied, and is just as unapplicable.
+  it("rejects an empty sql list as well", () => {
+    expect(() => makeDatabase({ namespaces: ["app"], sql: [] })).toThrow(AnyCloudError);
+  });
+});
+
 // `ignoreChanges` suppresses diffs only on resources that already exist, so
 // honouring `owner` would work on a greenfield stack and break only on upgrade:
 // the account would keep the database's name while `username` and `uri` flipped

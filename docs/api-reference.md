@@ -244,8 +244,7 @@ db.addRole("catalog-etl", { namespaces: ["ingest"] });
 ### `IOperatorDatabaseConfig.sql`
 
 Raw SQL statements applied to a CloudNativePG database as its owner, after the
-database and owner role exist. Ignored by MariaDB and Neo4j. Intended for one-off
-setup a CRD cannot express:
+database and owner role exist. Intended for one-off setup a CRD cannot express:
 
 ```typescript
 pg.createDatabase("warehouse", {
@@ -253,6 +252,13 @@ pg.createDatabase("warehouse", {
   sql: ["CREATE EXTENSION IF NOT EXISTS pgcrypto;"],
 });
 ```
+
+**CloudNativePG only — MariaDB and Neo4j throw.** The statements ride along in
+the same owner-authenticated `psql` Job that reconciles grants. MariaDB
+provisions through CRs and runs no SQL at all, and Neo4j's provisioning Job
+speaks Cypher, so neither has anywhere to run them. Setting `sql` on either
+throws `UNSUPPORTED_ROLE_OPTION` at preview rather than dropping the statements
+silently.
 
 Statements must be idempotent (the underlying Job re-runs whenever the SQL's
 checksum changes, and may run again against a database that already has the

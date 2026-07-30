@@ -266,6 +266,36 @@ describe("assertNoEnvironments", () => {
   });
 });
 
+// The provisioning Job speaks Cypher and there is no second Job to put
+// statements in, so `sql` — a PostgreSQL-flavoured statement list — cannot be
+// applied here at all. Every other unhonourable option on this branch throws
+// (`grants`, `login: false`, `environments`); accepting `sql` and dropping it
+// would leave the config claiming a schema was seeded when nothing ran.
+describe("config.sql", () => {
+  it("rejects sql, which Neo4j cannot apply", () => {
+    expect(() => makeDatabase({ namespaces: ["app"], sql: ["SELECT 1;"] })).toThrow(AnyCloudError);
+    expect(() => makeDatabase({ namespaces: ["app"], sql: ["SELECT 1;"] })).toThrow(
+      /cannot use "sql" on Neo4j/
+    );
+  });
+
+  it("reports UNSUPPORTED_ROLE_OPTION and names the database", () => {
+    try {
+      makeDatabase({ namespaces: ["app"], sql: ["SELECT 1;"] });
+      expect.unreachable("createDatabase should have thrown for sql");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AnyCloudError);
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
+      expect((error as AnyCloudError).message).toContain('"graph"');
+    }
+  });
+
+  // An empty list still asks for SQL to be applied, and is just as unapplicable.
+  it("rejects an empty sql list as well", () => {
+    expect(() => makeDatabase({ namespaces: ["app"], sql: [] })).toThrow(AnyCloudError);
+  });
+});
+
 describe("addRole", () => {
   // `CREATE USER ... IF NOT EXISTS` makes a second Job for the same username a
   // silent no-op, so the role's own Secrets would hold a password that was

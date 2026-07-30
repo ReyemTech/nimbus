@@ -237,6 +237,11 @@ export interface IOperatorDatabaseConfig {
    * role exist. Intended for one-off setup a CRD cannot express, such as
    * `CREATE EXTENSION IF NOT EXISTS ...` or seeding a schema.
    *
+   * **CloudNativePG only.** It rides along in the same owner-authenticated
+   * `psql` Job that reconciles grants; MariaDB (CRs only) and Neo4j (Cypher)
+   * have no equivalent path, so both **throw** `UNSUPPORTED_ROLE_OPTION` when
+   * this is set rather than accepting statements that would never run.
+   *
    * Statements MUST be idempotent — the Job re-runs whenever the content
    * checksum changes, and may be re-applied to a database that already has the
    * result of a previous run.

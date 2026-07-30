@@ -4,9 +4,10 @@
  * Provisioning is fully declarative: a `Database` CR owns the database, a
  * `User` CR owns each login account and its password, and a `Grant` CR owns
  * each privilege set. Unlike CloudNativePG — where privileges have no CRD
- * equivalent and are applied by a `psql` Job — nothing here executes SQL. The
- * operator reconciles all three kinds continuously, so drift is corrected
- * rather than silently persisting.
+ * equivalent and are applied by a `psql` Job — nothing here executes SQL, which
+ * is also why `config.sql` throws rather than being dropped. The operator
+ * reconciles all three kinds continuously, so drift is corrected rather than
+ * silently persisting.
  *
  * @module operator/mariadb-database
  */
@@ -28,6 +29,7 @@ import {
   toMariadbGrants,
 } from "./mariadb-roles.js";
 import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
+import { assertNoSql } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type {
   IDatabaseInstance,
@@ -46,6 +48,8 @@ const DEFAULT_CHARACTER_SET = "utf8mb4";
 const DEFAULT_COLLATION = "utf8mb4_unicode_ci";
 /** Field of the `Database` CR that mariadb-operator rejects updates to. */
 const DATABASE_IMMUTABLE_FIELDS = ["spec.name"];
+/** Engine name used in errors about options MariaDB cannot honour. */
+const MARIADB_ENGINE_NAME = "MariaDB";
 
 /** Inputs for {@link createSingleMariadbDatabaseInstance}. */
 export interface IMariadbDatabaseOptions {
@@ -75,14 +79,19 @@ export interface IMariadbDatabaseOptions {
  * @param options - Instance, database name, configuration, and provider
  * @returns The database instance, with `addRole()` bound to it
  * @throws {AnyCloudError} code `INVALID_GRANT` when a role's grant lists no privileges
- * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `config.owner` is
- *   set to anything but the database name, when `addRole()` is called with the
- *   database owner's own name, or when `addRole()` is passed `login: false`
+ * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `config.sql` is
+ *   set (MariaDB runs no SQL), when `config.owner` is set to anything but the
+ *   database name, when `addRole()` is called with the database owner's own
+ *   name, or when `addRole()` is passed `login: false`
  */
 export function createSingleMariadbDatabaseInstance(
   options: IMariadbDatabaseOptions
 ): IDatabaseInstance {
   const { clusterName, dbName, config, endpoint, port, mariadb, provider } = options;
+
+  // Nothing here executes SQL — provisioning is CRs all the way down — so
+  // `sql` is refused rather than dropped on the floor.
+  assertNoSql(dbName, config, MARIADB_ENGINE_NAME);
 
   // MariaDB cannot honour `owner`, and rejects it rather than ignoring it.
   //

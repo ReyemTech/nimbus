@@ -144,6 +144,7 @@ pulumi stack output           # View stack outputs
 - [API Reference](docs/api-reference.md) — Factory functions, provider options, direct cloud functions
 - [Examples](docs/examples.md) — Single-cloud, multi-cloud, standalone resources, BCDR
 - [Utilities](docs/utilities.md) — CIDR helpers, validation, tags, error handling
+- [CNPG Declarative Databases](docs/cnpg-declarative-databases.md) — Migrating PostgreSQL databases from bootstrap Jobs to `Database`/`DatabaseRole` CRDs
 
 ## Development
 

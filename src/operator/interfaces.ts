@@ -18,6 +18,14 @@ import type { IExposedService } from "../types";
 /** Per-environment config overrides. Keys are environment names (e.g. "dev", "prod"). */
 export type EnvironmentOverrides<T> = Record<string, Partial<T>>;
 
+/**
+ * End-of-life policy for a declaratively managed database or role.
+ *
+ * - `"retain"` — the database/role survives deletion of the Kubernetes resource.
+ * - `"delete"` — the operator issues `DROP DATABASE` / `DROP ROLE` on deletion.
+ */
+export type ReclaimPolicy = "retain" | "delete";
+
 /** Supported Kubernetes database operators. */
 export type OperatorType = "cloudnative-pg" | "mariadb-operator" | "minio" | "neo4j";
 
@@ -78,6 +86,17 @@ export interface IOperatorClusterConfig {
   readonly parameters?: Record<string, string>;
   /** Resource tags (applied as labels). */
   readonly tags?: Record<string, string>;
+  /**
+   * Expose a network-reachable superuser and publish its credentials Secret
+   * (CloudNativePG only). Default: false.
+   *
+   * Databases and roles are provisioned through the operator's own `Database`
+   * and `DatabaseRole` CRDs, which run inside the instance manager and do not
+   * need this. Enable it only when something outside nimbus must connect as
+   * `postgres` — turning it off makes CNPG set the superuser password to NULL
+   * and delete the `{cluster}-superuser` Secret.
+   */
+  readonly superuserAccess?: boolean;
   /** When set, creates separate clusters per environment with {name}-{env} naming. Per-env values override base config. */
   readonly environments?: EnvironmentOverrides<Omit<IOperatorClusterConfig, "environments">>;
 }
@@ -88,6 +107,15 @@ export interface IOperatorDatabaseConfig {
   readonly namespaces: string[];
   /** Database owner/username. Default: same as database name. */
   readonly owner?: string;
+  /**
+   * What happens to the PostgreSQL database and its owning role when the
+   * Kubernetes resources are deleted (CloudNativePG only). Default: `"retain"`.
+   *
+   * `"retain"` keeps the data, so removing a database from config — or renaming
+   * the Pulumi resource — is never destructive. Set `"delete"` only for
+   * databases whose lifecycle should genuinely track the config.
+   */
+  readonly reclaimPolicy?: ReclaimPolicy;
   /** When set, creates separate databases per environment with {dbName}-{env} naming. Per-env values override base config. */
   readonly environments?: EnvironmentOverrides<Omit<IOperatorDatabaseConfig, "environments">>;
 }

@@ -224,11 +224,19 @@ export interface IDatabaseInstance {
    * Optional until every backend (CloudNativePG, MariaDB, Neo4j) implements it;
    * it becomes required once all three do.
    *
+   * `grants` are reconciled, not merely applied: every privilege the role holds
+   * is revoked before the requested grants are re-applied, so removing a grant
+   * from config actually removes it. The database owner is exempt from this and
+   * cannot be passed here at all — an owner's rights over its own objects are
+   * ordinary ACL entries, so revoking them would strip the owner's access to
+   * the very tables it owns. The owner's role is created by `createDatabase()`.
+   *
    * @param name - Role name as it will exist in the database engine
    * @param config - Namespaces, login flag, grants, and engine-specific options
    * @returns The provisioned role with its replicated Secret references
    * @throws {AnyCloudError} with code `UNSUPPORTED_ROLE_OPTION` when `grants` is
-   *   passed to an engine that cannot express privileges (Neo4j Community).
+   *   passed to an engine that cannot express privileges (Neo4j Community), or
+   *   when `name` is the database owner's own role name.
    */
   addRole?(name: string, config?: IDatabaseRoleConfig): IDatabaseRole;
 }

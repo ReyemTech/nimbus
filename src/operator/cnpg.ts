@@ -22,7 +22,7 @@ import type {
 import { createCnpgClusterDashboard } from "../observability/dashboards";
 import { createPrometheusRule } from "../observability/alerts";
 import { nimbus } from "../nimbus";
-import { DATA_NAMESPACE, DEFAULT_PG_VERSION } from "./cnpg-common.js";
+import { CNPG_API_VERSION, DATA_NAMESPACE, DEFAULT_PG_VERSION } from "./cnpg-common.js";
 import { createSingleCnpgDatabaseInstance } from "./cnpg-database.js";
 
 const DEFAULT_REPLICAS = 1;
@@ -135,7 +135,7 @@ function createSingleCnpgCluster(
   const cluster = new k8s.apiextensions.CustomResource(
     `${name}-cnpg-cluster`,
     {
-      apiVersion: "postgresql.cnpg.io/v1",
+      apiVersion: CNPG_API_VERSION,
       kind: "Cluster",
       metadata: {
         name,
@@ -192,7 +192,7 @@ function createSingleCnpgCluster(
     new k8s.apiextensions.CustomResource(
       `${name}-cnpg-scheduled-backup`,
       {
-        apiVersion: "postgresql.cnpg.io/v1",
+        apiVersion: CNPG_API_VERSION,
         kind: "ScheduledBackup",
         metadata: {
           name: `${name}-scheduled-backup`,

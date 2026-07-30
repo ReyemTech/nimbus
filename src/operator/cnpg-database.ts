@@ -28,6 +28,7 @@ import {
 } from "./cnpg-roles.js";
 import { createPostgresGrantJob } from "./grants/postgres-job.js";
 import { resolveRoleConfig } from "./grants/role-config.js";
+import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type {
   IDatabaseInstance,
   IDatabaseRole,
@@ -76,6 +77,8 @@ export interface ICnpgDatabaseOptions {
  * @throws {AnyCloudError} code `INVALID_GRANT` when a role's grant lists no privileges
  * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a grant names a
  *   privilege the SQL compiler cannot emit
+ * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `addRole()` is
+ *   called with the database owner's own name
  */
 export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions): IDatabaseInstance {
   const { clusterName, dbName, config, endpoint, port, pgVersion, cluster, provider } = options;
@@ -172,6 +175,22 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
     nativeResource: database,
 
     addRole(roleName: string, roleConfig?: IDatabaseRoleConfig): IDatabaseRole {
+      // The owner already has a DatabaseRole CR from createDatabase(). Adding
+      // it again would create a SECOND CR for the same PostgreSQL role, bound
+      // to a different basic-auth Secret, and the two controllers would then
+      // fight over the role's password indefinitely — leaving the owner's
+      // replicated connection Secrets holding a credential that no longer
+      // authenticates. The two CRs have different Pulumi logical names, so
+      // `pulumi preview` sees no conflict and this fails only in production.
+      if (roleName === username) {
+        throw new AnyCloudError(
+          `Role "${roleName}" is the owner of database "${dbName}" and is created by ` +
+            `createDatabase(); it cannot be added again. Use a different role name, or ` +
+            `change the database's "owner".`,
+          ERROR_CODES.UNSUPPORTED_ROLE_OPTION
+        );
+      }
+
       const resolved = resolveRoleConfig(roleConfig);
       const naming = additionalRoleNaming(clusterName, dbName, roleName);
 
@@ -186,22 +205,9 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
         provider,
       });
 
-      const roleSecrets = replicateCnpgConnectionSecrets({
-        naming,
-        namespaces: resolved.namespaces,
-        dbName,
-        username: roleName,
-        password: provisioned.credentials.stablePassword,
-        endpoint,
-        port,
-        labels,
-        provider,
-        dependsOn: [database, provisioned.role],
-      });
-
       // Grants are applied as the database owner — never as superuser — so the
       // Job depends on the owner's credential Secret as well as both CRs.
-      createPostgresGrantJob({
+      const grantJob = createPostgresGrantJob({
         clusterName,
         databaseName: dbName,
         roleName,
@@ -214,6 +220,22 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
         labels,
         provider,
         dependsOn: [database, provisioned.role, owner.credentials.userSecret],
+      });
+
+      // The connection Secret waits on the grant Job so a consumer cannot read
+      // working credentials, connect, and hit permission errors before the
+      // privileges have landed. There is no Job when the role has no grants.
+      const roleSecrets = replicateCnpgConnectionSecrets({
+        naming,
+        namespaces: resolved.namespaces,
+        dbName,
+        username: roleName,
+        password: provisioned.credentials.stablePassword,
+        endpoint,
+        port,
+        labels,
+        provider,
+        dependsOn: grantJob ? [database, provisioned.role, grantJob] : [database, provisioned.role],
       });
 
       return {

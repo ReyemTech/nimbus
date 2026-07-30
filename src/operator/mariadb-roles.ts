@@ -36,6 +36,7 @@ import {
   replicateConnectionSecrets,
   type IRoleCredentials,
 } from "./credentials.js";
+import { normalizePrivilegeAgainst } from "./grants/privileges.js";
 import type { IDatabaseGrant } from "./interfaces.js";
 
 /** Fields of the `User` CR that mariadb-operator rejects updates to. */
@@ -168,6 +169,48 @@ export const OWNER_GRANT: IMariadbGrantSpec = {
   grantOption: true,
 };
 
+/** Engine name used when reporting a rejected privilege. */
+const ENGINE_NAME = "MariaDB";
+
+/**
+ * Privileges accepted in {@link IDatabaseGrant.privileges} on MariaDB.
+ *
+ * These are the privileges MariaDB allows in a database- or table-scoped
+ * `GRANT <privileges> ON db.table TO user`, which is exactly the statement
+ * mariadb-operator builds from a `Grant` CR. Anything outside the set — a
+ * typo, or a global privilege such as `PROCESS` or `SUPER` that cannot be
+ * scoped to a database — is rejected here rather than forwarded for the
+ * operator's SQL builder to choke on at reconcile time, where the failure
+ * surfaces only in operator logs.
+ *
+ * This is deliberately **not** PostgreSQL's list: `TRUNCATE` does not exist
+ * here, while `INDEX`, `DROP`, `EVENT`, `EXECUTE`, and the routine/view
+ * privileges do. `GRANT OPTION` is excluded because the CR models it as its
+ * own `spec.grantOption` field, not as a privilege.
+ */
+const ALLOWED_PRIVILEGES: ReadonlySet<string> = new Set([
+  ALL_PRIVILEGES,
+  "ALTER",
+  "ALTER ROUTINE",
+  "CREATE",
+  "CREATE ROUTINE",
+  "CREATE TEMPORARY TABLES",
+  "CREATE VIEW",
+  "DELETE",
+  "DELETE HISTORY",
+  "DROP",
+  "EVENT",
+  "EXECUTE",
+  "INDEX",
+  "INSERT",
+  "LOCK TABLES",
+  "REFERENCES",
+  "SELECT",
+  "SHOW VIEW",
+  "TRIGGER",
+  "UPDATE",
+]);
+
 /**
  * Translate portable grants into mariadb-operator `Grant` specs.
  *
@@ -177,12 +220,16 @@ export const OWNER_GRANT: IMariadbGrantSpec = {
  *
  * @param grants - Portable grants from the role configuration
  * @returns One MariaDB grant spec per input grant, in the same order
+ * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a grant names a
+ *   privilege outside {@link ALLOWED_PRIVILEGES}
  */
 export function toMariadbGrants(
   grants: ReadonlyArray<IDatabaseGrant>
 ): ReadonlyArray<IMariadbGrantSpec> {
   return grants.map((grant) => ({
-    privileges: grant.privileges.map((privilege) => privilege.toUpperCase()),
+    privileges: grant.privileges.map((privilege) =>
+      normalizePrivilegeAgainst(privilege, ALLOWED_PRIVILEGES, ENGINE_NAME)
+    ),
     table: grant.objects && grant.objects !== ALL_OBJECTS ? grant.objects : ALL_TABLES,
     grantOption: false,
   }));

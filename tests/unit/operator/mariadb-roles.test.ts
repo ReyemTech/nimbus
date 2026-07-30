@@ -6,6 +6,7 @@ import {
   toMariadbGrants,
   type IMariadbRoleNaming,
 } from "../../../src/operator/mariadb-roles.js";
+import { AnyCloudError, ERROR_CODES } from "../../../src/types/errors.js";
 
 // Pulumi identifies a resource by its logical name. Changing one of these
 // strings makes Pulumi delete and recreate the resource — for a credential
@@ -175,6 +176,45 @@ describe("toMariadbGrants", () => {
 
   it("returns nothing for a role with no grants", () => {
     expect(toMariadbGrants([])).toEqual([]);
+  });
+
+  // Privileges are SQL keywords that cannot be quoted, so an unvalidated one is
+  // forwarded verbatim into mariadb-operator's SQL builder and fails at
+  // reconcile time — visible only in operator logs, long after `pulumi up`
+  // reported success.
+  it.each(["DROP DATABASE", "SUPER", "PROCESS", "TRUNCATE"])(
+    "rejects %s, which a database-scoped MariaDB GRANT cannot carry",
+    (privilege) => {
+      expect(() => toMariadbGrants([{ privileges: [privilege] }])).toThrow(AnyCloudError);
+      expect(() => toMariadbGrants([{ privileges: [privilege] }])).toThrow(
+        /unsupported privilege/i
+      );
+    }
+  );
+
+  it("reports UNSUPPORTED_PRIVILEGE and names MariaDB, not PostgreSQL", () => {
+    try {
+      toMariadbGrants([{ privileges: ["SUPER"] }]);
+      expect.unreachable("toMariadbGrants should have thrown for SUPER");
+    } catch (error) {
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_PRIVILEGE);
+      expect((error as AnyCloudError).message).toContain("MariaDB");
+    }
+  });
+
+  // MariaDB's privilege set is not PostgreSQL's: applying PostgreSQL's
+  // allowlist here would reject these outright.
+  it.each(["INDEX", "DROP", "EVENT", "EXECUTE", "CREATE VIEW", "DELETE HISTORY"])(
+    "accepts %s, which MariaDB supports and PostgreSQL does not",
+    (privilege) => {
+      expect(toMariadbGrants([{ privileges: [privilege] }])[0]?.privileges).toEqual([privilege]);
+    }
+  );
+
+  it("normalises case and internal whitespace before matching the allowlist", () => {
+    expect(toMariadbGrants([{ privileges: ["  create   temporary tables "] }])).toEqual([
+      { privileges: ["CREATE TEMPORARY TABLES"], table: "*", grantOption: false },
+    ]);
   });
 });
 

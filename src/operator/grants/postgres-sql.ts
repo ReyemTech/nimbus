@@ -13,7 +13,7 @@
  * @module operator/grants/postgres-sql
  */
 
-import { AnyCloudError, ERROR_CODES } from "../../types/errors.js";
+import { normalizePrivilegeAgainst } from "./privileges.js";
 import type { IDatabaseGrant } from "../interfaces.js";
 
 /**
@@ -74,6 +74,9 @@ const SEQUENCE_IMPLYING_PRIVILEGES: ReadonlySet<string> = new Set([
  */
 const SEQUENCE_PRIVILEGES = "USAGE, SELECT";
 
+/** Engine name used when reporting a rejected privilege. */
+const ENGINE_NAME = "PostgreSQL";
+
 /** Sentinel meaning "every current and future object in the schema". */
 const ALL_OBJECTS = "all";
 /** Schema used for a grant when {@link IDatabaseGrant.schema} is omitted. */
@@ -116,24 +119,18 @@ export function quoteIdentifier(name: string): string {
 }
 
 /**
- * Validate and normalise a privilege keyword.
+ * Validate and normalise a privilege keyword for PostgreSQL.
  *
  * Privileges are SQL keywords and cannot be quoted, so they are checked against
- * an allowlist rather than escaped.
+ * an allowlist rather than escaped. The allowlist is PostgreSQL's own — see
+ * {@link normalizePrivilegeAgainst} for why it is not shared with MariaDB.
  *
  * @param privilege - Raw privilege name, any case
  * @returns The upper-cased privilege
  * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when not in the allowlist
  */
 export function normalizePrivilege(privilege: string): string {
-  const normalized = privilege.trim().toUpperCase().replace(/\s+/g, " ");
-  if (!ALLOWED_PRIVILEGES.has(normalized)) {
-    throw new AnyCloudError(
-      `Unsupported privilege "${privilege}". Allowed: ${[...ALLOWED_PRIVILEGES].join(", ")}.`,
-      ERROR_CODES.UNSUPPORTED_PRIVILEGE
-    );
-  }
-  return normalized;
+  return normalizePrivilegeAgainst(privilege, ALLOWED_PRIVILEGES, ENGINE_NAME);
 }
 
 /**

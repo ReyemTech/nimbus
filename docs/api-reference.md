@@ -176,6 +176,15 @@ they are schema privileges, not relation privileges, so they would render as
 `GRANT USAGE ON ALL TABLES IN SCHEMA ...` and fail at runtime. Nothing is lost —
 `GRANT USAGE ON SCHEMA` is emitted automatically for every grant.
 
+MariaDB validates against its own set, not PostgreSQL's: `ALL PRIVILEGES`,
+`ALTER`, `ALTER ROUTINE`, `CREATE`, `CREATE ROUTINE`, `CREATE TEMPORARY TABLES`,
+`CREATE VIEW`, `DELETE`, `DELETE HISTORY`, `DROP`, `EVENT`, `EXECUTE`, `INDEX`,
+`INSERT`, `LOCK TABLES`, `REFERENCES`, `SELECT`, `SHOW VIEW`, `TRIGGER`,
+`UPDATE` — everything a database- or table-scoped `GRANT` can carry. `TRUNCATE`
+does not exist there, and global privileges such as `SUPER` or `PROCESS` cannot
+be scoped to a database. `GRANT OPTION` is not a privilege here either: the
+`Grant` CR models it as its own field, which nimbus sets only for the owner.
+
 **Omitting `grants` is not the same as `grants: []`.** Omitting it means nimbus
 does not manage the role's privileges: nothing is granted and, on CloudNativePG,
 nothing is revoked. `grants: []` means the role should hold *no* privileges — a

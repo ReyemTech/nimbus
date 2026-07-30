@@ -10,9 +10,10 @@
  *
  * The SQL reaches the container exclusively through a mounted ConfigMap, so
  * no user-controlled value is ever interpolated into `command`. The Job's
- * name embeds a checksum of the SQL, so an unchanged grant spec reuses the
- * same Job (Pulumi diffs it as a no-op) and a changed spec produces a new
- * Job that actually runs.
+ * name embeds a checksum of the cluster, database, role, and compiled SQL, so
+ * an unchanged grant spec reuses the same Job (Pulumi diffs it as a no-op)
+ * and a changed spec — or the same grants applied to a different database —
+ * always produces a new, distinct Job.
  *
  * @module operator/grants/postgres-job
  */
@@ -39,7 +40,11 @@ const SQL_CONFIG_MAP_KEY = "grants.sql";
 const SQL_MOUNT_PATH = "/sql";
 /** Full in-container path to the mounted SQL file, passed to `psql -f`. */
 const SQL_FILE_PATH = `${SQL_MOUNT_PATH}/${SQL_CONFIG_MAP_KEY}`;
-/** Hex length of the SQL checksum embedded in the Job name. */
+/** Name of the ConfigMap volume and its mount inside the Pod template. */
+const SQL_VOLUME_NAME = "sql";
+/** Name of the `psql` container in the Pod template. */
+const PSQL_CONTAINER_NAME = "psql";
+/** Hex length of the checksum embedded in the Job name. */
 const CHECKSUM_LENGTH = 8;
 /**
  * Maximum length of a DNS-1123 label (RFC 1123), the constraint Kubernetes
@@ -111,14 +116,28 @@ function sanitizeForLabel(value: string): string {
 /**
  * Derive the Job name: a sanitized, checksum-suffixed DNS-1123 label.
  *
- * The checksum is computed over the compiled SQL, so a changed grant spec
- * (different SQL) always produces a different Job name — and therefore a Job
- * that actually runs — while an unchanged spec reuses the same name and
- * Pulumi diffs it as a no-op. Cluster, database, and role names are
- * user-controlled and unbounded in length; when the descriptive prefix would
- * push the full name past {@link JOB_NAME_MAX_LENGTH}, it is truncated and the
- * checksum suffix — which is what actually guarantees change-detection — is
- * always kept intact.
+ * The checksum is computed over `clusterName`, `databaseName`, `roleName`,
+ * and the compiled SQL — newline-joined in that fixed order — not over the
+ * SQL alone. `compileGrantSql`'s output encodes only role, owner, schema, and
+ * grants; it never encodes the database name. Hashing the SQL by itself would
+ * therefore let two different databases in the same cluster that happen to
+ * share a role name and identical grants (e.g. a `readonly` role repeated
+ * per-database) produce byte-identical SQL, and thus an identical checksum —
+ * and if the descriptive prefix is also truncated down to something
+ * indistinguishable between them (see below), the two would collide on the
+ * same Job name. Including the resource identity in the hash makes that
+ * collision impossible while preserving the property the checksum exists
+ * for: `clusterName`, `databaseName`, and `roleName` are stable for a given
+ * resource, so an unchanged grant spec (unchanged SQL) still yields an
+ * unchanged Job name and does not re-run, while a changed spec — anywhere in
+ * cluster, database, role, or SQL — always produces a different name and
+ * therefore a Job that actually runs.
+ *
+ * Cluster, database, and role names are user-controlled and unbounded in
+ * length; when the descriptive prefix would push the full name past
+ * {@link JOB_NAME_MAX_LENGTH}, it is truncated and the checksum suffix —
+ * which is what actually guarantees change-detection and collision-avoidance
+ * — is always kept intact.
  *
  * @param clusterName - CNPG cluster name
  * @param databaseName - Database name
@@ -132,7 +151,12 @@ function deriveJobName(
   roleName: string,
   sql: string
 ): string {
-  const checksum = crypto.createHash("sha256").update(sql).digest("hex").slice(0, CHECKSUM_LENGTH);
+  const identity = [clusterName, databaseName, roleName, sql].join("\n");
+  const checksum = crypto
+    .createHash("sha256")
+    .update(identity)
+    .digest("hex")
+    .slice(0, CHECKSUM_LENGTH);
 
   const descriptive = sanitizeForLabel(
     `${JOB_NAME_PREFIX}-${clusterName}-${databaseName}-${roleName}`
@@ -153,6 +177,15 @@ function deriveJobName(
  * the Job instead of being silently skipped. The SQL itself is mounted from a
  * ConfigMap — it never appears in `command`, so nothing derived from role,
  * schema, or grant data is ever passed as a shell argument.
+ *
+ * The Job's name is derived from its content (cluster, database, role, and
+ * compiled SQL — see {@link deriveJobName}), so a Job that exhausts
+ * `backoffLimit` and permanently fails is **not** retried by a later
+ * `pulumi up` as long as the grant spec is unchanged: the same input still
+ * derives the same name, and Pulumi sees no diff against the existing
+ * (failed) Job. Recovering from a permanent failure requires deleting the
+ * failed Job manually (e.g. `kubectl delete job <name>`) before re-running
+ * Pulumi, so a new Job is created and actually runs.
  *
  * @param options - Cluster, role, owner, grants, and dependencies
  * @returns The Job, or `undefined` when `grants` and `extraSql` are both empty
@@ -205,7 +238,7 @@ export function createPostgresGrantJob(options: IGrantJobOptions): k8s.batch.v1.
             restartPolicy: "Never",
             containers: [
               {
-                name: "psql",
+                name: PSQL_CONTAINER_NAME,
                 image: `${PG_IMAGE_REPO}:${options.pgVersion}`,
                 command: ["psql", "-v", "ON_ERROR_STOP=1", "-f", SQL_FILE_PATH],
                 env: [
@@ -220,10 +253,10 @@ export function createPostgresGrantJob(options: IGrantJobOptions): k8s.batch.v1.
                   },
                   { name: "PGSSLMODE", value: "require" },
                 ],
-                volumeMounts: [{ name: "sql", mountPath: SQL_MOUNT_PATH }],
+                volumeMounts: [{ name: SQL_VOLUME_NAME, mountPath: SQL_MOUNT_PATH }],
               },
             ],
-            volumes: [{ name: "sql", configMap: { name: configMapName } }],
+            volumes: [{ name: SQL_VOLUME_NAME, configMap: { name: configMapName } }],
           },
         },
       },

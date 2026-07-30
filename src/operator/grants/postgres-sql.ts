@@ -7,6 +7,9 @@
  * re-granted stays revoked. The whole script runs in one transaction so no
  * window of missing privileges is ever observable.
  *
+ * The one exception is a script whose role IS the owner: revoking there would
+ * take the owner's access to its own objects away, so the preamble is skipped.
+ *
  * @module operator/grants/postgres-sql
  */
 
@@ -49,7 +52,10 @@ const BASE_DOLLAR_TAG = "nimbus";
 
 /** Options for {@link compileGrantSql}. */
 export interface ICompileOptions {
-  /** Role receiving the privileges. */
+  /**
+   * Role receiving the privileges. When it equals {@link ICompileOptions.owner}
+   * the revoke preamble is omitted — see {@link compileGrantSql}.
+   */
   readonly role: string;
   /** Database owner — the role whose future objects default privileges apply to. */
   readonly owner: string;
@@ -140,6 +146,12 @@ function chooseDollarTag(values: ReadonlyArray<string>): string {
 /**
  * Compile a grant spec into an idempotent, transactional SQL script.
  *
+ * When `role` and `owner` name the same role the revoke preamble is omitted:
+ * an owner's rights over its own objects are ordinary ACL entries it is
+ * allowed to revoke from itself, so reconciling "the owner holds exactly these
+ * grants" would lock the owner out of its own tables. Such a script therefore
+ * carries only the grants and `extraSql` it was given.
+ *
  * @param options - Role, owner, desired grants, and optional trailing SQL
  * @returns A complete SQL script beginning with `BEGIN;` and ending `COMMIT;`
  * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a privilege is not
@@ -159,9 +171,6 @@ export function compileGrantSql(options: ICompileOptions): string {
   const { role, owner, grants, extraSql = [] } = options;
   const qRole = quoteIdentifier(role);
   const qOwner = quoteIdentifier(owner);
-  const lRole = quoteLiteral(role);
-  const lOwner = quoteLiteral(owner);
-  const tag = chooseDollarTag([role, owner]);
 
   const statements: string[] = ["BEGIN;"];
 
@@ -172,25 +181,40 @@ export function compileGrantSql(options: ICompileOptions): string {
   // role holds nothing in is a harmless no-op. format(%I) quotes
   // identifiers; the role/owner names are passed as literal parameters to
   // format rather than concatenated into DDL.
-  statements.push(
-    [
-      `DO $${tag}$`,
-      "DECLARE s record;",
-      "BEGIN",
-      "  FOR s IN",
-      "    SELECT nspname FROM pg_namespace",
-      "    WHERE nspname NOT LIKE 'pg\\_%'",
-      "      AND nspname <> 'information_schema'",
-      "  LOOP",
-      `    EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM %I', s.nspname, ${lRole});`,
-      `    EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM %I', s.nspname, ${lRole});`,
-      `    EXECUTE format('REVOKE ALL ON SCHEMA %I FROM %I', s.nspname, ${lRole});`,
-      `    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I REVOKE ALL ON TABLES FROM %I', ${lOwner}, s.nspname, ${lRole});`,
-      "  END LOOP;",
-      "END",
-      `$${tag}$;`,
-    ].join("\n")
-  );
+  //
+  // Skipped entirely when the role IS the owner. PostgreSQL records an owner's
+  // rights over its own objects as ordinary entries in the object's ACL, and a
+  // role is allowed to revoke its own privileges — so running this preamble
+  // against the owner strips the owner's access to the very tables it owns
+  // (and, via ALTER DEFAULT PRIVILEGES, to tables it has yet to create) until
+  // something grants them back. Convergence is also meaningless there: an
+  // owner-scoped script exists to run `extraSql`, never to reconcile a grant
+  // spec the owner does not have.
+  if (role !== owner) {
+    const lRole = quoteLiteral(role);
+    const lOwner = quoteLiteral(owner);
+    const tag = chooseDollarTag([role, owner]);
+
+    statements.push(
+      [
+        `DO $${tag}$`,
+        "DECLARE s record;",
+        "BEGIN",
+        "  FOR s IN",
+        "    SELECT nspname FROM pg_namespace",
+        "    WHERE nspname NOT LIKE 'pg\\_%'",
+        "      AND nspname <> 'information_schema'",
+        "  LOOP",
+        `    EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA %I FROM %I', s.nspname, ${lRole});`,
+        `    EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA %I FROM %I', s.nspname, ${lRole});`,
+        `    EXECUTE format('REVOKE ALL ON SCHEMA %I FROM %I', s.nspname, ${lRole});`,
+        `    EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I REVOKE ALL ON TABLES FROM %I', ${lOwner}, s.nspname, ${lRole});`,
+        "  END LOOP;",
+        "END",
+        `$${tag}$;`,
+      ].join("\n")
+    );
+  }
 
   for (const grant of grants) {
     const privileges = grant.privileges.map(normalizePrivilege).join(", ");

@@ -210,6 +210,33 @@ describe("compileGrantSql", () => {
     expect(sql).toContain(`, 'x$nimbus$; DROP DATABASE prod; --');`);
   });
 
+  // A role may revoke its own privileges in PostgreSQL, and an owner's rights
+  // over its own objects are ordinary ACL entries — so running the revoke
+  // preamble against the owner would lock the owner out of its own tables.
+  it("omits the revoke preamble when the role is the owner", () => {
+    const sql = compileGrantSql({
+      role: "app",
+      owner: "app",
+      grants: [],
+      extraSql: ["CREATE EXTENSION IF NOT EXISTS pgcrypto;"],
+    });
+
+    expect(sql).not.toContain("REVOKE");
+    expect(sql).not.toContain("DO $");
+    expect(sql).toBe("BEGIN;\nCREATE EXTENSION IF NOT EXISTS pgcrypto;\nCOMMIT;");
+  });
+
+  it("still grants when the role is the owner", () => {
+    const sql = compileGrantSql({
+      role: "app",
+      owner: "app",
+      grants: [{ privileges: ["SELECT"], schema: "marts", objects: "all" }],
+    });
+
+    expect(sql).not.toContain("REVOKE");
+    expect(sql).toContain('GRANT SELECT ON ALL TABLES IN SCHEMA "marts" TO "app";');
+  });
+
   it("still avoids collision when both role and owner contain the base tag", () => {
     const sql = compileGrantSql({
       role: "$nimbus$",

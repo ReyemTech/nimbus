@@ -176,6 +176,27 @@ export interface IOperatorDatabaseConfig {
    * databases whose lifecycle should genuinely track the config.
    */
   readonly reclaimPolicy?: ReclaimPolicy;
+  /**
+   * Raw SQL applied to the database as its owner, after the database and owner
+   * role exist. Intended for one-off setup a CRD cannot express, such as
+   * `CREATE EXTENSION IF NOT EXISTS ...` or seeding a schema.
+   *
+   * Statements MUST be idempotent — the Job re-runs whenever the content
+   * checksum changes, and may be re-applied to a database that already has the
+   * result of a previous run.
+   *
+   * They also run inside the surrounding transaction the applying script opens,
+   * not in one of their own, so they must be transaction-safe: statements
+   * PostgreSQL refuses inside a transaction block (`CREATE INDEX CONCURRENTLY`,
+   * `VACUUM`) will error, and a stray `COMMIT;` closes the transaction early and
+   * leaves the script's own trailing `COMMIT;` failing outside any transaction.
+   *
+   * @example
+   * ```typescript
+   * sql: ["CREATE EXTENSION IF NOT EXISTS pgcrypto;"]
+   * ```
+   */
+  readonly sql?: string[];
   /** When set, creates separate databases per environment with {dbName}-{env} naming. Per-env values override base config. */
   readonly environments?: EnvironmentOverrides<Omit<IOperatorDatabaseConfig, "environments">>;
 }

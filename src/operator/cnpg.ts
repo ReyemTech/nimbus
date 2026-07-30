@@ -8,7 +8,6 @@
  * @module operator/cnpg
  */
 
-import * as crypto from "node:crypto";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { ensureNamespace } from "../utils/ensure-namespace";
@@ -19,218 +18,15 @@ import type {
   IClusterInstance,
   IOperatorDatabaseConfig,
   IDatabaseInstance,
-  ReclaimPolicy,
 } from "./interfaces";
 import { createCnpgClusterDashboard } from "../observability/dashboards";
 import { createPrometheusRule } from "../observability/alerts";
 import { nimbus } from "../nimbus";
+import { DATA_NAMESPACE, DEFAULT_PG_VERSION } from "./cnpg-common.js";
+import { createSingleCnpgDatabaseInstance } from "./cnpg-database.js";
 
-const DATA_NAMESPACE = "data";
-const DEFAULT_PG_VERSION = "17";
 const DEFAULT_REPLICAS = 1;
 const DEFAULT_STORAGE_GB = 10;
-const CNPG_API_VERSION = "postgresql.cnpg.io/v1";
-/** CNPG reads role passwords from Secrets of this type (username + password keys). */
-const BASIC_AUTH_SECRET_TYPE = "kubernetes.io/basic-auth";
-const DEFAULT_RECLAIM_POLICY: ReclaimPolicy = "retain";
-
-/**
- * Normalize a string into a DNS-1123 subdomain usable as `metadata.name`.
- *
- * Only the Kubernetes object name is sanitized — the PostgreSQL identifiers in
- * `spec.name` / `spec.owner` are passed through verbatim so that CRs adopt
- * databases and roles that already exist under their original names.
- */
-function toResourceName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-/**
- * Create a single database instance within a CNPG cluster.
- *
- * Provisioning is declarative: a `DatabaseRole` CR owns the login role and its
- * password, and a `Database` CR owns the database and its ownership. The
- * operator reconciles both continuously, so drift (a dropped role, a changed
- * owner) is corrected rather than silently persisting.
- *
- * Both CRs adopt pre-existing objects — CNPG detects the database/role and
- * `ALTER`s it to match the manifest instead of failing — so this is safe to
- * apply on top of databases previously created by the psql bootstrap Job.
- *
- * Connection secrets with the per-user credentials are replicated to target
- * namespaces.
- */
-function createSingleCnpgDatabaseInstance(
-  clusterName: string,
-  dbName: string,
-  dbConfig: Omit<IOperatorDatabaseConfig, "environments">,
-  endpoint: pulumi.Output<string>,
-  port: pulumi.Output<number>,
-  cluster: k8s.apiextensions.CustomResource,
-  provider: k8s.Provider
-): IDatabaseInstance {
-  const username = dbConfig.owner ?? dbName;
-  const userSecretName = `${clusterName}-${dbName}-user`;
-  const roleSecretName = `${clusterName}-${dbName}-role`;
-  const reclaimPolicy = dbConfig.reclaimPolicy ?? DEFAULT_RECLAIM_POLICY;
-  const resourceLabels = {
-    "app.kubernetes.io/managed-by": "nimbus",
-    "nimbus/cluster": clusterName,
-    "nimbus/database": dbName,
-  };
-
-  // Generate a random password for the database user (deterministic per Pulumi resource)
-  const generatedPassword = pulumi.secret(crypto.randomBytes(24).toString("base64url"));
-
-  // Store user credentials in a Secret in the data namespace
-  const userSecret = new k8s.core.v1.Secret(
-    `${clusterName}-${dbName}-user-secret`,
-    {
-      metadata: {
-        name: userSecretName,
-        namespace: DATA_NAMESPACE,
-        labels: resourceLabels,
-      },
-      stringData: {
-        username,
-        password: generatedPassword,
-      },
-    },
-    { provider, dependsOn: [cluster], ignoreChanges: ["data", "stringData"] }
-  );
-
-  // Read password back from the stored secret (stable across deploys)
-  const storedSecret = k8s.core.v1.Secret.get(
-    `${clusterName}-${dbName}-user-secret-read`,
-    pulumi.interpolate`${DATA_NAMESPACE}/${userSecretName}`,
-    { provider, dependsOn: [userSecret] }
-  );
-  const stablePassword = storedSecret.data.apply((d) =>
-    Buffer.from(d?.["password"] ?? "", "base64").toString()
-  );
-
-  // basic-auth projection of the same credentials — the only Secret shape the
-  // CNPG DatabaseRole controller reads. Kept separate from userSecret because
-  // Secret.type is immutable in Kubernetes: converting the existing Opaque
-  // secret in place would force a replace and regenerate the password.
-  const roleSecret = new k8s.core.v1.Secret(
-    `${clusterName}-${dbName}-role-secret`,
-    {
-      metadata: {
-        name: roleSecretName,
-        namespace: DATA_NAMESPACE,
-        labels: resourceLabels,
-      },
-      type: BASIC_AUTH_SECRET_TYPE,
-      stringData: {
-        username,
-        password: stablePassword,
-      },
-    },
-    { provider, dependsOn: [userSecret] }
-  );
-
-  // DatabaseRole CR: owns the login role and its password. Adopting an existing
-  // role forces omitted attributes back to their defaults, so `login` is set
-  // explicitly — everything else already matches the PostgreSQL defaults the
-  // previous bootstrap Job left behind.
-  const databaseRole = new k8s.apiextensions.CustomResource(
-    `${clusterName}-${dbName}-role-cr`,
-    {
-      apiVersion: CNPG_API_VERSION,
-      kind: "DatabaseRole",
-      metadata: {
-        name: toResourceName(`${clusterName}-${dbName}-role`),
-        namespace: DATA_NAMESPACE,
-        labels: resourceLabels,
-      },
-      spec: {
-        cluster: { name: clusterName },
-        name: username,
-        ensure: "present",
-        login: true,
-        passwordSecret: { name: roleSecretName },
-        databaseRoleReclaimPolicy: reclaimPolicy,
-      },
-    },
-    { provider, dependsOn: [cluster, roleSecret] }
-  );
-
-  // Database CR: owns the database and its ownership. `spec.name` is the raw
-  // PostgreSQL identifier so the CR adopts a database created under that exact
-  // name; only metadata.name is sanitized for DNS-1123.
-  const database = new k8s.apiextensions.CustomResource(
-    `${clusterName}-${dbName}-database-cr`,
-    {
-      apiVersion: CNPG_API_VERSION,
-      kind: "Database",
-      metadata: {
-        name: toResourceName(`${clusterName}-${dbName}-db`),
-        namespace: DATA_NAMESPACE,
-        labels: resourceLabels,
-      },
-      spec: {
-        cluster: { name: clusterName },
-        name: dbName,
-        owner: username,
-        ensure: "present",
-        databaseReclaimPolicy: reclaimPolicy,
-      },
-    },
-    // The owning role must exist before CREATE DATABASE ... OWNER.
-    { provider, dependsOn: [cluster, databaseRole] }
-  );
-
-  // Replicate connection secrets with per-user credentials to target namespaces
-  const secrets: Record<string, pulumi.Output<string>> = {};
-  const dbHost = endpoint;
-  const dbPort = port;
-
-  for (const targetNs of dbConfig.namespaces) {
-    const nsResource = ensureNamespace(targetNs, provider);
-    const secretName = `${clusterName}-${dbName}-pg`;
-
-    new k8s.core.v1.Secret(
-      `${clusterName}-${dbName}-secret-${targetNs}`,
-      {
-        metadata: {
-          name: secretName,
-          namespace: targetNs,
-          labels: resourceLabels,
-        },
-        stringData: {
-          host: dbHost,
-          port: dbPort.apply((p) => String(p)),
-          username,
-          password: stablePassword,
-          database: dbName,
-          uri: pulumi
-            .all([dbHost, dbPort, stablePassword])
-            .apply(
-              ([h, p, pw]) => `postgresql://${username}:${pw}@${h}:${p}/${dbName}?sslmode=require`
-            ),
-        },
-      },
-      { provider, dependsOn: [database, nsResource] }
-    );
-
-    secrets[targetNs] = pulumi.output(secretName);
-  }
-
-  return {
-    name: dbName,
-    clusterName,
-    host: endpoint,
-    port,
-    database: pulumi.output(dbName),
-    secrets,
-    nativeResource: database,
-  };
-}
 
 /**
  * Create a single PostgreSQL cluster via the CloudNativePG operator (no environment awareness).
@@ -450,28 +246,30 @@ function createSingleCnpgCluster(
             ...baseConfig,
             ...envOverrides,
           };
-          envResult[env] = createSingleCnpgDatabaseInstance(
-            `${name}`,
-            `${dbName}-${env}`,
-            mergedConfig,
+          envResult[env] = createSingleCnpgDatabaseInstance({
+            clusterName: name,
+            dbName: `${dbName}-${env}`,
+            config: mergedConfig,
             endpoint,
             port,
+            pgVersion: version,
             cluster,
-            provider
-          );
+            provider,
+          });
         }
         result = envResult;
       } else {
         const { environments: _, ...cleanConfig } = dbConfig;
-        result = createSingleCnpgDatabaseInstance(
-          name,
+        result = createSingleCnpgDatabaseInstance({
+          clusterName: name,
           dbName,
-          cleanConfig,
+          config: cleanConfig,
           endpoint,
           port,
+          pgVersion: version,
           cluster,
-          provider
-        );
+          provider,
+        });
       }
       // Runtime: environments → Record, otherwise → IDatabaseInstance.
       // Overload signatures on IClusterInstance narrow the type for callers.

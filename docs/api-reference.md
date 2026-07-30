@@ -211,6 +211,21 @@ Job's revoke-then-grant preamble is scoped to exactly the privileges a grant spe
 can ask back, so reconciliation can never strip access that no configuration
 restores. Read-only grants get no sequence privileges.
 
+**Out-of-band grants (PostgreSQL).** The scoping above cuts both ways. If a DBA
+runs `GRANT CREATE ON SCHEMA marts TO reader;` or `GRANT UPDATE ON marts.orders_id_seq
+TO reader;` by hand outside of nimbus, that grant survives every future
+reconciliation — the revoke preamble never issues `REVOKE ... ON SCHEMA` for
+anything but `USAGE`, nor `REVOKE ... ON SEQUENCE` for anything but `USAGE,
+SELECT`, so it has nothing to strip either privilege with. A hand-run table
+grant does not get the same protection: `REVOKE ALL ON ALL TABLES IN SCHEMA
+... FROM <role>` runs unconditionally in the preamble regardless of what put
+the privilege there, so `GRANT INSERT ON marts.orders TO reader;` run by hand
+is revoked on the next `addRole()` reconcile even though no `IDatabaseGrant` in
+the role's config ever asked for it. In short: schema `CREATE` and sequence
+`UPDATE` are privileges nimbus cannot manage in either direction, not merely
+privileges it declines to grant — anything else, table grants included, is
+fair game for the next revoke pass.
+
 #### CloudNativePG example
 
 ```typescript

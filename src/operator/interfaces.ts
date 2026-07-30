@@ -69,7 +69,27 @@ export interface IDatabaseRoleConfig {
   readonly namespaces?: string[];
   /** Whether the role can log in. Default: true. */
   readonly login?: boolean;
-  /** Privileges granted to this role on the owning database. */
+  /**
+   * Privileges this role holds on the owning database.
+   *
+   * The field has three states, and the difference between the last two
+   * matters:
+   *
+   * - **omitted** — nimbus does not manage this role's privileges. Nothing is
+   *   granted and, on CloudNativePG, nothing is revoked: whatever the role
+   *   holds is left exactly as it is.
+   * - **`[]`** — this role should hold *no* privileges. This is a real desired
+   *   state, not an absence of one: on CloudNativePG the reconciling Job still
+   *   runs and revokes everything the role holds. Removing the last entry from
+   *   a role's grants therefore actually takes its access away, rather than
+   *   freezing it at whatever was granted last.
+   * - **a non-empty list** — the role holds exactly these privileges; anything
+   *   else it held is revoked.
+   *
+   * On MariaDB the first two states coincide, since privileges live in `Grant`
+   * CRs the operator deletes (and revokes) when they leave the config. Neo4j
+   * Community has no RBAC at all, so any value — including `[]` — throws.
+   */
   readonly grants?: IDatabaseGrant[];
   /**
    * End-of-life policy for the role. Default: "retain".
@@ -264,7 +284,9 @@ export interface IDatabaseInstance {
    *
    * `grants` are reconciled, not merely applied: every privilege the role holds
    * is revoked before the requested grants are re-applied, so removing a grant
-   * from config actually removes it. The database owner is exempt from this and
+   * from config actually removes it — including the last one, since
+   * `grants: []` means "hold nothing" rather than "manage nothing" (see
+   * {@link IDatabaseRoleConfig.grants}). The database owner is exempt and
    * cannot be passed here at all — an owner's rights over its own objects are
    * ordinary ACL entries, so revoking them would strip the owner's access to
    * the very tables it owns. The owner's role is created by `createDatabase()`.

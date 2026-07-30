@@ -10,7 +10,18 @@ import type { IDatabaseGrant, IDatabaseRoleConfig, ReclaimPolicy } from "../inte
 /** Role configuration with all defaults applied. */
 export interface IResolvedRoleConfig {
   readonly login: boolean;
-  readonly grants: ReadonlyArray<IDatabaseGrant>;
+  /**
+   * Desired privileges, or `undefined` when nimbus does not manage this role's
+   * privileges at all.
+   *
+   * The distinction is load-bearing and must survive defaults resolution: an
+   * empty array means "this role should hold no privileges" and reconciles to
+   * a revoke of everything, while `undefined` means "leave the role's
+   * privileges alone". Collapsing the two — defaulting to `[]` — would make
+   * removing the last grant from a config indistinguishable from never having
+   * configured grants, and the role would silently keep every privilege it had.
+   */
+  readonly grants: ReadonlyArray<IDatabaseGrant> | undefined;
   readonly reclaimPolicy: ReclaimPolicy;
   readonly namespaces: ReadonlyArray<string>;
 }
@@ -68,14 +79,18 @@ export function assertValidRoleName(roleName: string, databaseName: string): voi
 /**
  * Apply defaults to a role config and validate its grants.
  *
+ * `grants` is deliberately **not** defaulted: see
+ * {@link IResolvedRoleConfig.grants} for why `undefined` and `[]` must stay
+ * distinguishable.
+ *
  * @param config - Raw user-supplied configuration
  * @returns Configuration with every optional field resolved
  * @throws {AnyCloudError} code `INVALID_GRANT` when a grant lists no privileges
  */
 export function resolveRoleConfig(config?: IDatabaseRoleConfig): IResolvedRoleConfig {
-  const grants = config?.grants ?? [];
+  const grants = config?.grants;
 
-  for (const grant of grants) {
+  for (const grant of grants ?? []) {
     if (grant.privileges.length === 0) {
       throw new AnyCloudError(
         "Each grant must list at least one privilege.",

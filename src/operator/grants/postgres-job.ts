@@ -79,8 +79,18 @@ export interface IGrantJobOptions {
   readonly ownerName: string;
   /** Secret holding the owner's existing credentials (must expose a `password` key). */
   readonly ownerSecretName: string;
-  /** Desired grants. An empty list (with no `extraSql`) means nothing to apply. */
-  readonly grants: ReadonlyArray<IDatabaseGrant>;
+  /**
+   * Desired grants, or `undefined` when privileges are not managed for this
+   * role.
+   *
+   * The two are not the same. `undefined` (with no `extraSql`) means there is
+   * nothing to apply and no Job is created. An **empty array** means the role
+   * should hold no privileges, which is a real reconciliation: the Job runs and
+   * {@link compileGrantSql}'s revoke preamble strips everything. Treating `[]`
+   * as "nothing to do" would make removing the last grant from a config a
+   * silent no-op, leaving the role holding privileges forever.
+   */
+  readonly grants?: ReadonlyArray<IDatabaseGrant>;
   /** Raw SQL appended after the grants; see {@link compileGrantSql}'s `extraSql`. */
   readonly extraSql?: ReadonlyArray<string>;
   /** Namespace to create the Job and ConfigMap in. */
@@ -188,20 +198,23 @@ function deriveJobName(
  * Pulumi, so a new Job is created and actually runs.
  *
  * @param options - Cluster, role, owner, grants, and dependencies
- * @returns The Job, or `undefined` when `grants` and `extraSql` are both empty
+ * @returns The Job, or `undefined` when privileges are unmanaged (`grants` is
+ *   `undefined`) and there is no `extraSql`. An **empty** `grants` array still
+ *   produces a Job — it means "this role should hold no privileges", and the
+ *   compiled script revokes them.
  * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a grant lists a
  *   privilege {@link compileGrantSql} does not support
  */
 export function createPostgresGrantJob(options: IGrantJobOptions): k8s.batch.v1.Job | undefined {
   const { grants, extraSql = [] } = options;
-  if (grants.length === 0 && extraSql.length === 0) {
+  if (grants === undefined && extraSql.length === 0) {
     return undefined;
   }
 
   const sql = compileGrantSql({
     role: options.roleName,
     owner: options.ownerName,
-    grants,
+    grants: grants ?? [],
     extraSql,
   });
 

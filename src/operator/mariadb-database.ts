@@ -216,7 +216,11 @@ export function createSingleMariadbDatabaseInstance(
         dbName,
         roleName,
         naming,
-        grants: toMariadbGrants(resolved.grants),
+        // `grants: []` and an omitted `grants` both come to the same thing on
+        // MariaDB: no `Grant` CRs. Removing a grant from config deletes its CR
+        // and mariadb-operator issues the `REVOKE`, so the revoke semantics
+        // `grants: []` asks for are what the declarative path already gives.
+        grants: toMariadbGrants(resolved.grants ?? []),
         host: mariadbOptions?.host ?? DEFAULT_GRANT_HOST,
         maxUserConnections: mariadbOptions?.maxUserConnections,
         labels,

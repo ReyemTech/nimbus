@@ -124,13 +124,13 @@ across engines; the mechanism and the guarantees behind it are not:
 | --- | --- |
 | CloudNativePG | `DatabaseRole` CR for the role itself. Grants have no CRD, so they are applied by a `psql` Job that authenticates as the **database owner**, never superuser — one transaction that revokes every privilege the role currently holds and re-grants the requested set, so removing a grant from config actually revokes it. |
 | MariaDB | `User` CR for the account, one `Grant` CR per requested grant. Fully declarative — no SQL, no Job. |
-| Neo4j (Community) | a one-shot `cypher-shell` Job running `CREATE USER ... IF NOT EXISTS`. There is no RBAC to reconcile — `grants` throws. |
+| Neo4j (Community) | a one-shot `cypher-shell` Job running `CREATE USER ... IF NOT EXISTS`. There is no RBAC to reconcile — any `grants` value throws, `[]` included. |
 
 ```typescript
 interface IDatabaseRoleConfig {
   namespaces?: string[]; // Secret replication targets. Default: none.
   login?: boolean; // Default: true. false throws on MariaDB and Neo4j.
-  grants?: IDatabaseGrant[]; // Throws on Neo4j (no RBAC in Community edition).
+  grants?: IDatabaseGrant[]; // Omitted = unmanaged; [] = hold nothing. Throws on Neo4j.
   reclaimPolicy?: "retain" | "delete"; // CloudNativePG only; ignored elsewhere. Default: "retain".
   engineOptions?: {
     postgresql?: { inRoles?: string[]; connectionLimit?: number; validUntil?: string };
@@ -158,7 +158,9 @@ interface IDatabaseRole {
 - `name` equals the database's owner — the owner's role already exists (created by
   `createDatabase()`); a second CR/Job for the same account would fight the first
   over its password.
-- `grants` is passed on Neo4j (no RBAC in Community edition).
+- `grants` is passed on Neo4j — including `grants: []`. Community edition has no
+  RBAC, so neither a privilege set nor "this role holds no privileges" can be
+  honoured: every Neo4j account can read and write the whole graph.
 - `login: false` is passed on MariaDB or Neo4j (every account there is a login
   account).
 - `name` contains a backtick, single quote, double quote, backslash, or NUL byte,
@@ -173,6 +175,14 @@ them is valid in the `GRANT ... ON ALL TABLES IN SCHEMA ...` / `GRANT ... ON
 they are schema privileges, not relation privileges, so they would render as
 `GRANT USAGE ON ALL TABLES IN SCHEMA ...` and fail at runtime. Nothing is lost —
 `GRANT USAGE ON SCHEMA` is emitted automatically for every grant.
+
+**Omitting `grants` is not the same as `grants: []`.** Omitting it means nimbus
+does not manage the role's privileges: nothing is granted and, on CloudNativePG,
+nothing is revoked. `grants: []` means the role should hold *no* privileges — a
+real desired state, so the reconciling Job still runs and revokes everything.
+That is what makes removing the last grant from a config take access away
+instead of freezing it. On MariaDB the two coincide (privileges live in `Grant`
+CRs, which are deleted — and revoked — when they leave the config).
 
 `objects: "all"` is the portable "current and future objects" form. On PostgreSQL
 it emits both `GRANT ... ON ALL TABLES IN SCHEMA ...` and

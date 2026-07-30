@@ -320,6 +320,18 @@ describe("addRole", () => {
     expect(() => db.addRole("reader", withGrants)).toThrow(/Neo4j Community has no RBAC/);
   });
 
+  // `grants: []` is not "no grants to apply" — on the engines that model
+  // privileges it means "this role should hold none", and Neo4j Community
+  // cannot honour that either: every account it creates can read and write the
+  // whole graph. Accepting it would be exactly the silent lie the non-empty
+  // case is rejected for.
+  it("rejects an empty grants list too", () => {
+    const db = makeDatabase();
+
+    expect(() => db.addRole("reader", { grants: [] })).toThrow(AnyCloudError);
+    expect(() => db.addRole("reader", { grants: [] })).toThrow(/grants: \[\]/);
+  });
+
   it("names the role and the database when rejecting grants", () => {
     const db = makeDatabase();
 

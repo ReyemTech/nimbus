@@ -16,10 +16,21 @@ describe("resolveRoleConfig", () => {
     expect(resolved.reclaimPolicy).toBe("retain");
   });
 
-  it("defaults namespaces and grants to empty arrays", () => {
-    const resolved = resolveRoleConfig();
-    expect(resolved.namespaces).toEqual([]);
-    expect(resolved.grants).toEqual([]);
+  it("defaults namespaces to an empty array", () => {
+    expect(resolveRoleConfig().namespaces).toEqual([]);
+  });
+
+  // `grants` is the one field that must NOT be defaulted. Resolving an omitted
+  // `grants` to `[]` would make "nimbus does not manage this role's privileges"
+  // indistinguishable from "this role should hold no privileges", and the
+  // engines act on that difference: the second revokes, the first does nothing.
+  it("leaves an omitted grants list undefined rather than defaulting it", () => {
+    expect(resolveRoleConfig().grants).toBeUndefined();
+    expect(resolveRoleConfig({ namespaces: ["apps"] }).grants).toBeUndefined();
+  });
+
+  it("preserves an explicitly empty grants list", () => {
+    expect(resolveRoleConfig({ grants: [] }).grants).toEqual([]);
   });
 
   it("preserves explicit login false", () => {

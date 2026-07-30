@@ -146,17 +146,18 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
     dependsOn: [database],
   });
 
-  // Owner-scoped Job for `config.sql`. It carries no grants, and because the
-  // role and the owner are the same the compiler emits no revoke preamble, so
-  // this only ever runs the supplied statements. Creates nothing at all when
-  // `sql` is omitted.
+  // Owner-scoped Job for `config.sql`. `grants` is omitted rather than passed
+  // as `[]`: the owner's privileges are not managed here at all, where `[]`
+  // would mean "the owner should hold nothing". Because the role and the owner
+  // are the same the compiler emits no revoke preamble either way, so this only
+  // ever runs the supplied statements — and creates nothing at all when `sql`
+  // is omitted.
   createPostgresGrantJob({
     clusterName,
     databaseName: dbName,
     roleName: username,
     ownerName: username,
     ownerSecretName: ownerNaming.credentialSecret,
-    grants: [],
     extraSql: config.sql ?? [],
     namespace: DATA_NAMESPACE,
     endpoint,
@@ -227,7 +228,8 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
 
       // The connection Secret waits on the grant Job so a consumer cannot read
       // working credentials, connect, and hit permission errors before the
-      // privileges have landed. There is no Job when the role has no grants.
+      // privileges have landed. There is no Job only when `grants` was omitted
+      // entirely; `grants: []` still produces one, which revokes.
       const roleSecrets = replicateCnpgConnectionSecrets({
         naming,
         namespaces: resolved.namespaces,

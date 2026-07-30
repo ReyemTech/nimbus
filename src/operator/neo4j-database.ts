@@ -169,10 +169,18 @@ export function createSingleNeo4jDatabaseInstance(
       // is nothing to compile these into, and accepting them so the call
       // succeeds would hand back a user with full access to the whole graph
       // while the config says it is read-only.
-      if (resolved.grants.length > 0) {
+      //
+      // An empty list is refused for the same reason rather than waved through
+      // as "nothing to grant". On the engines that model privileges it means
+      // "this role should hold none", and Neo4j Community cannot express that
+      // either: every account it creates can read and write the whole graph.
+      // Only omitting `grants` — asking nimbus not to manage privileges — is
+      // honourable here.
+      if (resolved.grants !== undefined) {
         throw new AnyCloudError(
           `Neo4j does not support declarative grants (role "${roleName}" on "${dbName}"). ` +
-            `Neo4j Community has no RBAC; remove the grants option.`,
+            `Neo4j Community has no RBAC — every account can read and write the whole ` +
+            `graph, so even "grants: []" cannot be honoured. Remove the grants option.`,
           ERROR_CODES.UNSUPPORTED_ROLE_OPTION
         );
       }

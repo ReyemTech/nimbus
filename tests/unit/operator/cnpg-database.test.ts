@@ -11,11 +11,14 @@ import { AnyCloudError, ERROR_CODES } from "../../../src/types/errors.js";
 
 /** Pulumi logical names registered so far, in creation order. */
 let registered: string[] = [];
+/** Inputs each registration was made with, keyed by logical name. */
+let inputsByName: Record<string, Record<string, unknown>> = {};
 
 beforeAll(() => {
   pulumi.runtime.setMocks({
     newResource: (args: pulumi.runtime.MockResourceArgs) => {
       registered.push(args.name);
+      inputsByName[args.name] = args.inputs;
       return { id: `${args.name}-id`, state: { ...args.inputs, data: {} } };
     },
     call: () => ({}),
@@ -24,6 +27,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   registered = [];
+  inputsByName = {};
 });
 
 /** Wait for Pulumi's asynchronous resource registrations to reach the mock. */
@@ -72,6 +76,26 @@ function addRoleOf(
     throw new Error("CNPG database instances must implement addRole()");
   }
   return addRole.bind(db);
+}
+
+/** Logical name of the grant Job registered for a role, or undefined if none. */
+function grantJobNameFor(role: string): string | undefined {
+  return registered.find(
+    (name) => name.startsWith(`cnpg-grants-shared-pg-analytics-${role}`) && !name.endsWith("-sql")
+  );
+}
+
+/** The SQL the grant Job's ConfigMap mounts, for the role's Job. */
+function grantSqlFor(role: string): string {
+  const jobName = grantJobNameFor(role);
+  if (!jobName) {
+    throw new Error(`no grant Job was registered for role "${role}"`);
+  }
+  const data = inputsByName[`${jobName}-sql`]?.["data"] as Record<string, string> | undefined;
+  if (!data?.["grants.sql"]) {
+    throw new Error(`the grant Job for role "${role}" mounted no SQL`);
+  }
+  return data["grants.sql"];
 }
 
 /** Resolve an Output to its underlying value. */
@@ -186,15 +210,45 @@ describe("addRole", () => {
     ).toBe(true);
   });
 
-  it("creates no grant Job for a role with no grants", async () => {
+  // Omitting `grants` means "nimbus does not manage this role's privileges",
+  // so there is nothing to reconcile and no Job to run.
+  it("creates no grant Job when grants is omitted", async () => {
     const db = makeDatabase();
     addRoleOf(db)("reader", { namespaces: ["app"] });
     await settle();
 
     expect(registered).toContain("shared-pg-analytics-role-reader-cr");
-    expect(
-      registered.some((name) => name.startsWith("cnpg-grants-shared-pg-analytics-reader"))
-    ).toBe(false);
+    expect(grantJobNameFor("reader")).toBeUndefined();
+  });
+
+  // `grants: []` is the opposite: a role that should hold no privileges. It is
+  // what a config looks like the moment its last grant is removed, and if that
+  // were treated as "nothing to do" the role would keep every privilege it had,
+  // forever — the revoke-then-grant script is the only thing that takes them
+  // away. MariaDB does revoke here (its Grant CRs are deleted), so skipping the
+  // Job would also split the two backends on the headline promise.
+  it("creates a revoke-only grant Job for an empty grants list", async () => {
+    const db = makeDatabase();
+    addRoleOf(db)("reader", { namespaces: ["app"], grants: [] });
+    await settle();
+
+    expect(grantJobNameFor("reader")).toBeDefined();
+
+    const sql = grantSqlFor("reader");
+    expect(sql).toContain("REVOKE ALL ON ALL TABLES IN SCHEMA");
+    expect(sql).not.toContain("GRANT SELECT");
+  });
+
+  // The Secret must not become readable before the revoke has run, or a
+  // consumer could connect with privileges the config says are gone.
+  it("makes the connection Secret wait on the revoke-only Job", async () => {
+    const db = makeDatabase();
+    addRoleOf(db)("reader", { namespaces: ["app"], grants: [] });
+    await settle();
+
+    expect(registered.indexOf(grantJobNameFor("reader") as string)).toBeLessThan(
+      registered.indexOf("shared-pg-analytics-role-reader-connection-app")
+    );
   });
   // Validation lives in one shared choke point (`assertValidRoleName`) rather
   // than being argued separately per engine. CNPG's grant SQL quotes

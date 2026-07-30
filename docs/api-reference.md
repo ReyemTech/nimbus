@@ -165,9 +165,14 @@ interface IDatabaseRole {
   on any engine.
 
 It throws code `INVALID_GRANT` when a grant lists zero privileges, and code
-`UNSUPPORTED_PRIVILEGE` (CloudNativePG only) when a grant names a privilege the SQL
-compiler cannot emit — the allowed set is `SELECT`, `INSERT`, `UPDATE`, `DELETE`,
-`TRUNCATE`, `REFERENCES`, `TRIGGER`, `USAGE`, `CREATE`, `ALL PRIVILEGES`.
+`UNSUPPORTED_PRIVILEGE` when a grant names a privilege the engine's grant path
+cannot emit. On CloudNativePG the allowed set is `SELECT`, `INSERT`, `UPDATE`,
+`DELETE`, `TRUNCATE`, `REFERENCES`, `TRIGGER`, `ALL PRIVILEGES` — every one of
+them is valid in the `GRANT ... ON ALL TABLES IN SCHEMA ...` / `GRANT ... ON
+<table>` statements the compiler emits. `USAGE` and `CREATE` are **not** accepted:
+they are schema privileges, not relation privileges, so they would render as
+`GRANT USAGE ON ALL TABLES IN SCHEMA ...` and fail at runtime. Nothing is lost —
+`GRANT USAGE ON SCHEMA` is emitted automatically for every grant.
 
 `objects: "all"` is the portable "current and future objects" form. On PostgreSQL
 it emits both `GRANT ... ON ALL TABLES IN SCHEMA ...` and

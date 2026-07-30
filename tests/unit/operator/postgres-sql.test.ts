@@ -60,7 +60,12 @@ describe("normalizePrivilege", () => {
   // compiler only ever emits GRANT ... ON ALL TABLES / ON <table> / ON SCHEMA
   // statements, none of which can carry them. Accepting them here would pass
   // validation and then fail (or silently do nothing) when the script runs.
-  it.each(["EXECUTE", "CONNECT", "TEMPORARY"])(
+  //
+  // USAGE and CREATE are the same class and were briefly allowed by mistake:
+  // they are schema privileges, so with `objects` defaulting to "all" they
+  // rendered as `GRANT USAGE ON ALL TABLES IN SCHEMA ...`, which PostgreSQL
+  // rejects with "invalid privilege type USAGE for relation".
+  it.each(["EXECUTE", "CONNECT", "TEMPORARY", "USAGE", "CREATE"])(
     "rejects %s because this compiler has no emission path for it",
     (privilege) => {
       expect(() => normalizePrivilege(privilege)).toThrow(/unsupported privilege/i);

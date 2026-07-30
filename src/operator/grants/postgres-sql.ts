@@ -19,16 +19,22 @@ import type { IDatabaseGrant } from "../interfaces.js";
 /**
  * Privileges accepted in {@link IDatabaseGrant.privileges}.
  *
- * Deliberately narrow: every entry here is either a privilege PostgreSQL
- * allows in a `GRANT ... ON ALL TABLES IN SCHEMA` / `GRANT ... ON <table>`
- * statement (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`,
- * `REFERENCES`, `TRIGGER`, `ALL PRIVILEGES`), or `CREATE`/`USAGE` for the
- * schema-scoped grant this compiler always emits alongside a table grant.
- * `EXECUTE`, `CONNECT`, and `TEMPORARY` are real PostgreSQL privileges but
- * apply to functions, databases, and tablespaces respectively — this
- * compiler has no emission path for them, so accepting them would pass
- * validation here and then fail (or silently do nothing useful) when the
- * script runs. Rejecting them at compile time surfaces the mistake early.
+ * Deliberately narrow: every entry is a privilege PostgreSQL allows in the
+ * only grant statements this compiler emits — `GRANT ... ON ALL TABLES IN
+ * SCHEMA <schema>` and `GRANT ... ON <schema>.<table>`. A keyword that is a
+ * real PostgreSQL privilege elsewhere but has no emission path here is
+ * rejected at compile time rather than passing validation and failing when
+ * the script runs:
+ *
+ * - `EXECUTE` applies to functions, `CONNECT` and `TEMPORARY` to databases.
+ * - `USAGE` and `CREATE` apply to schemas (and `USAGE` to sequences and
+ *   types), never to relations. They were briefly accepted here, which was a
+ *   bug: with `objects` defaulting to `"all"` they rendered as
+ *   `GRANT USAGE ON ALL TABLES IN SCHEMA "x" TO "r";`, which PostgreSQL
+ *   rejects with `invalid privilege type USAGE for relation`. Nothing is lost
+ *   by removing them — {@link compileGrantSql} already emits
+ *   `GRANT USAGE ON SCHEMA` for every grant, and schema `CREATE` is not
+ *   something this compiler grants at all.
  */
 const ALLOWED_PRIVILEGES: ReadonlySet<string> = new Set([
   "SELECT",
@@ -38,8 +44,6 @@ const ALLOWED_PRIVILEGES: ReadonlySet<string> = new Set([
   "TRUNCATE",
   "REFERENCES",
   "TRIGGER",
-  "USAGE",
-  "CREATE",
   "ALL PRIVILEGES",
 ]);
 

@@ -593,6 +593,43 @@ describe("addRole", () => {
     });
   });
 
+  // Two grants for one table both resolve to `-grant-events`. Rendering both
+  // would register two resources under one logical name and abort the preview
+  // with a duplicate-URN error, so the role would never be provisioned at all.
+  it("renders two grants on one table as a single CR holding both privileges", async () => {
+    addRoleOf(makeDatabase())("reader", {
+      grants: [
+        { privileges: ["select"], objects: "events" },
+        { privileges: ["insert"], objects: "events" },
+      ],
+    });
+    await awaitRegistered("shared-maria-analytics-role-reader-grant-events");
+
+    expect(
+      registered.filter((name) => name === "shared-maria-analytics-role-reader-grant-events")
+    ).toHaveLength(1);
+    expect(specOf("shared-maria-analytics-role-reader-grant-events")).toMatchObject({
+      privileges: ["INSERT", "SELECT"],
+      table: "events",
+      grantOption: false,
+    });
+  });
+
+  it("renders reordered same-table grants identically", async () => {
+    addRoleOf(makeDatabase())("reader", {
+      grants: [
+        { privileges: ["insert"], objects: "events" },
+        { privileges: ["select"], objects: "events" },
+      ],
+    });
+    await awaitRegistered("shared-maria-analytics-role-reader-grant-events");
+
+    expect(specOf("shared-maria-analytics-role-reader-grant-events")).toMatchObject({
+      privileges: ["INSERT", "SELECT"],
+      table: "events",
+    });
+  });
+
   it("creates no Grant CR for a role with no grants", async () => {
     const db = makeDatabase();
     addRoleOf(db)("reader", { namespaces: ["app"] });

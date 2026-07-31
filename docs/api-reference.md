@@ -240,6 +240,14 @@ That is what makes removing the last grant from a config take access away
 instead of freezing it. On MariaDB the two coincide (privileges live in `Grant`
 CRs, which are deleted — and revoked — when they leave the config).
 
+**MariaDB merges grants by table.** A `Grant` CR is named for the table it
+covers, so two entries targeting the same table — separate `SELECT` and `INSERT`
+grants on `orders`, say — become one CR whose `privileges` is the union of both.
+The result is canonical: privileges are deduplicated and sorted, and grants are
+ordered by table, so reordering the `grants` array produces identical CRs and no
+Pulumi diff. `ALL PRIVILEGES` absorbs anything merged with it, since MariaDB's
+`GRANT` grammar refuses it alongside other privileges.
+
 `objects: "all"` is the portable "current and future objects" form. On PostgreSQL
 it emits both `GRANT ... ON ALL TABLES IN SCHEMA ...` and
 `ALTER DEFAULT PRIVILEGES FOR ROLE <owner> ...`, so tables created after the grant

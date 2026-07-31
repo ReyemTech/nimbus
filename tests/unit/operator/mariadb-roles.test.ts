@@ -135,9 +135,11 @@ describe("additionalRoleNaming", () => {
 });
 
 describe("toMariadbGrants", () => {
+  // Privileges come back sorted, not in the order supplied: that is what makes
+  // a reordered config produce byte-identical output and no Pulumi diff.
   it("upper-cases privileges as MariaDB spells them", () => {
     expect(toMariadbGrants([{ privileges: ["select", "Insert"] }])).toEqual([
-      { privileges: ["SELECT", "INSERT"], table: "*", grantOption: false },
+      { privileges: ["INSERT", "SELECT"], table: "*", grantOption: false },
     ]);
   });
 
@@ -176,6 +178,68 @@ describe("toMariadbGrants", () => {
 
   it("returns nothing for a role with no grants", () => {
     expect(toMariadbGrants([])).toEqual([]);
+  });
+
+  // `grantNaming` keys a Grant CR's logical name on its table, so two grants for
+  // one table would register two resources under the same name and abort the
+  // preview with a duplicate-URN error — the role would never be provisioned at
+  // all. Unioning them is both the fix and what the caller meant.
+  it("merges two grants targeting the same table into one", () => {
+    expect(
+      toMariadbGrants([
+        { privileges: ["SELECT"], objects: "orders" },
+        { privileges: ["INSERT"], objects: "orders" },
+      ])
+    ).toEqual([{ privileges: ["INSERT", "SELECT"], table: "orders", grantOption: false }]);
+  });
+
+  it("produces identical output for reordered input", () => {
+    const forwards = toMariadbGrants([
+      { privileges: ["SELECT"], objects: "orders" },
+      { privileges: ["INSERT", "UPDATE"], objects: "orders" },
+      { privileges: ["SELECT"], objects: "customers" },
+    ]);
+    const backwards = toMariadbGrants([
+      { privileges: ["SELECT"], objects: "customers" },
+      { privileges: ["UPDATE", "INSERT"], objects: "orders" },
+      { privileges: ["SELECT"], objects: "orders" },
+    ]);
+
+    expect(forwards).toEqual(backwards);
+    expect(forwards).toEqual([
+      { privileges: ["SELECT"], table: "customers", grantOption: false },
+      { privileges: ["INSERT", "SELECT", "UPDATE"], table: "orders", grantOption: false },
+    ]);
+  });
+
+  it("merges database-wide grants, however objects spelt them", () => {
+    expect(
+      toMariadbGrants([
+        { privileges: ["SELECT"] },
+        { privileges: ["INSERT"], objects: "all" },
+        { privileges: ["select"], schema: "ignored" },
+      ])
+    ).toEqual([{ privileges: ["INSERT", "SELECT"], table: "*", grantOption: false }]);
+  });
+
+  it("keeps tables that genuinely differ apart", () => {
+    const grants = toMariadbGrants([
+      { privileges: ["SELECT"], objects: "orders" },
+      { privileges: ["SELECT"], objects: "customers" },
+    ]);
+
+    expect(grants.map((grant) => grant.table)).toEqual(["customers", "orders"]);
+  });
+
+  // MariaDB's GRANT grammar refuses ALL PRIVILEGES alongside anything else, so a
+  // union that kept both would render SQL the operator cannot execute.
+  it("lets ALL PRIVILEGES absorb what it is merged with", () => {
+    expect(
+      toMariadbGrants([
+        { privileges: ["SELECT"], objects: "orders" },
+        { privileges: ["ALL PRIVILEGES"], objects: "orders" },
+      ])
+    ).toEqual([{ privileges: ["ALL PRIVILEGES"], table: "orders", grantOption: false }]);
   });
 
   // Privileges are SQL keywords that cannot be quoted, so an unvalidated one is

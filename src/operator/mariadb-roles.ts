@@ -212,27 +212,60 @@ const ALLOWED_PRIVILEGES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Translate portable grants into mariadb-operator `Grant` specs.
+ * Translate portable grants into mariadb-operator `Grant` specs, one per table.
  *
  * `IDatabaseGrant.schema` has no MariaDB equivalent and is dropped — MariaDB
  * has no schema concept distinct from the database itself. `objects` is either
  * a single table name or `"all"`, which becomes `"*"`.
  *
+ * **Grants are merged by table.** A role may legitimately express two grants for
+ * one table — separate `SELECT` and `INSERT` entries, say — but
+ * {@link IMariadbRoleNaming.grantNaming} keys a `Grant` CR's logical name on the
+ * table, so rendering both would register two resources under one name and abort
+ * the preview with a duplicate-URN error instead of provisioning anything. Their
+ * privileges are unioned into a single CR, which is also what the caller meant.
+ *
+ * The result is canonical: privileges are deduplicated after normalization and
+ * sorted, and tables are sorted, so reordering the input array produces byte-
+ * identical output and no Pulumi diff. `ALL PRIVILEGES` absorbs everything it is
+ * merged with — MariaDB's `GRANT` grammar rejects it alongside other privileges,
+ * so a union that keeps both would only render invalid SQL.
+ *
  * @param grants - Portable grants from the role configuration
- * @returns One MariaDB grant spec per input grant, in the same order
+ * @returns One MariaDB grant spec per distinct table, ordered by table name
  * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a grant names a
  *   privilege outside {@link ALLOWED_PRIVILEGES}
+ *
+ * @example
+ * ```typescript
+ * toMariadbGrants([
+ *   { privileges: ["SELECT"], objects: "orders" },
+ *   { privileges: ["INSERT"], objects: "orders" },
+ * ]);
+ * // → [{ privileges: ["INSERT", "SELECT"], table: "orders", grantOption: false }]
+ * ```
  */
 export function toMariadbGrants(
   grants: ReadonlyArray<IDatabaseGrant>
 ): ReadonlyArray<IMariadbGrantSpec> {
-  return grants.map((grant) => ({
-    privileges: grant.privileges.map((privilege) =>
-      normalizePrivilegeAgainst(privilege, ALLOWED_PRIVILEGES, ENGINE_NAME)
-    ),
-    table: grant.objects && grant.objects !== ALL_OBJECTS ? grant.objects : ALL_TABLES,
-    grantOption: false,
-  }));
+  const privilegesByTable = new Map<string, Set<string>>();
+
+  for (const grant of grants) {
+    const table = grant.objects && grant.objects !== ALL_OBJECTS ? grant.objects : ALL_TABLES;
+    const privileges = privilegesByTable.get(table) ?? new Set<string>();
+    for (const privilege of grant.privileges) {
+      privileges.add(normalizePrivilegeAgainst(privilege, ALLOWED_PRIVILEGES, ENGINE_NAME));
+    }
+    privilegesByTable.set(table, privileges);
+  }
+
+  return [...privilegesByTable.entries()]
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([table, privileges]) => ({
+      privileges: privileges.has(ALL_PRIVILEGES) ? [ALL_PRIVILEGES] : [...privileges].sort(),
+      table,
+      grantOption: false,
+    }));
 }
 
 /** Inputs for {@link provisionMariadbRole}. */
@@ -271,7 +304,7 @@ export interface IMariadbRoleOptions {
 export interface IMariadbProvisionedRole {
   /** The `User` custom resource. */
   readonly user: k8s.apiextensions.CustomResource;
-  /** One `Grant` custom resource per requested grant, in order. */
+  /** One `Grant` custom resource per requested grant, in the order supplied. */
   readonly grants: ReadonlyArray<k8s.apiextensions.CustomResource>;
   /** The user's password Secret and its stable password. */
   readonly credentials: IRoleCredentials;

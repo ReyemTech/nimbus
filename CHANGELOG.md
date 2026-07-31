@@ -1,3 +1,60 @@
+# [3.0.0](https://github.com/ReyemTech/nimbus/compare/v2.12.6...v3.0.0) (2026-07-31)
+
+
+* feat(operator)!: make addRole() required on IDatabaseInstance ([96e0a1b](https://github.com/ReyemTech/nimbus/commit/96e0a1bb5c96b18a13d8dc68ab95eb95e0a0ffd9))
+
+
+### Bug Fixes
+
+* **cli:** check every attribute DatabaseRole adoption resets ([c3e73a6](https://github.com/ReyemTech/nimbus/commit/c3e73a6580216f10fa37d77e00b0b223886c7420))
+* **cli:** parse migrate pre-flight query output as JSON ([0d3c16f](https://github.com/ReyemTech/nimbus/commit/0d3c16f0052a1266096857954f12993909ddc96b))
+* **operator/cnpg:** reject addRole() for the database owner ([b9a58b5](https://github.com/ReyemTech/nimbus/commit/b9a58b582eec5e1b675fd652e1322608935bb3b9))
+* **operator/cnpg:** reject role names claimed twice on one cluster ([368e377](https://github.com/ReyemTech/nimbus/commit/368e3772d129698d88777a7e24d89bcb1c7f3a74))
+* **operator/cnpg:** serialize grant Jobs within a database ([8fab68f](https://github.com/ReyemTech/nimbus/commit/8fab68f8acdbbb65d2c957aa1a3d4ea1007d1813))
+* **operator/grants:** grant sequences back for write grants ([e632390](https://github.com/ReyemTech/nimbus/commit/e6323909f293552c8f6900571b3bb4bcf44735b6))
+* **operator/grants:** render sequence grants and revokes from one constant ([24c7bb2](https://github.com/ReyemTech/nimbus/commit/24c7bb2a615c027e12d19932a3e32261f5785372))
+* **operator/mariadb:** keep Grant CR names distinct after sanitizing ([073861d](https://github.com/ReyemTech/nimbus/commit/073861d37230b831344677e56cd52ffd0cb30adc))
+* **operator/mariadb:** key addRole() names on the user@host account ([2228cdf](https://github.com/ReyemTech/nimbus/commit/2228cdfb20a7669afd1dffa6e947b22fa826d66b))
+* **operator/mariadb:** merge grants targeting the same table ([dfdd296](https://github.com/ReyemTech/nimbus/commit/dfdd296c1eea9ae279e7abb5d2cafac60a3e370f))
+* **operator/mariadb:** reject account identities claimed twice on one instance ([5eb7966](https://github.com/ReyemTech/nimbus/commit/5eb79666e784f83b95d0f6a3ee4bf2d4eaa004db))
+* **operator/mariadb:** reject config.owner, name Grant CRs by table ([a38e201](https://github.com/ReyemTech/nimbus/commit/a38e201b75f905c7bac2dcdcbf856ac5c46ed419))
+* **operator/mariadb:** resolve a blank host to the operator's default ([cf37aa1](https://github.com/ReyemTech/nimbus/commit/cf37aa10f08e181f979e0fe688e63fc798151b56))
+* **operator/mariadb:** validate grant privileges ([dd72666](https://github.com/ReyemTech/nimbus/commit/dd72666fee0448227b51b973a9f254545f67b9a5))
+* **operator/neo4j:** reject usernames claimed twice on one deployment ([6c935e1](https://github.com/ReyemTech/nimbus/commit/6c935e16779077f1faf5a8eb2c5b4e0f94700721))
+* **operator/neo4j:** sanitize role names used as label values ([52a7f20](https://github.com/ReyemTech/nimbus/commit/52a7f201373fdab5b458fc7cecbbb33fcdf4968a))
+* **operator/neo4j:** set a provisioned user's password unconditionally ([ffe3c70](https://github.com/ReyemTech/nimbus/commit/ffe3c70dd734d838b187908fb92d39c88ddb1c5e))
+* **operator:** bound derived resource names to the limits Kubernetes enforces ([10fc918](https://github.com/ReyemTech/nimbus/commit/10fc91855fa362e4e2469719b7ed69b8b6e9a1fc))
+* **operator:** close dollar-quote injection and revoke-scan gaps in grant compiler ([e380e30](https://github.com/ReyemTech/nimbus/commit/e380e304ad7034619bc9239364786d0d4f19eb22))
+* **operator:** keep addRole() resource names distinct after sanitizing ([ab61208](https://github.com/ReyemTech/nimbus/commit/ab61208d0c380351f3d251a9b10afb42510aa4b0))
+* **operator:** make credentials username optional, readonly dependsOn ([7e0b231](https://github.com/ReyemTech/nimbus/commit/7e0b231b257f545cd582ffa9d0339908302db19c))
+* **operator:** make encoded and unchanged role identities disjoint ([057c8fc](https://github.com/ReyemTech/nimbus/commit/057c8fc54a85429eb91a1fdbd71d487b437d0d4e))
+* **operator:** percent-encode connection URI components on all backends ([f675caa](https://github.com/ReyemTech/nimbus/commit/f675caaa7d3592f05c34865493682c54f6656900))
+* **operator:** reject blank role and database names ([20702fa](https://github.com/ReyemTech/nimbus/commit/20702fa44eb465fd5505f51f77315cb2f638dd91))
+* **operator:** reject engineOptions blocks the running engine cannot honour ([1a027c6](https://github.com/ReyemTech/nimbus/commit/1a027c6e726449efea2eb3f2af78ff6376795e04))
+* **operator:** rename misleading test, use ERROR_CODES constant ([5100461](https://github.com/ReyemTech/nimbus/commit/51004616bae15660276531678bdfe8d45e784569))
+* **operator:** scope grant Job checksum to full resource identity ([b9c8a51](https://github.com/ReyemTech/nimbus/commit/b9c8a51707c450d86ec4e06941de570fb61d5ed7))
+* **operator:** validate grants before claiming the account name ([cab33ec](https://github.com/ReyemTech/nimbus/commit/cab33ecac241de2b0e842ef4155e5ac5b55ec0dc))
+* **operator:** validate role names and reject Neo4j environments ([6087a29](https://github.com/ReyemTech/nimbus/commit/6087a29dca69f0afa8048028aa0d53072c3d25d0))
+
+
+### Features
+
+* **cli:** add read-only migrate pre-flight command ([638ca70](https://github.com/ReyemTech/nimbus/commit/638ca70b1006b9dc3743bc0c2f76e3809d5ee660))
+* **operator/cnpg:** add addRole() and reimplement createDatabase on it ([c67bfb2](https://github.com/ReyemTech/nimbus/commit/c67bfb200ad30fa4870fe3ed2926a6f33b1a8e13))
+* **operator/cnpg:** replace psql bootstrap Job with Database/DatabaseRole CRDs ([682a950](https://github.com/ReyemTech/nimbus/commit/682a9505adde7d49e8783f247d7d8c658c2bc2b2))
+* **operator/mariadb:** add addRole() and reimplement createDatabase on it ([399de49](https://github.com/ReyemTech/nimbus/commit/399de49d4860e2c39d2fe64642b87f8c0c851cd8))
+* **operator/neo4j:** add addRole() and stop swallowing GRANT ROLE failures ([c850c42](https://github.com/ReyemTech/nimbus/commit/c850c42604c88188b9a7a0a5f526b5bd34259c44))
+* **operator:** add PostgreSQL grant reconciliation job ([e329498](https://github.com/ReyemTech/nimbus/commit/e329498396fd7ba82c4da2203d091fb04bfdeabc))
+* **operator:** add PostgreSQL grant SQL compiler ([59cdfa0](https://github.com/ReyemTech/nimbus/commit/59cdfa0e58c06713db70ed1d5ad841ba429ed03d))
+* **operator:** add role interfaces and config defaults ([0a8d4d2](https://github.com/ReyemTech/nimbus/commit/0a8d4d2023863b292cd46fedf2af9c08acfcef93))
+
+
+### BREAKING CHANGES
+
+* `IDatabaseInstance.addRole()` is required. Only code that
+implements the interface is affected — realistically test mocks and hand-rolled
+fakes; every call site gets strictly better types.
+
 ## [2.12.6](https://github.com/ReyemTech/nimbus/compare/v2.12.5...v2.12.6) (2026-07-24)
 
 

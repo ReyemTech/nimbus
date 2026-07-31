@@ -151,6 +151,38 @@ export function readString(row: Record<string, unknown>, column: string): string
 }
 
 /**
+ * Read a column that may legitimately hold SQL `NULL`.
+ *
+ * A nullable column has three states this parser must keep apart: a value, an
+ * explicit `NULL` — which is data, not a failure (`rolvaliduntil` NULL is how
+ * PostgreSQL spells "this password never expires") — and a column that is absent
+ * or of the wrong type, which is unreadable. Only the last may warn, so `null`
+ * is returned as itself rather than collapsed into the `undefined` that
+ * {@link readString} uses for "could not read this".
+ *
+ * An empty string is a value here, unlike in {@link readString}: `COMMENT ON
+ * ROLE … IS ''` is a real, if pointless, state and must not read as unreadable.
+ *
+ * @param row - Parsed row
+ * @param column - Column name
+ * @returns The value, `null` for a SQL `NULL`, or undefined when the column is
+ *   absent or of another type
+ */
+export function readNullableString(
+  row: Record<string, unknown>,
+  column: string
+): string | null | undefined {
+  if (!(column in row)) {
+    return undefined;
+  }
+  const value = row[column];
+  if (value === null) {
+    return null;
+  }
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
  * Read a column that must hold a JSON boolean.
  *
  * PostgreSQL's `boolean` renders as a JSON boolean, not as psql's `t`/`f`, so a

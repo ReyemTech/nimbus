@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseJsonRows,
   readBoolean,
+  readNullableString,
   readNumber,
   readString,
   readStringArray,
@@ -101,6 +102,7 @@ describe("column readers", () => {
     members: ["a", "b"],
     mixed: ["a", 1],
     psqlBoolean: "t",
+    nothing: null,
   };
 
   it("reads a non-empty string", () => {
@@ -122,6 +124,22 @@ describe("column readers", () => {
     expect(readNumber(row, "limit")).toBe(-1);
     expect(readNumber(row, "notFinite")).toBeUndefined();
     expect(readNumber(row, "name")).toBeUndefined();
+  });
+
+  // A SQL NULL in a nullable column is data — `rolvaliduntil` NULL is how
+  // PostgreSQL says a password never expires — so it must be distinguishable
+  // from a column that could not be read, which warns and drops the whole role.
+  it("keeps a SQL NULL apart from an unreadable column", () => {
+    expect(readNullableString(row, "nothing")).toBeNull();
+    expect(readNullableString(row, "missing")).toBeUndefined();
+    expect(readNullableString(row, "flag")).toBeUndefined();
+    expect(readNullableString(row, "name")).toBe("analytics");
+  });
+
+  // `COMMENT ON ROLE … IS ''` is a real state; unlike readString, an empty
+  // string here is a value rather than "could not read this".
+  it("reads an empty string as a value", () => {
+    expect(readNullableString(row, "empty")).toBe("");
   });
 
   it("reads only an array of strings", () => {

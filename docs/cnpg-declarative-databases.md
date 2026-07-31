@@ -71,19 +71,45 @@ exactly what the new manifest declares:
 ```bash
 kubectl exec -n data <cluster>-1 -- psql -tAc "
   SELECT r.rolname, r.rolcanlogin, r.rolsuper, r.rolcreatedb, r.rolcreaterole,
-         r.rolinherit, r.rolconnlimit, r.rolbypassrls,
+         r.rolinherit, r.rolconnlimit, r.rolbypassrls, r.rolreplication, r.rolvaliduntil,
+         shobj_description(r.oid, 'pg_authid') AS rolcomment,
          coalesce(array_agg(m.rolname) FILTER (WHERE m.rolname IS NOT NULL), '{}') AS memberof
   FROM pg_roles r
   LEFT JOIN pg_auth_members am ON am.member = r.oid
   LEFT JOIN pg_roles m ON m.oid = am.roleid
   WHERE r.rolname NOT LIKE 'pg\_%'
-  GROUP BY 1,2,3,4,5,6,7,8 ORDER BY 1"
+  GROUP BY 1,2,3,4,5,6,7,8,9,10,11 ORDER BY 1"
 ```
 
-For each role nimbus manages, expect `t|f|f|f|t|-1|f|{}` — login true, `inherit` true,
-`connlimit` -1, everything else false, no role memberships. Any role that deviates (a
-hand-granted `CREATEDB`, `SUPERUSER`, or membership in another role) **will lose that
-attribute on adoption**; either add it back after migrating or leave that database out.
+The query reads every attribute `DatabaseRole.spec` can express, because adoption resets
+each one the manifest omits. For each role nimbus manages, expect
+`t|f|f|f|t|-1|f|f|||{}` after the name — column by column:
+
+| Column                     | Expected | Meaning                                              |
+| -------------------------- | -------- | ---------------------------------------------------- |
+| `rolcanlogin`              | `t`      | the manifest sets `login: true`                       |
+| `rolsuper`                 | `f`      | not a superuser                                       |
+| `rolcreatedb`              | `f`      | cannot create databases                               |
+| `rolcreaterole`            | `f`      | cannot create roles                                   |
+| `rolinherit`               | `t`      | PostgreSQL's default                                  |
+| `rolconnlimit`             | `-1`     | no connection limit                                   |
+| `rolbypassrls`             | `f`      | does not bypass row-level security                    |
+| `rolreplication`           | `f`      | not a replication role                                |
+| `rolvaliduntil`            | empty    | NULL — the password never expires                     |
+| `rolcomment`               | empty    | NULL — no `COMMENT ON ROLE`                           |
+| `memberof`                 | `{}`     | no role memberships                                   |
+
+`psql -tA` prints a NULL as an empty field, so the two nullable columns show as the empty
+run `||` in the middle of the line. `rolvaliduntil` may also read `infinity`, which means
+the same thing — `ALTER ROLE` cannot write `VALID UNTIL NULL`, so that is how CNPG itself
+spells "never expires".
+
+Any role that deviates (a hand-granted `CREATEDB`, `SUPERUSER`, `REPLICATION`, a finite
+`VALID UNTIL`, a comment, or membership in another role) **will lose that attribute on
+adoption**; either add it back after migrating or leave that database out.
+
+`nimbus migrate` runs this same query and reports the same deviations, so running it by
+hand is a cross-check rather than a separate procedure.
 
 Then confirm database ownership already matches what nimbus assigns, so the
 `ALTER DATABASE … OWNER TO` on adoption is a no-op:
@@ -170,7 +196,8 @@ untouched and the previous Job-based flow can be restored from git history.
 - `DatabaseRole` adoption forces attributes **omitted** from the manifest back to their
   defaults. nimbus sets `login: true` explicitly; every other attribute already matches the
   PostgreSQL default that the bootstrap Job left in place. A role you hand-granted
-  `CREATEDB` or `SUPERUSER` to would lose it.
+  `CREATEDB`, `SUPERUSER` or `REPLICATION` to would lose it, a finite `VALID UNTIL` would be
+  lifted to `infinity`, and a `COMMENT ON ROLE` would be cleared.
 - **One owner per database.** Two `createDatabase()` calls sharing the same `owner` would
   produce two `DatabaseRole` CRs managing the same PostgreSQL role with different passwords,
   and they would overwrite each other on every reconcile. The old Job was one-shot so it

@@ -269,6 +269,59 @@ describe("additionalRoleNaming", () => {
     );
   });
 
+  // Instance, database, role and table names are all caller-controlled and
+  // unbounded, and Kubernetes rejects a `metadata.name` over 253 characters at
+  // apply time — after preview has passed, so the CRs the account needs are
+  // never created. Nothing here names a Job, so the stricter 63-character label
+  // limit does not apply.
+  describe("with a long instance, database and role", () => {
+    const clusterName = `production-mariadb-instance-${"x".repeat(90)}`;
+    const dbName = `customer-analytics-warehouse-${"y".repeat(90)}`;
+    const roleName = `reporting-read-only-service-account-${"z".repeat(90)}`;
+    const naming = additionalRoleNaming(clusterName, dbName, roleName, "%");
+    const longTable = `orders-${"w".repeat(90)}`;
+
+    it("bounds every name to the DNS-1123 subdomain limit", () => {
+      const names = [
+        ...pulumiNames(naming),
+        ...kubernetesNames(naming),
+        naming.grantNaming(longTable).resource,
+        naming.grantNaming(longTable).metadataName,
+      ];
+
+      for (const name of names) {
+        expect(name.length).toBeLessThanOrEqual(253);
+      }
+    });
+
+    // Truncating each name independently must not merge two of them: two
+    // resources under one Pulumi logical name abort the preview with a
+    // duplicate URN. The credential Secret and the User CR share a name by
+    // design — they are different object kinds — so the assertion is that
+    // truncation introduces no coincidence a short name does not already have.
+    it("keeps every truncated name distinct within its own space", () => {
+      const short = additionalRoleNaming("c", "d", "reader", "%");
+
+      expect(new Set(pulumiNames(naming)).size).toBe(pulumiNames(naming).length);
+      expect(new Set(kubernetesNames(naming)).size).toBe(new Set(kubernetesNames(short)).size);
+    });
+
+    // Two tables whose names truncate alike are still two Grant CRs.
+    it("keeps two long tables apart after truncation", () => {
+      expect(naming.grantNaming(`${longTable}-a`).resource).not.toBe(
+        naming.grantNaming(`${longTable}-b`).resource
+      );
+    });
+
+    it("keeps two roles apart whose names truncate alike", () => {
+      const first = additionalRoleNaming(clusterName, dbName, `${roleName}-a`, "%");
+      const second = additionalRoleNaming(clusterName, dbName, `${roleName}-b`, "%");
+
+      expect(first.credentialSecret).not.toBe(second.credentialSecret);
+      expect(first.userMetadataName).not.toBe(second.userMetadataName);
+    });
+  });
+
   // A name needing no sanitizing still carries the hash: the rule has no
   // exceptions, which is what makes the mapping injective by construction.
   it("suffixes a name that needs no sanitizing too", () => {

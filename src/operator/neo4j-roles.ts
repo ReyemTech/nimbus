@@ -39,7 +39,12 @@ import {
   type IRoleCredentials,
 } from "./credentials.js";
 import { encodeUriComponentValue } from "./connection-uri.js";
-import { toIdentitySegment } from "./resource-identity.js";
+import {
+  DNS_1123_LABEL_MAX_LENGTH,
+  DNS_1123_SUBDOMAIN_MAX_LENGTH,
+  toBoundedName,
+  toIdentitySegment,
+} from "./resource-identity.js";
 
 /** Seconds a completed provisioning Job is kept before Kubernetes reaps it. */
 const JOB_TTL_SECONDS = 300;
@@ -111,10 +116,22 @@ export function ownerRoleNaming(clusterName: string, dbName: string): INeo4jRole
  * carries the hash, including names that needed no sanitizing, so no raw name
  * can land on another's encoded form.
  *
+ * Every name is then bounded by {@link toBoundedName}, each by the limit that
+ * applies to the object it names. Deployment, database and username are all
+ * caller-controlled and unbounded, and the provisioning Job's name —
+ * `neo4j-init-user-{deployment}-{database}-role-{user}-{hash}` — passes 63
+ * characters once they total roughly 32. Kubernetes copies a Job's name into the
+ * `job-name` label of every Pod it creates and label values are capped at 63, so
+ * an untruncated name is rejected at apply time: preview passes, the Job is
+ * refused, and the account it would have created never exists. The Secrets are
+ * bound only by the far looser subdomain limit, so they keep their readable
+ * names.
+ *
  * @param clusterName - Neo4j deployment name
  * @param dbName - Database name
  * @param roleName - Username as it exists in Neo4j
- * @returns Naming for the additional user's resources
+ * @returns Naming for the additional user's resources, each within the limit
+ *   Kubernetes enforces on its object kind
  */
 export function additionalRoleNaming(
   clusterName: string,
@@ -122,13 +139,17 @@ export function additionalRoleNaming(
   roleName: string
 ): INeo4jRoleNaming {
   const base = `${clusterName}-${dbName}-role-${toIdentitySegment(roleName)}`;
+  const jobName = `neo4j-init-user-${base}`;
+  const bounded = (name: string): string => toBoundedName(name, DNS_1123_SUBDOMAIN_MAX_LENGTH);
   return {
-    credentialResource: `${base}-neo4j-password`,
-    credentialSecret: `${base}-neo4j-user`,
-    initJobResource: `neo4j-init-user-${base}`,
-    initJobName: toResourceName(`neo4j-init-user-${base}`),
-    connectionResourcePrefix: `${base}-neo4j-secret`,
-    connectionSecret: `${base}-neo4j`,
+    credentialResource: bounded(`${base}-neo4j-password`),
+    credentialSecret: bounded(`${base}-neo4j-user`),
+    // The Job alone takes the stricter label limit: Kubernetes copies its name
+    // into the `job-name` label of every Pod it creates.
+    initJobResource: toBoundedName(jobName, DNS_1123_LABEL_MAX_LENGTH),
+    initJobName: toBoundedName(toResourceName(jobName), DNS_1123_LABEL_MAX_LENGTH),
+    connectionResourcePrefix: bounded(`${base}-neo4j-secret`),
+    connectionSecret: bounded(`${base}-neo4j`),
   };
 }
 

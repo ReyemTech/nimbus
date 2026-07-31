@@ -22,6 +22,7 @@ import * as crypto from "node:crypto";
 import * as k8s from "@pulumi/kubernetes";
 import type * as pulumi from "@pulumi/pulumi";
 import { compileGrantSql } from "./postgres-sql.js";
+import { DNS_1123_LABEL_MAX_LENGTH, toBoundedName, toDnsSegment } from "../resource-identity.js";
 import type { IDatabaseGrant } from "../interfaces.js";
 
 /** Image repository for the `psql` client used to apply grants. */
@@ -46,19 +47,6 @@ const SQL_VOLUME_NAME = "sql";
 const PSQL_CONTAINER_NAME = "psql";
 /** Hex length of the checksum embedded in the Job name. */
 const CHECKSUM_LENGTH = 8;
-/**
- * Maximum length of a DNS-1123 label (RFC 1123), the constraint Kubernetes
- * enforces on `metadata.name` for Jobs — a Job stamps its name onto the
- * `job-name` label of every Pod it creates, and label values are capped at 63
- * characters.
- */
-const DNS_1123_LABEL_MAX_LENGTH = 63;
-/**
- * Budget reserved for the checksum suffix (a `-` separator plus
- * {@link CHECKSUM_LENGTH} hex characters) when truncating the descriptive part
- * of the Job name.
- */
-const CHECKSUM_SUFFIX_LENGTH = 1 + CHECKSUM_LENGTH;
 /**
  * Effective max length for the Job name itself. Reserved below
  * {@link DNS_1123_LABEL_MAX_LENGTH} by the length of {@link CONFIG_MAP_NAME_SUFFIX}
@@ -114,22 +102,6 @@ export interface IGrantJobOptions {
 }
 
 /**
- * Sanitize a string into the character set a DNS-1123 label allows
- * (lowercase alphanumeric and `-`), collapsing runs of `-` and trimming any
- * leading or trailing `-` left behind.
- *
- * @param value - Raw string
- * @returns A string safe to use inside a DNS-1123 label
- */
-function sanitizeForLabel(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-/**
  * Derive the Job name: a sanitized, checksum-suffixed DNS-1123 label.
  *
  * The checksum is computed over `clusterName`, `databaseName`, `roleName`,
@@ -150,10 +122,11 @@ function sanitizeForLabel(value: string): string {
  * therefore a Job that actually runs.
  *
  * Cluster, database, and role names are user-controlled and unbounded in
- * length; when the descriptive prefix would push the full name past
- * {@link JOB_NAME_MAX_LENGTH}, it is truncated and the checksum suffix —
- * which is what actually guarantees change-detection and collision-avoidance
- * — is always kept intact.
+ * length, so the composed name is bounded by {@link toBoundedName}: when it
+ * would exceed {@link JOB_NAME_MAX_LENGTH} the descriptive head is truncated
+ * and a hash of the whole name — content checksum included — is appended, so
+ * two Jobs whose heads truncate alike still differ and a changed spec still
+ * yields a changed name.
  *
  * @param clusterName - CNPG cluster name
  * @param databaseName - Database name
@@ -174,13 +147,9 @@ function deriveJobName(
     .digest("hex")
     .slice(0, CHECKSUM_LENGTH);
 
-  const descriptive = sanitizeForLabel(
-    `${JOB_NAME_PREFIX}-${clusterName}-${databaseName}-${roleName}`
-  );
-  const descriptiveMaxLength = JOB_NAME_MAX_LENGTH - CHECKSUM_SUFFIX_LENGTH;
-  const truncated = sanitizeForLabel(descriptive.slice(0, descriptiveMaxLength));
+  const descriptive = toDnsSegment(`${JOB_NAME_PREFIX}-${clusterName}-${databaseName}-${roleName}`);
 
-  return `${truncated}-${checksum}`;
+  return toBoundedName(`${descriptive}-${checksum}`, JOB_NAME_MAX_LENGTH);
 }
 
 /**

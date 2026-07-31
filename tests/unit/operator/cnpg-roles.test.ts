@@ -128,6 +128,44 @@ describe("additionalRoleNaming", () => {
       "c-d-role-read-only-4fed3970"
     );
   });
+
+  // Cluster, database and role names are all caller-controlled and unbounded,
+  // and Kubernetes rejects a `metadata.name` over 253 characters at apply time —
+  // after preview has passed, so the Secrets and the DatabaseRole the role needs
+  // are never created. The grant Job, which the 63-character label limit does
+  // bind, names itself: see postgres-job.test.ts.
+  describe("with a long cluster, database and role", () => {
+    const clusterName = `production-postgresql-cluster-${"x".repeat(90)}`;
+    const dbName = `customer-analytics-warehouse-${"y".repeat(90)}`;
+    const roleName = `reporting-read-only-service-account-${"z".repeat(90)}`;
+    const naming = additionalRoleNaming(clusterName, dbName, roleName);
+
+    it("bounds every name to the DNS-1123 subdomain limit", () => {
+      for (const name of [...pulumiNames(naming), ...kubernetesNames(naming)]) {
+        expect(name.length).toBeLessThanOrEqual(253);
+      }
+    });
+
+    // Truncating each name independently must not merge two of them: two
+    // resources under one Pulumi logical name abort the preview with a
+    // duplicate URN. The credential Secret and the DatabaseRole CR share a name
+    // by design — they are different object kinds — so the assertion is that
+    // truncation introduces no coincidence a short name does not already have.
+    it("keeps every truncated name distinct within its own space", () => {
+      const short = additionalRoleNaming("c", "d", "reader");
+
+      expect(new Set(pulumiNames(naming)).size).toBe(pulumiNames(naming).length);
+      expect(new Set(kubernetesNames(naming)).size).toBe(new Set(kubernetesNames(short)).size);
+    });
+
+    it("keeps two roles apart whose names truncate alike", () => {
+      const first = additionalRoleNaming(clusterName, dbName, `${roleName}-a`);
+      const second = additionalRoleNaming(clusterName, dbName, `${roleName}-b`);
+
+      expect(first.credentialSecret).not.toBe(second.credentialSecret);
+      expect(first.roleMetadataName).not.toBe(second.roleMetadataName);
+    });
+  });
 });
 
 // The disambiguating hash belongs to the addRole() path alone. The owner's

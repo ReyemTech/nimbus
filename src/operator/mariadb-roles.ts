@@ -37,7 +37,12 @@ import {
   type IRoleCredentials,
 } from "./credentials.js";
 import { encodeUriComponentValue } from "./connection-uri.js";
-import { toCompositeIdentitySegment, toIdentitySegment } from "./resource-identity.js";
+import {
+  DNS_1123_SUBDOMAIN_MAX_LENGTH,
+  toBoundedName,
+  toCompositeIdentitySegment,
+  toIdentitySegment,
+} from "./resource-identity.js";
 import { normalizePrivilegeAgainst } from "./grants/privileges.js";
 import type { IDatabaseGrant } from "./interfaces.js";
 
@@ -147,11 +152,19 @@ export function ownerRoleNaming(clusterName: string, dbName: string): IMariadbRo
  * carries the hash, including names that needed no sanitizing, so no raw name
  * can land on another's encoded form.
  *
+ * Every name is then bounded by {@link toBoundedName}: instance, database, role
+ * and table names are all caller-controlled and unbounded, and a `metadata.name`
+ * over {@link DNS_1123_SUBDOMAIN_MAX_LENGTH} is rejected by the Kubernetes API
+ * at apply time — after preview has passed, so the CRs the account needs are
+ * never created. Nothing here names a Job, so the stricter 63-character label
+ * limit does not apply and ordinary names keep their readable form.
+ *
  * @param clusterName - MariaDB instance name
  * @param dbName - Database name
  * @param roleName - Role name as it exists in MariaDB
  * @param host - Effective host pattern, as returned by `resolveMariadbHost`
- * @returns Naming for the additional user's resources
+ * @returns Naming for the additional user's resources, each within the DNS-1123
+ *   subdomain limit
  */
 export function additionalRoleNaming(
   clusterName: string,
@@ -160,13 +173,14 @@ export function additionalRoleNaming(
   host: string
 ): IMariadbRoleNaming {
   const base = `${clusterName}-${dbName}-role-${toCompositeIdentitySegment([roleName, host])}`;
+  const bounded = (name: string): string => toBoundedName(name, DNS_1123_SUBDOMAIN_MAX_LENGTH);
   return {
-    credentialResource: `${base}-secret`,
-    credentialSecret: base,
-    userResource: `${base}-user`,
-    userMetadataName: toResourceName(base),
-    connectionResourcePrefix: `${base}-connection`,
-    connectionSecret: `${base}-mariadb`,
+    credentialResource: bounded(`${base}-secret`),
+    credentialSecret: bounded(base),
+    userResource: bounded(`${base}-user`),
+    userMetadataName: bounded(toResourceName(base)),
+    connectionResourcePrefix: bounded(`${base}-connection`),
+    connectionSecret: bounded(`${base}-mariadb`),
     grantNaming: (table: string) => {
       // Table names are narrowed the same collision-resistant way role names
       // are: `sales.eu` and `sales_eu` are two distinct tables that sanitize to
@@ -177,8 +191,8 @@ export function additionalRoleNaming(
       // carries its hash, so none of them can render as that bare constant.
       const suffix = table === ALL_TABLES ? ALL_OBJECTS : toIdentitySegment(table);
       return {
-        resource: `${base}-grant-${suffix}`,
-        metadataName: toResourceName(`${base}-grant-${suffix}`),
+        resource: bounded(`${base}-grant-${suffix}`),
+        metadataName: bounded(toResourceName(`${base}-grant-${suffix}`)),
       };
     },
   };

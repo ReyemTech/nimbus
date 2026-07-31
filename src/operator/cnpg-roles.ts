@@ -28,7 +28,11 @@ import {
   type IRoleCredentials,
 } from "./credentials.js";
 import { encodeUriComponentValue } from "./connection-uri.js";
-import { toIdentitySegment } from "./resource-identity.js";
+import {
+  DNS_1123_SUBDOMAIN_MAX_LENGTH,
+  toBoundedName,
+  toIdentitySegment,
+} from "./resource-identity.js";
 import type { IResolvedRoleConfig } from "./grants/role-config.js";
 
 /** CNPG reads role passwords from Secrets of this type (username + password keys). */
@@ -100,10 +104,18 @@ export function ownerRoleNaming(clusterName: string, dbName: string): ICnpgRoleN
  * carries the hash, including names that needed no sanitizing, so no raw name
  * can land on another's encoded form.
  *
+ * Every name is then bounded by {@link toBoundedName}: cluster, database and
+ * role names are all caller-controlled and unbounded, and a `metadata.name` over
+ * {@link DNS_1123_SUBDOMAIN_MAX_LENGTH} is rejected by the Kubernetes API at
+ * apply time — after preview has passed, so the Secrets and the `DatabaseRole`
+ * the role needs are never created. The grant Job, which is bound by the
+ * stricter 63-character label limit, names itself: see `createPostgresGrantJob`.
+ *
  * @param clusterName - CNPG cluster name
  * @param dbName - Database name
  * @param roleName - Role name as it exists in PostgreSQL
- * @returns Naming for the additional role's resources
+ * @returns Naming for the additional role's resources, each within the DNS-1123
+ *   subdomain limit
  */
 export function additionalRoleNaming(
   clusterName: string,
@@ -111,15 +123,16 @@ export function additionalRoleNaming(
   roleName: string
 ): ICnpgRoleNaming {
   const base = `${clusterName}-${dbName}-role-${toIdentitySegment(roleName)}`;
+  const bounded = (name: string): string => toBoundedName(name, DNS_1123_SUBDOMAIN_MAX_LENGTH);
   return {
-    credentialResource: `${base}-secret`,
-    credentialSecret: base,
-    basicAuthResource: `${base}-auth-secret`,
-    basicAuthSecret: `${base}-auth`,
-    roleResource: `${base}-cr`,
-    roleMetadataName: toResourceName(base),
-    connectionResourcePrefix: `${base}-connection`,
-    connectionSecret: `${base}-pg`,
+    credentialResource: bounded(`${base}-secret`),
+    credentialSecret: bounded(base),
+    basicAuthResource: bounded(`${base}-auth-secret`),
+    basicAuthSecret: bounded(`${base}-auth`),
+    roleResource: bounded(`${base}-cr`),
+    roleMetadataName: bounded(toResourceName(base)),
+    connectionResourcePrefix: bounded(`${base}-connection`),
+    connectionSecret: bounded(`${base}-pg`),
   };
 }
 

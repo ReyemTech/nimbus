@@ -48,8 +48,27 @@ const HASH_ALGORITHM = "sha256";
  */
 const SHORT_HASH_LENGTH = 8;
 
-/** Longest value the Kubernetes API accepts for a label. */
-const MAX_LABEL_VALUE_LENGTH = 63;
+/**
+ * Longest DNS-1123 *label*: the cap on a label value and on a Job's name.
+ *
+ * Kubernetes enforces it on every label value, and `batch` validation enforces
+ * it on a Job's `metadata.name` — a Job stamps its own name onto the `job-name`
+ * label of every Pod it creates, so a longer name could not be labelled.
+ */
+export const DNS_1123_LABEL_MAX_LENGTH = 63;
+
+/**
+ * Longest DNS-1123 *subdomain*: the cap on `metadata.name` for a Secret,
+ * ConfigMap, or custom resource.
+ *
+ * Deliberately not collapsed into {@link DNS_1123_LABEL_MAX_LENGTH}. Bounding
+ * every name by the strictest limit would be one rule instead of two, but a
+ * perfectly ordinary `Grant` CR name already runs past 63 characters, and
+ * truncating it would replace a name an operator can read with an opaque hash
+ * for no gain — the API accepts it. Each name is bounded by the limit that
+ * actually applies to the object it names.
+ */
+export const DNS_1123_SUBDOMAIN_MAX_LENGTH = 253;
 
 /** Characters a DNS-1123 subdomain may not contain, once lowercased. */
 const DISALLOWED_CHARS = /[^a-z0-9-]/g;
@@ -155,6 +174,46 @@ export function toCompositeIdentitySegment(parts: readonly [string, ...string[]]
 }
 
 /**
+ * Bound an already-derived name to a length limit without losing its identity.
+ *
+ * Cluster, database, role and table names are all caller-controlled and
+ * unbounded, so a name composed from them is unbounded too — and an over-long
+ * one is not a cosmetic problem. Kubernetes rejects a Job whose `metadata.name`
+ * exceeds {@link DNS_1123_LABEL_MAX_LENGTH} outright, which happens at apply
+ * time: preview passes, then the object the account depends on is refused and
+ * the account is never created.
+ *
+ * Truncation is lossy in exactly the way sanitizing is — two names agreeing on
+ * their first characters cut down to one string — so it is disambiguated the
+ * same way: keep a readable head, and append a hash of the **whole** name. Two
+ * distinct inputs therefore stay distinct, and a name that already fits is
+ * returned untouched so short names keep their readable form.
+ *
+ * @param name - Derived name, already sanitized into the target character set
+ * @param maxLength - The limit that applies to the object this names — see
+ *   {@link DNS_1123_LABEL_MAX_LENGTH} and {@link DNS_1123_SUBDOMAIN_MAX_LENGTH}.
+ *   Must leave room for the hash suffix (at least {@link SHORT_HASH_LENGTH} + 1
+ *   characters). Default: {@link DNS_1123_LABEL_MAX_LENGTH}
+ * @returns The name unchanged when it fits, otherwise a truncated,
+ *   hash-suffixed form of at most `maxLength` characters
+ *
+ * @example
+ * ```typescript
+ * toBoundedName("cnpg-grants-analytics"); // unchanged — it already fits
+ * toBoundedName("a".repeat(80)); // "aaa…a-3e2f1c7d" — 63 characters
+ * ```
+ */
+export function toBoundedName(name: string, maxLength: number = DNS_1123_LABEL_MAX_LENGTH): string {
+  if (name.length <= maxLength) {
+    return name;
+  }
+  const head = name.slice(0, maxLength - SHORT_HASH_LENGTH - 1).replace(EDGE_SEPARATORS, "");
+  // A budget small enough to erase the head still has to produce a valid
+  // DNS-1123 name, and a bare `-`-prefixed hash is not one.
+  return head === "" ? shortHash(name) : `${head}-${shortHash(name)}`;
+}
+
+/**
  * Derive a Kubernetes label *value* from a raw identifier.
  *
  * Label values are far more restricted than the identifiers engines accept: the
@@ -162,7 +221,8 @@ export function toCompositeIdentitySegment(parts: readonly [string, ...string[]]
  * not a legal label character, so the raw name would be rejected by the
  * Kubernetes API when the object carrying the label is applied — after preview
  * has passed and, for a Job, before it can ever run. Values are additionally
- * capped at {@link MAX_LABEL_VALUE_LENGTH} characters.
+ * capped at {@link DNS_1123_LABEL_MAX_LENGTH} characters, which is what
+ * {@link toBoundedName} enforces here.
  *
  * The raw identifier must still be used everywhere it has to be exact: the SQL
  * or Cypher statement that creates the account, and the Secret payload
@@ -172,15 +232,5 @@ export function toCompositeIdentitySegment(parts: readonly [string, ...string[]]
  * @returns A valid label value, truncated with a hash suffix when over-long
  */
 export function toLabelValue(value: string): string {
-  const segment = toIdentitySegment(value);
-  if (segment.length <= MAX_LABEL_VALUE_LENGTH) {
-    return segment;
-  }
-  // Truncation is lossy in exactly the way sanitizing is, so it is disambiguated
-  // the same way: keep a readable head, and let the hash of the raw value carry
-  // the identity.
-  const head = segment
-    .slice(0, MAX_LABEL_VALUE_LENGTH - SHORT_HASH_LENGTH - 1)
-    .replace(EDGE_SEPARATORS, "");
-  return `${head}-${shortHash(value)}`;
+  return toBoundedName(toIdentitySegment(value));
 }

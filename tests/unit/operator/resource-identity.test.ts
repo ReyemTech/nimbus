@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  toBoundedName,
   toCompositeIdentitySegment,
   toDnsSegment,
   toIdentitySegment,
@@ -151,6 +152,49 @@ describe("toCompositeIdentitySegment", () => {
     for (const value of ["Read_Only", "@@", "_x_", "reader", "A".repeat(40)]) {
       expect(toCompositeIdentitySegment([value, "%"])).toMatch(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/);
     }
+  });
+});
+
+describe("toBoundedName", () => {
+  it("leaves a name that fits untouched", () => {
+    expect(toBoundedName("cnpg-grants-analytics-reader")).toBe("cnpg-grants-analytics-reader");
+    expect(toBoundedName("a".repeat(63))).toBe("a".repeat(63));
+  });
+
+  it("truncates to the limit it is given", () => {
+    expect(toBoundedName("a".repeat(80))).toHaveLength(63);
+    expect(toBoundedName("a".repeat(80), 20)).toHaveLength(20);
+    expect(toBoundedName("a".repeat(300), 253)).toHaveLength(253);
+  });
+
+  // Truncation is lossy in the way sanitizing is: two names agreeing on their
+  // first characters cut down to one string, and two resources under one Pulumi
+  // logical name abort the whole preview with a duplicate URN.
+  it("keeps names apart that truncate to the same head", () => {
+    const shared = "a".repeat(70);
+
+    expect(toBoundedName(`${shared}1`)).not.toBe(toBoundedName(`${shared}2`));
+    expect(toBoundedName(`${shared}1`)).toMatch(/-[0-9a-f]{8}$/);
+  });
+
+  // A rename is a delete-and-recreate in Pulumi, so the bounded name must be a
+  // pure function of its input.
+  it("is deterministic across calls", () => {
+    expect(toBoundedName("b".repeat(80))).toBe(toBoundedName("b".repeat(80)));
+  });
+
+  it("returns a valid DNS-1123 label whatever it truncates", () => {
+    // A truncation landing on a separator would otherwise leave a trailing `-`.
+    for (const value of ["ab-".repeat(40), `${"x".repeat(53)}-${"y".repeat(20)}`]) {
+      expect(toBoundedName(value)).toMatch(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/);
+      expect(toBoundedName(value).length).toBeLessThanOrEqual(63);
+    }
+  });
+
+  // A budget too small for both head and hash still has to produce a valid name,
+  // rather than one beginning with the separator the empty head left behind.
+  it("returns a bare hash when the budget leaves no head", () => {
+    expect(toBoundedName("a".repeat(80), 9)).toMatch(/^[0-9a-f]{8}$/);
   });
 });
 

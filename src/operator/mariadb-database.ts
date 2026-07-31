@@ -30,7 +30,7 @@ import {
   toMariadbGrants,
 } from "./mariadb-roles.js";
 import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
-import { assertNoSql } from "./database-options.js";
+import { ENGINE_NAMES, assertNoForeignEngineOptions, assertNoSql } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type { IRoleRegistry } from "./role-registry.js";
 import type {
@@ -51,7 +51,7 @@ const DEFAULT_COLLATION = "utf8mb4_unicode_ci";
 /** Field of the `Database` CR that mariadb-operator rejects updates to. */
 const DATABASE_IMMUTABLE_FIELDS = ["spec.name"];
 /** Engine name used in errors about options MariaDB cannot honour. */
-const MARIADB_ENGINE_NAME = "MariaDB";
+const MARIADB_ENGINE_NAME = ENGINE_NAMES.MARIADB;
 
 /** Inputs for {@link createSingleMariadbDatabaseInstance}. */
 export interface IMariadbDatabaseOptions {
@@ -93,8 +93,9 @@ export interface IMariadbDatabaseOptions {
  *   set (MariaDB runs no SQL), when `config.owner` is set to anything but the
  *   database name, when `addRole()` is called with the database owner's own
  *   name, when `addRole()` is called with a `user`@`host` pair any other
- *   database on the same instance has already claimed, or when `addRole()` is
- *   passed `login: false`
+ *   database on the same instance has already claimed, when `addRole()` is
+ *   passed `login: false`, or when it is passed an `engineOptions` block
+ *   belonging to another engine
  */
 export function createSingleMariadbDatabaseInstance(
   options: IMariadbDatabaseOptions
@@ -234,6 +235,17 @@ export function createSingleMariadbDatabaseInstance(
           ERROR_CODES.UNSUPPORTED_ROLE_OPTION
         );
       }
+
+      // A `postgresql` block here names an engine that will never run this
+      // role, so its memberships, connection cap and expiry would be dropped
+      // while the role provisioned as if they had been applied.
+      assertNoForeignEngineOptions({
+        roleName,
+        databaseName: dbName,
+        engineOptions: roleConfig?.engineOptions,
+        honoured: "mariadb",
+        engine: MARIADB_ENGINE_NAME,
+      });
 
       const mariadbOptions = roleConfig?.engineOptions?.mariadb;
       const host = mariadbOptions?.host ?? DEFAULT_GRANT_HOST;

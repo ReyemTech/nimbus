@@ -132,6 +132,7 @@ interface IDatabaseRoleConfig {
   login?: boolean; // Default: true. false throws on MariaDB and Neo4j.
   grants?: IDatabaseGrant[]; // Omitted = unmanaged; [] = hold nothing. Throws on Neo4j.
   reclaimPolicy?: "retain" | "delete"; // CloudNativePG only; ignored elsewhere. Default: "retain".
+  // A block for an engine other than the one running the role throws.
   engineOptions?: {
     postgresql?: { inRoles?: string[]; connectionLimit?: number; validUntil?: string };
     mariadb?: { host?: string; maxUserConnections?: number };
@@ -165,6 +166,11 @@ interface IDatabaseRole {
   honoured: every Neo4j account can read and write the whole graph.
 - `login: false` is passed on MariaDB or Neo4j (every account there is a login
   account).
+- an `engineOptions` block for a **different** engine is present: `mariadb` on
+  CloudNativePG, `postgresql` on MariaDB, or either one on Neo4j (which reads
+  neither). The block would otherwise provision successfully with the host,
+  connection cap, memberships or expiry it asks for simply absent. Presence is
+  what is rejected, so an empty `{}` block throws too.
 - `name` contains a backtick, single quote, double quote, backslash, or NUL byte,
   on any engine.
 

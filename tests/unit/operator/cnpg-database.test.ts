@@ -425,4 +425,46 @@ describe("addRole", () => {
     expect(() => addRole('read"er')).toThrow(AnyCloudError);
     expect(() => addRole('read"er')).toThrow(/double quote/);
   });
+
+  // A `mariadb` block names an engine that will never run this role. Accepting
+  // it provisioned the role successfully with the requested host and connection
+  // cap simply absent — the silent drop every other unhonourable option here is
+  // refused for.
+  it("rejects an engineOptions block belonging to another engine", () => {
+    const addRole = addRoleOf(makeDatabase());
+    const foreign = { engineOptions: { mariadb: { host: "10.0.0.1" } } };
+
+    expect(() => addRole("reader", foreign)).toThrow(AnyCloudError);
+    expect(() => addRole("reader", foreign)).toThrow(/engineOptions\.mariadb/);
+    expect(() => addRole("reader", foreign)).toThrow(/CloudNativePG/);
+  });
+
+  it("reports UNSUPPORTED_ROLE_OPTION for a foreign engineOptions block", () => {
+    const addRole = addRoleOf(makeDatabase());
+
+    try {
+      addRole("reader", { engineOptions: { mariadb: {} } });
+      expect.unreachable("addRole should have thrown for engineOptions.mariadb");
+    } catch (error) {
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
+    }
+  });
+
+  it("still accepts its own engineOptions block", () => {
+    const addRole = addRoleOf(makeDatabase());
+
+    expect(() =>
+      addRole("reader", { engineOptions: { postgresql: { inRoles: ["pg_read_all_data"] } } })
+    ).not.toThrow();
+  });
+
+  // A rejected call provisioned nothing, so it must not leave the role name
+  // claimed — otherwise fixing the config fails with a duplicate-name error
+  // about a role that was never created.
+  it("leaves the role name claimable after a rejected call", () => {
+    const addRole = addRoleOf(makeDatabase());
+
+    expect(() => addRole("reader", { engineOptions: { mariadb: {} } })).toThrow(AnyCloudError);
+    expect(() => addRole("reader")).not.toThrow();
+  });
 });

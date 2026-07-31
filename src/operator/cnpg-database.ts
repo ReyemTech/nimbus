@@ -29,6 +29,7 @@ import {
 } from "./cnpg-roles.js";
 import { createPostgresGrantJob } from "./grants/postgres-job.js";
 import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
+import { ENGINE_NAMES, assertNoForeignEngineOptions } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type { IRoleRegistry } from "./role-registry.js";
 import type {
@@ -87,8 +88,9 @@ export interface ICnpgDatabaseOptions {
  * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a grant names a
  *   privilege the SQL compiler cannot emit
  * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `addRole()` is
- *   called with the database owner's own name, or with a role name any other
- *   database on the same cluster has already claimed
+ *   called with the database owner's own name, with a role name any other
+ *   database on the same cluster has already claimed, or with an
+ *   `engineOptions` block belonging to another engine
  */
 export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions): IDatabaseInstance {
   const { clusterName, dbName, config, endpoint, port, pgVersion, cluster, provider } = options;
@@ -218,13 +220,30 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
         );
       }
 
+      // A `mariadb` block here names an engine that will never run this role,
+      // so its host and connection cap would be dropped while the role
+      // provisioned as if they had been applied.
+      assertNoForeignEngineOptions({
+        roleName,
+        databaseName: dbName,
+        engineOptions: roleConfig?.engineOptions,
+        honoured: "postgresql",
+        engine: ENGINE_NAMES.CNPG,
+      });
+
+      const resolved = resolveRoleConfig(roleConfig);
+
       // Same hazard one scope wider: the check above only sees this database's
       // own owner, while a role of this name may already belong to a sibling
       // database on the same cluster — the same role, since PostgreSQL has only
       // one. The registry is what notices.
+      //
+      // Claimed after the guards above, not before them, so a call they reject
+      // leaves no claim behind: nothing was provisioned, so fixing the config
+      // must not then fail with a duplicate-name error about a role that never
+      // existed.
       claimCnpgRoleName(roleRegistry, roleName, dbName);
 
-      const resolved = resolveRoleConfig(roleConfig);
       const naming = additionalRoleNaming(clusterName, dbName, roleName);
 
       const provisioned = provisionCnpgRole({

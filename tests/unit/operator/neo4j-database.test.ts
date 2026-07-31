@@ -609,6 +609,42 @@ describe("addRole", () => {
     expect(() => db.addRole("x` SET PASSWORD 'pwned' //")).toThrow(/backtick/);
   });
 
+  // Neo4j honours no engineOptions block at all — it has no operator, no CRs,
+  // and nothing in either block maps onto `CREATE USER`. Both would provision a
+  // working account with the requested behaviour simply absent.
+  it.each([
+    ["postgresql", { engineOptions: { postgresql: { connectionLimit: 5 } } }],
+    ["mariadb", { engineOptions: { mariadb: { host: "10.0.0.1" } } }],
+  ])("rejects the %s engineOptions block", (block, config) => {
+    const db = makeDatabase();
+
+    expect(() => db.addRole("reader", config)).toThrow(AnyCloudError);
+    expect(() => db.addRole("reader", config)).toThrow(new RegExp(`engineOptions\\.${block}`));
+    expect(() => db.addRole("reader", config)).toThrow(/Neo4j/);
+  });
+
+  it("reports UNSUPPORTED_ROLE_OPTION for an engineOptions block", () => {
+    const db = makeDatabase();
+
+    try {
+      db.addRole("reader", { engineOptions: { mariadb: {} } });
+      expect.unreachable("addRole should have thrown for engineOptions.mariadb");
+    } catch (error) {
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
+    }
+  });
+
+  it("provisions nothing before rejecting an engineOptions block", async () => {
+    const db = makeDatabase();
+    await awaitRegistered(...OWNER_RESOURCES);
+    const before = [...registered];
+
+    expect(() => db.addRole("reader", { engineOptions: { mariadb: {} } })).toThrow(AnyCloudError);
+    await flushBehindAnchorRole(db);
+
+    expect(registeredWithoutAnchor()).toEqual(before);
+  });
+
   it("provisions nothing before rejecting an unsafe role name", async () => {
     const db = makeDatabase();
     await awaitRegistered(...OWNER_RESOURCES);

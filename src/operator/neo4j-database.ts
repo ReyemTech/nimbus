@@ -32,7 +32,7 @@ import {
   replicateNeo4jConnectionSecrets,
 } from "./neo4j-roles.js";
 import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
-import { assertNoSql } from "./database-options.js";
+import { ENGINE_NAMES, assertNoForeignEngineOptions, assertNoSql } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type { IRoleRegistry } from "./role-registry.js";
 import type {
@@ -43,7 +43,7 @@ import type {
 } from "./interfaces.js";
 
 /** Engine name used in errors about options Neo4j cannot honour. */
-const NEO4J_ENGINE_NAME = "Neo4j";
+const NEO4J_ENGINE_NAME = ENGINE_NAMES.NEO4J;
 
 /**
  * Reject `environments`, which Neo4j cannot fan a database out across.
@@ -110,8 +110,8 @@ export interface INeo4jDatabaseOptions {
  * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `config.sql` is
  *   set (Neo4j runs no SQL), or when `addRole()` is called with the database
  *   owner's own name, with a username any other database on the same deployment
- *   has already claimed, is passed `grants` (Neo4j Community has no RBAC), or is
- *   passed `login: false`
+ *   has already claimed, is passed `grants` (Neo4j Community has no RBAC), is
+ *   passed `login: false`, or is passed any `engineOptions` block
  */
 export function createSingleNeo4jDatabaseInstance(
   options: INeo4jDatabaseOptions
@@ -226,6 +226,16 @@ export function createSingleNeo4jDatabaseInstance(
           ERROR_CODES.UNSUPPORTED_ROLE_OPTION
         );
       }
+
+      // Neo4j reads no engineOptions block at all: it has no operator and no
+      // CRs, and nothing in `postgresql` or `mariadb` maps onto `CREATE USER`.
+      // Either block names an engine that will never run this role.
+      assertNoForeignEngineOptions({
+        roleName,
+        databaseName: dbName,
+        engineOptions: roleConfig?.engineOptions,
+        engine: NEO4J_ENGINE_NAME,
+      });
 
       // Same hazard one scope wider: the check above only sees this database's
       // own owner, while a user of this name may already belong to a sibling

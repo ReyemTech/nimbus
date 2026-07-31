@@ -8,6 +8,35 @@
  * available — the config says one thing, the database does another, and
  * nothing in the Pulumi diff explains the gap.
  *
+ * ## The one deliberate exception: `reclaimPolicy`
+ *
+ * `reclaimPolicy` is accepted on MariaDB and Neo4j and does nothing there. That
+ * is inconsistent with the rule above and is documented rather than fixed,
+ * because the rule cannot be applied to it:
+ *
+ * - **It is defaulted, so it is always "set".** `resolveRoleConfig` fills in
+ *   `"retain"` when the caller omits it, so by the time any engine could check,
+ *   there is no way to tell "the user asked for retain" from "the user said
+ *   nothing". A guard would therefore have to reject every MariaDB and Neo4j
+ *   database ever declared, including the ones already running. The guards this
+ *   module does implement all cover options that are genuinely absent by
+ *   default (`sql` is `undefined` unless asked for).
+ * - **Only CloudNativePG consumes it.** It becomes
+ *   `Database.spec.databaseReclaimPolicy` and
+ *   `DatabaseRole.spec.databaseRoleReclaimPolicy`. mariadb-operator's nearest
+ *   equivalent is `spec.cleanupPolicy` on its `Database`/`User`/`Grant` CRs, and
+ *   Neo4j is provisioned by a `cypher-shell` Job with no CR lifecycle at all.
+ * - **Adopting the MariaDB equivalent is not a documentation change.** Setting
+ *   `cleanupPolicy` on the CRs of databases that already exist would change
+ *   their deletion semantics on the next apply — a data-loss-shaped change made
+ *   silently, which is worse than the gap it closes.
+ *
+ * So on MariaDB and Neo4j the lifecycle of a database, user, or grant is
+ * governed by the operator's own default (mariadb-operator retains its managed
+ * objects unless `cleanupPolicy` says otherwise; Neo4j has no such notion),
+ * not by this field. Nothing is deleted that would otherwise be kept — the
+ * exemption costs an unhonoured option, never data.
+ *
  * @module operator/database-options
  */
 

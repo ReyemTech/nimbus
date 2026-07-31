@@ -92,12 +92,22 @@ export interface IDatabaseRoleConfig {
    */
   readonly grants?: IDatabaseGrant[];
   /**
-   * End-of-life policy for the role. Default: "retain".
+   * End-of-life policy for the role. Default: `"retain"`.
    *
-   * CloudNativePG only — it becomes `DatabaseRole.spec.databaseRoleReclaimPolicy`.
-   * MariaDB drops it: the equivalent would be mariadb-operator's
-   * `spec.cleanupPolicy`, and adding that field to the `User` and `Grant` CRs of
-   * existing databases could change their deletion semantics on the next apply.
+   * **CloudNativePG only, and — uniquely among this module's engine-specific
+   * options — accepted and ignored elsewhere rather than rejected.** On CNPG it
+   * becomes `DatabaseRole.spec.databaseRoleReclaimPolicy`. MariaDB and Neo4j
+   * drop it: their role lifecycle is governed by the operator's own default
+   * (mariadb-operator's `spec.cleanupPolicy`, left unset) instead.
+   *
+   * Every other unhonourable option throws `UNSUPPORTED_ROLE_OPTION` at preview.
+   * This one cannot, because it is defaulted: `resolveRoleConfig` fills in
+   * `"retain"`, so it is always "set" and a guard could not distinguish an
+   * explicit value from an omitted one without rejecting every MariaDB and
+   * Neo4j role that exists. Adopting `cleanupPolicy` instead would change the
+   * deletion semantics of already-running CRs on the next apply. The exemption
+   * and its reasoning are recorded at the rule's definition site — see the
+   * `operator/database-options` module docblock.
    */
   readonly reclaimPolicy?: ReclaimPolicy;
   /** Engine-specific options that do not port across engines. */
@@ -230,6 +240,16 @@ export interface IOperatorDatabaseConfig {
    * `"retain"` keeps the data, so removing a database from config — or renaming
    * the Pulumi resource — is never destructive. Set `"delete"` only for
    * databases whose lifecycle should genuinely track the config.
+   *
+   * **On MariaDB and Neo4j this is accepted and ignored, not rejected** — the
+   * single deliberate exception to the rule that an option which cannot be
+   * honoured throws `UNSUPPORTED_ROLE_OPTION` at preview. It is exempt because
+   * it is defaulted (so it is always "set" and no guard could tell an explicit
+   * value from an omitted one), because only CloudNativePG consumes it, and
+   * because adopting mariadb-operator's `spec.cleanupPolicy` would silently
+   * change the deletion semantics of CRs that already exist. There, the
+   * database's lifecycle follows the operator's own default instead. See the
+   * `operator/database-options` module docblock for the full reasoning.
    */
   readonly reclaimPolicy?: ReclaimPolicy;
   /**

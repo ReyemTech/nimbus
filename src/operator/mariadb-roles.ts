@@ -133,8 +133,9 @@ export function ownerRoleNaming(clusterName: string, dbName: string): IMariadbRo
  * The role segment comes from {@link toIdentitySegment}, not from plain
  * sanitizing: `Read_Only` and `read_only` are two distinct, simultaneously valid
  * MariaDB usernames that sanitize alike, and two resources deriving one logical
- * name abort the entire preview with a duplicate-URN error. Names that are
- * already valid DNS-1123 labels are unaffected.
+ * name abort the entire preview with a duplicate-URN error. Every segment
+ * carries the hash, including names that needed no sanitizing, so no raw name
+ * can land on another's encoded form.
  *
  * @param clusterName - MariaDB instance name
  * @param dbName - Database name
@@ -160,8 +161,8 @@ export function additionalRoleNaming(
       // `sales-eu`, and {@link toMariadbGrants} merges grants by raw table, so
       // both survive as separate Grant CRs and would then register under one
       // Pulumi logical name. `*` is not a table name but the whole-database
-      // sentinel, and renders as the constant `all` — `objects: "all"` is the
-      // only way to ask for it, so no literal table can reach that value.
+      // sentinel, and renders as the constant `all`; every real table name
+      // carries its hash, so none of them can render as that bare constant.
       const suffix = table === ALL_TABLES ? ALL_OBJECTS : toIdentitySegment(table);
       return {
         resource: `${base}-grant-${suffix}`,

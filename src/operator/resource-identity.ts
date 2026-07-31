@@ -12,11 +12,16 @@
  * provisioned, including the resources that had nothing to do with the clash.
  *
  * {@link toIdentitySegment} closes that by appending a short hash of the raw
- * value whenever sanitizing changed it, and only then. The "only then" is the
- * point: a name that is already a valid DNS-1123 label — which every role name
- * in practice is — keeps its plain, readable form, so the common case reads as
- * `pgsql-main-billing-role-reader-secret` rather than carrying an opaque suffix
- * for a collision it cannot have.
+ * value to **every** segment it derives, not only to the ones sanitizing
+ * changed. Hashing only the lossy ones leaves two namespaces sharing one output
+ * space: `Read_Only` encodes to `read-only-7b1060cf`, and the perfectly valid
+ * role name `read-only-7b1060cf` — which needs no sanitizing — would pass
+ * through unchanged onto that same string. The two roles' Secrets then collide
+ * on one Pulumi logical name and abort the preview, which is the exact failure
+ * the hash exists to prevent. Hashing unconditionally makes the mapping
+ * injective by construction: the hash covers the raw value, so distinct raw
+ * inputs cannot meet. The cost is an opaque suffix on every name, which is a
+ * fair price for a rule with no exceptions to reason about.
  *
  * **These helpers are for `addRole()`-path names only.** The names
  * `createDatabase()` emits for a database owner are already live in released
@@ -86,28 +91,31 @@ function shortHash(value: string): string {
 /**
  * Derive a resource-name segment that survives sanitization without collisions.
  *
- * When sanitizing is a no-op the plain value is returned, so ordinary names stay
- * readable and — importantly — stable: a role called `reader` derives `reader`
- * and always will. When sanitizing changed something, the information that was
- * lost is restored as a hash of the raw value, so two identifiers that sanitize
- * alike stay apart.
+ * The sanitized value is kept as a readable head and the raw value's hash is
+ * always appended. Appending it only where sanitizing was lossy would leave the
+ * encoded and the pass-through forms sharing one output space — see this
+ * module's note — so the suffix is unconditional and the mapping from raw value
+ * to segment is injective by construction.
+ *
+ * The result is a pure function of `value`: a role called `reader` derives
+ * `reader-3d094196` on every call, in every process, forever. That matters more
+ * than readability here, because Pulumi reads a changed logical name as
+ * delete-and-recreate.
  *
  * @param value - Raw identifier as it exists in the database engine
- * @returns A DNS-1123-safe segment that is injective in practice over raw values
+ * @returns A DNS-1123-safe segment, distinct for every distinct raw value
  *
  * @example
  * ```typescript
- * toIdentitySegment("reader"); // "reader"      — already a valid label
+ * toIdentitySegment("reader"); // "reader-3d094196"
  * toIdentitySegment("Read_Only"); // "read-only-7b1060cf"
  * toIdentitySegment("read_only"); // "read-only-9c586a9b" — a different role
- * toIdentitySegment("@@"); // "3330e5ba"        — nothing survives sanitizing
+ * toIdentitySegment("read-only-7b1060cf"); // "read-only-7b1060cf-707a9bc6"
+ * toIdentitySegment("@@"); // "3330e5ba" — nothing survives sanitizing
  * ```
  */
 export function toIdentitySegment(value: string): string {
   const sanitized = toDnsSegment(value);
-  if (sanitized === value && sanitized !== "") {
-    return sanitized;
-  }
   // Sanitizing can erase the value entirely (`"@@"`, or the empty string), and
   // a bare `-`-prefixed hash is not a valid DNS-1123 name — so the hash stands
   // alone rather than being suffixed onto nothing.

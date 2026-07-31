@@ -78,9 +78,9 @@ const ANCHOR = "anchor-role";
 async function flushBehindAnchorRole(db: IDatabaseInstance): Promise<void> {
   db.addRole(ANCHOR, { namespaces: ["app"] });
   await awaitRegistered(
-    `shared-neo4j-graph-role-${ANCHOR}-neo4j-password`,
-    `neo4j-init-user-shared-neo4j-graph-role-${ANCHOR}`,
-    `shared-neo4j-graph-role-${ANCHOR}-neo4j-secret-app`
+    `shared-neo4j-graph-role-${ANCHOR}-9048712e-neo4j-password`,
+    `neo4j-init-user-shared-neo4j-graph-role-${ANCHOR}-9048712e`,
+    `shared-neo4j-graph-role-${ANCHOR}-9048712e-neo4j-secret-app`
   );
 }
 
@@ -462,10 +462,10 @@ describe("connection URI encoding", () => {
 
   it("leaves an ordinary username unencoded", async () => {
     makeDatabase().addRole("reporting", { namespaces: ["app"] });
-    await awaitRegistered("shared-neo4j-graph-role-reporting-neo4j-secret-app");
+    await awaitRegistered("shared-neo4j-graph-role-reporting-637d7bec-neo4j-secret-app");
 
     const stringData = unwrapSecret(
-      inputsOf("shared-neo4j-graph-role-reporting-neo4j-secret-app")["stringData"]
+      inputsOf("shared-neo4j-graph-role-reporting-637d7bec-neo4j-secret-app")["stringData"]
     );
 
     expect(stringData["uri"]).toBe("bolt://reporting:@shared-neo4j.data.svc.cluster.local:7687");
@@ -660,16 +660,16 @@ describe("addRole", () => {
     const db = makeDatabase();
     const role = db.addRole("reader", { namespaces: ["app"] });
     await awaitRegistered(
-      "shared-neo4j-graph-role-reader-neo4j-password",
-      "neo4j-init-user-shared-neo4j-graph-role-reader",
-      "shared-neo4j-graph-role-reader-neo4j-secret-app"
+      "shared-neo4j-graph-role-reader-3d094196-neo4j-password",
+      "neo4j-init-user-shared-neo4j-graph-role-reader-3d094196",
+      "shared-neo4j-graph-role-reader-3d094196-neo4j-secret-app"
     );
 
     expect(role.name).toBe("reader");
     expect(role.databaseName).toBe("graph");
     expect(role.clusterName).toBe("shared-neo4j");
     await expect(unwrap(pulumi.output(role.secrets["app"]))).resolves.toBe(
-      "shared-neo4j-graph-role-reader-neo4j"
+      "shared-neo4j-graph-role-reader-3d094196-neo4j"
     );
   });
 
@@ -678,7 +678,10 @@ describe("addRole", () => {
   it("cannot collide with the owner's pinned names", async () => {
     const db = makeDatabase();
     db.addRole("reader", { namespaces: ["app"] });
-    await awaitRegistered(...OWNER_RESOURCES, "shared-neo4j-graph-role-reader-neo4j-secret-app");
+    await awaitRegistered(
+      ...OWNER_RESOURCES,
+      "shared-neo4j-graph-role-reader-3d094196-neo4j-secret-app"
+    );
 
     for (const ownerName of OWNER_RESOURCES) {
       expect(registered.filter((name) => name === ownerName)).toHaveLength(1);
@@ -688,13 +691,15 @@ describe("addRole", () => {
   it("creates the role's account with its own cypher-shell Job", async () => {
     const db = makeDatabase();
     db.addRole("reader");
-    await awaitRegistered("neo4j-init-user-shared-neo4j-graph-role-reader");
+    await awaitRegistered("neo4j-init-user-shared-neo4j-graph-role-reader-3d094196");
 
-    const script = jobScriptOf("neo4j-init-user-shared-neo4j-graph-role-reader");
+    const script = jobScriptOf("neo4j-init-user-shared-neo4j-graph-role-reader-3d094196");
     expect(script).toContain("CREATE USER");
     expect(script).not.toContain("GRANT ROLE");
-    expect(inputsOf("neo4j-init-user-shared-neo4j-graph-role-reader")["metadata"]).toMatchObject({
-      name: "neo4j-init-user-shared-neo4j-graph-role-reader",
+    expect(
+      inputsOf("neo4j-init-user-shared-neo4j-graph-role-reader-3d094196")["metadata"]
+    ).toMatchObject({
+      name: "neo4j-init-user-shared-neo4j-graph-role-reader-3d094196",
     });
   });
 

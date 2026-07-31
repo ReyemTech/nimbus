@@ -107,8 +107,9 @@ export function ownerRoleNaming(clusterName: string, dbName: string): INeo4jRole
  * The role segment comes from {@link toIdentitySegment}, not from plain
  * sanitizing: `Read_Only` and `read_only` are two distinct, simultaneously valid
  * Neo4j usernames that sanitize alike, and two resources deriving one logical
- * name abort the entire preview with a duplicate-URN error. Names that are
- * already valid DNS-1123 labels are unaffected.
+ * name abort the entire preview with a duplicate-URN error. Every segment
+ * carries the hash, including names that needed no sanitizing, so no raw name
+ * can land on another's encoded form.
  *
  * @param clusterName - Neo4j deployment name
  * @param dbName - Database name

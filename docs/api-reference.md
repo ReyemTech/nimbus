@@ -185,10 +185,13 @@ raw value, since clients consume those literally. See
 The Kubernetes objects a role creates are named `{cluster}-{database}-role-{role}`,
 with the role segment narrowed into the DNS-1123 character set. That narrowing is
 lossy — `Read_Only` and `read_only` are two distinct roles that both narrow to
-`read-only` — so **a role name that is not already a valid DNS-1123 label gains a
-short hash of the raw name** (`read-only-7b1060cf`), which keeps the two apart.
-A name that needs no narrowing keeps its plain form: `reader` stays `reader`. The
-raw name is what reaches the database and the Secret payload either way.
+`read-only` — so **every role segment carries a short hash of the raw name**:
+`reader` becomes `reader-3d094196` and `Read_Only` becomes `read-only-7b1060cf`.
+The hash is unconditional rather than reserved for names the narrowing changed,
+because a role could otherwise be named after another role's encoded form
+(`read-only-7b1060cf` is itself a legal role name) and the two would collide on
+one Pulumi logical name. The raw name is what reaches the database and the Secret
+payload either way.
 
 #### Role names are unique per cluster, not per database
 

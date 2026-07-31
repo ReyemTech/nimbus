@@ -64,12 +64,14 @@ describe("additionalRoleNaming", () => {
   it("prefixes every name with the role", () => {
     const role = additionalRoleNaming("shared-maria", "analytics", "reader");
 
-    expect(role.credentialResource).toBe("shared-maria-analytics-role-reader-secret");
-    expect(role.credentialSecret).toBe("shared-maria-analytics-role-reader");
-    expect(role.userResource).toBe("shared-maria-analytics-role-reader-user");
-    expect(role.userMetadataName).toBe("shared-maria-analytics-role-reader");
-    expect(role.connectionResourcePrefix).toBe("shared-maria-analytics-role-reader-connection");
-    expect(role.connectionSecret).toBe("shared-maria-analytics-role-reader-mariadb");
+    expect(role.credentialResource).toBe("shared-maria-analytics-role-reader-3d094196-secret");
+    expect(role.credentialSecret).toBe("shared-maria-analytics-role-reader-3d094196");
+    expect(role.userResource).toBe("shared-maria-analytics-role-reader-3d094196-user");
+    expect(role.userMetadataName).toBe("shared-maria-analytics-role-reader-3d094196");
+    expect(role.connectionResourcePrefix).toBe(
+      "shared-maria-analytics-role-reader-3d094196-connection"
+    );
+    expect(role.connectionSecret).toBe("shared-maria-analytics-role-reader-3d094196-mariadb");
   });
 
   // Keying grants on the table rather than on their position is what makes
@@ -80,24 +82,26 @@ describe("additionalRoleNaming", () => {
     const role = additionalRoleNaming("shared-maria", "analytics", "reader");
 
     expect(role.grantNaming("events").resource).toBe(
-      "shared-maria-analytics-role-reader-grant-events"
+      "shared-maria-analytics-role-reader-3d094196-grant-events-862417b9"
     );
     expect(role.grantNaming("events").metadataName).toBe(
-      "shared-maria-analytics-role-reader-grant-events"
+      "shared-maria-analytics-role-reader-3d094196-grant-events-862417b9"
     );
   });
 
   it("renders the whole-database table as `all`", () => {
     const role = additionalRoleNaming("shared-maria", "analytics", "reader");
 
-    expect(role.grantNaming("*").resource).toBe("shared-maria-analytics-role-reader-grant-all");
+    expect(role.grantNaming("*").resource).toBe(
+      "shared-maria-analytics-role-reader-3d094196-grant-all"
+    );
   });
 
   it("sanitizes table names that are not valid DNS-1123 labels", () => {
     const role = additionalRoleNaming("c", "d", "reader");
 
     expect(role.grantNaming("Order_Items").resource).toBe(
-      "c-d-role-reader-grant-order-items-62753264"
+      "c-d-role-reader-3d094196-grant-order-items-62753264"
     );
   });
 
@@ -114,10 +118,17 @@ describe("additionalRoleNaming", () => {
     );
   });
 
-  // A table name that is already a valid DNS-1123 label keeps its plain form.
-  it("leaves a table name that needs no sanitizing unsuffixed", () => {
-    expect(additionalRoleNaming("c", "d", "reader").grantNaming("events").resource).toBe(
-      "c-d-role-reader-grant-events"
+  // A table name that is already a valid DNS-1123 label carries the hash too:
+  // a table could otherwise be named after another table's encoded form and the
+  // two Grant CRs would register under one Pulumi logical name.
+  it("suffixes a table name that needs no sanitizing too", () => {
+    const role = additionalRoleNaming("c", "d", "reader");
+
+    expect(role.grantNaming("events").resource).toBe(
+      "c-d-role-reader-3d094196-grant-events-862417b9"
+    );
+    expect(role.grantNaming("sales-eu-d6cd8bd8").resource).not.toBe(
+      role.grantNaming("sales.eu").resource
     );
   });
 
@@ -130,8 +141,12 @@ describe("additionalRoleNaming", () => {
   it("derives a stable name from the table alone", () => {
     const role = additionalRoleNaming("c", "d", "reader");
 
-    expect(role.grantNaming("events").resource).toBe("c-d-role-reader-grant-events");
-    expect(role.grantNaming("events").metadataName).toBe("c-d-role-reader-grant-events");
+    expect(role.grantNaming("events").resource).toBe(
+      "c-d-role-reader-3d094196-grant-events-862417b9"
+    );
+    expect(role.grantNaming("events").metadataName).toBe(
+      "c-d-role-reader-3d094196-grant-events-862417b9"
+    );
   });
 
   it("gives different tables different names", () => {
@@ -142,13 +157,13 @@ describe("additionalRoleNaming", () => {
 
     expect(new Set(names).size).toBe(tables.length);
     expect(names).toEqual([
-      "c-d-role-reader-grant-events",
-      "c-d-role-reader-grant-orders",
-      "c-d-role-reader-grant-order-items-62753264",
-      "c-d-role-reader-grant-all",
-      "c-d-role-reader-grant-invoices",
-      "c-d-role-reader-grant-sales-eu-d6cd8bd8",
-      "c-d-role-reader-grant-sales-eu-0abb0838",
+      "c-d-role-reader-3d094196-grant-events-862417b9",
+      "c-d-role-reader-3d094196-grant-orders-1c168adb",
+      "c-d-role-reader-3d094196-grant-order-items-62753264",
+      "c-d-role-reader-3d094196-grant-all",
+      "c-d-role-reader-3d094196-grant-invoices-491dabd4",
+      "c-d-role-reader-3d094196-grant-sales-eu-d6cd8bd8",
+      "c-d-role-reader-3d094196-grant-sales-eu-0abb0838",
     ]);
   });
 
@@ -193,10 +208,27 @@ describe("additionalRoleNaming", () => {
     expect(upper.grantNaming("*").resource).not.toBe(lower.grantNaming("*").resource);
   });
 
-  // The disambiguator applies only where sanitizing lost something: an ordinary
-  // role name keeps the plain, readable form it has always had.
-  it("leaves a name that needs no sanitizing unsuffixed", () => {
-    expect(additionalRoleNaming("c", "d", "read-only").credentialSecret).toBe("c-d-role-read-only");
+  // A user may legitimately be named after another user's *encoded* form —
+  // `read-only-7b1060cf` needs no sanitizing and is a valid MariaDB username.
+  // Suffixing only the lossy names let it pass through onto the exact string
+  // `Read_Only` encodes to, which is the duplicate URN the hash exists to
+  // prevent. Every segment carries the hash, so the two namespaces are disjoint.
+  it("keeps a user named after another user's encoded form apart from it", () => {
+    const encoded = additionalRoleNaming("c", "d", "Read_Only");
+    const literal = additionalRoleNaming("c", "d", "read-only-7b1060cf");
+
+    expect(encoded.credentialSecret).toBe("c-d-role-read-only-7b1060cf");
+    expect(literal.credentialSecret).toBe("c-d-role-read-only-7b1060cf-707a9bc6");
+    expect(literal.credentialResource).not.toBe(encoded.credentialResource);
+    expect(literal.userResource).not.toBe(encoded.userResource);
+  });
+
+  // A name needing no sanitizing still carries the hash: the rule has no
+  // exceptions, which is what makes the mapping injective by construction.
+  it("suffixes a name that needs no sanitizing too", () => {
+    expect(additionalRoleNaming("c", "d", "read-only").credentialSecret).toBe(
+      "c-d-role-read-only-4fed3970"
+    );
   });
 });
 
@@ -357,5 +389,22 @@ describe("OWNER_GRANT", () => {
       table: "*",
       grantOption: true,
     });
+  });
+});
+
+// The disambiguating hash belongs to the addRole() path alone. The owner's
+// names are live in released stacks, and re-deriving one through
+// `toIdentitySegment` would rename it — which Pulumi performs as a delete and
+// recreate, regenerating the password in every credential Secret.
+describe("owner naming is never hashed", () => {
+  it.each([
+    ["shared-maria", "analytics"],
+    ["Shared_Maria", "An_Alytics"],
+  ])("derives no hash suffix for %s/%s", (clusterName, dbName) => {
+    const owner = ownerRoleNaming(clusterName, dbName);
+
+    for (const name of [...pulumiNames(owner), ...kubernetesNames(owner)]) {
+      expect(name).not.toMatch(/-[0-9a-f]{8}$/);
+    }
   });
 });

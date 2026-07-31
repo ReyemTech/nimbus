@@ -25,21 +25,50 @@ describe("toDnsSegment", () => {
 });
 
 describe("toIdentitySegment", () => {
-  // The common case must stay readable and stable: an ordinary role name
-  // derives itself, so `pgsql-main-billing-role-reader-secret` never gains an
-  // opaque suffix for a collision it cannot have.
-  it.each(["reader", "etl", "read-only", "r2d2", "a"])(
-    "leaves %s unchanged when sanitizing is a no-op",
-    (value) => {
-      expect(toIdentitySegment(value)).toBe(value);
-    }
-  );
+  // The hash is unconditional, so an ordinary name keeps a readable head and
+  // gains the suffix like every other. Suffixing only the lossy names left the
+  // encoded and pass-through forms sharing one output space — see the
+  // "encoded form" test below for the collision that allowed.
+  it.each([
+    ["reader", "reader-3d094196"],
+    ["etl", "etl-631fd8e1"],
+    ["read-only", "read-only-4fed3970"],
+  ])("keeps %s as a readable head and appends its hash", (value, expected) => {
+    expect(toIdentitySegment(value)).toBe(expected);
+  });
 
   // Two valid, simultaneously creatable PostgreSQL roles. Sharing a logical
   // name aborts the whole preview with a duplicate-URN error, so nothing is
   // provisioned — not even the resources unrelated to the clash.
   it("keeps role names apart that sanitize to the same value", () => {
     expect(toIdentitySegment("Read_Only")).not.toBe(toIdentitySegment("read_only"));
+  });
+
+  // `read-only-7b1060cf` is itself a perfectly valid role name, and it is what
+  // `Read_Only` encodes to. While the hash was appended only where sanitizing
+  // was lossy, this name took the pass-through path and landed on that exact
+  // string — the two roles' Secrets then collided on one Pulumi logical name.
+  it("keeps a raw name apart from the encoded form it is spelt like", () => {
+    const encoded = toIdentitySegment("Read_Only");
+
+    expect(encoded).toBe("read-only-7b1060cf");
+    expect(toIdentitySegment(encoded)).not.toBe(encoded);
+    expect(toIdentitySegment(encoded)).toBe("read-only-7b1060cf-707a9bc6");
+  });
+
+  // The property the test above is one instance of: the segment is a function
+  // of the raw value, so no two distinct raw values can meet.
+  it("is injective across values that sanitize, encode, or pass through alike", () => {
+    const values = [
+      "Read_Only",
+      "read_only",
+      "read-only",
+      "read-only-7b1060cf",
+      "READ__ONLY",
+      "read.only",
+    ];
+
+    expect(new Set(values.map(toIdentitySegment)).size).toBe(values.length);
   });
 
   it("keeps table names apart that sanitize to the same value", () => {
@@ -82,8 +111,8 @@ describe("toLabelValue", () => {
     expect(toLabelValue("reporting@corp")).not.toContain("@");
   });
 
-  it("leaves an ordinary role name as its own label value", () => {
-    expect(toLabelValue("reader")).toBe("reader");
+  it("keeps an ordinary role name readable in its label value", () => {
+    expect(toLabelValue("reader")).toBe("reader-3d094196");
   });
 
   it("keeps roles apart that sanitize alike", () => {

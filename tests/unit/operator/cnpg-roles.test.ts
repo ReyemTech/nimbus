@@ -55,14 +55,16 @@ describe("additionalRoleNaming", () => {
   it("prefixes every name with the role", () => {
     const role = additionalRoleNaming("shared-pg", "analytics", "reader");
 
-    expect(role.credentialResource).toBe("shared-pg-analytics-role-reader-secret");
-    expect(role.credentialSecret).toBe("shared-pg-analytics-role-reader");
-    expect(role.basicAuthResource).toBe("shared-pg-analytics-role-reader-auth-secret");
-    expect(role.basicAuthSecret).toBe("shared-pg-analytics-role-reader-auth");
-    expect(role.roleResource).toBe("shared-pg-analytics-role-reader-cr");
-    expect(role.roleMetadataName).toBe("shared-pg-analytics-role-reader");
-    expect(role.connectionResourcePrefix).toBe("shared-pg-analytics-role-reader-connection");
-    expect(role.connectionSecret).toBe("shared-pg-analytics-role-reader-pg");
+    expect(role.credentialResource).toBe("shared-pg-analytics-role-reader-3d094196-secret");
+    expect(role.credentialSecret).toBe("shared-pg-analytics-role-reader-3d094196");
+    expect(role.basicAuthResource).toBe("shared-pg-analytics-role-reader-3d094196-auth-secret");
+    expect(role.basicAuthSecret).toBe("shared-pg-analytics-role-reader-3d094196-auth");
+    expect(role.roleResource).toBe("shared-pg-analytics-role-reader-3d094196-cr");
+    expect(role.roleMetadataName).toBe("shared-pg-analytics-role-reader-3d094196");
+    expect(role.connectionResourcePrefix).toBe(
+      "shared-pg-analytics-role-reader-3d094196-connection"
+    );
+    expect(role.connectionSecret).toBe("shared-pg-analytics-role-reader-3d094196-pg");
   });
 
   // A role literally named "user", "role", or "secret" is the case most likely
@@ -104,9 +106,43 @@ describe("additionalRoleNaming", () => {
     expect(upper.connectionResourcePrefix).not.toBe(lower.connectionResourcePrefix);
   });
 
-  // The disambiguator applies only where sanitizing lost something: an ordinary
-  // role name keeps the plain, readable form it has always had.
-  it("leaves a name that needs no sanitizing unsuffixed", () => {
-    expect(additionalRoleNaming("c", "d", "read-only").credentialSecret).toBe("c-d-role-read-only");
+  // A role may legitimately be named after another role's *encoded* form —
+  // `read-only-7b1060cf` needs no sanitizing and is a valid PostgreSQL role.
+  // Suffixing only the lossy names let it pass through onto the exact string
+  // `Read_Only` encodes to, which is the duplicate URN the hash exists to
+  // prevent. Every segment carries the hash, so the two namespaces are disjoint.
+  it("keeps a role named after another role's encoded form apart from it", () => {
+    const encoded = additionalRoleNaming("c", "d", "Read_Only");
+    const literal = additionalRoleNaming("c", "d", "read-only-7b1060cf");
+
+    expect(encoded.credentialSecret).toBe("c-d-role-read-only-7b1060cf");
+    expect(literal.credentialSecret).toBe("c-d-role-read-only-7b1060cf-707a9bc6");
+    expect(literal.credentialResource).not.toBe(encoded.credentialResource);
+    expect(literal.roleResource).not.toBe(encoded.roleResource);
+  });
+
+  // A name needing no sanitizing still carries the hash: the rule has no
+  // exceptions, which is what makes the mapping injective by construction.
+  it("suffixes a name that needs no sanitizing too", () => {
+    expect(additionalRoleNaming("c", "d", "read-only").credentialSecret).toBe(
+      "c-d-role-read-only-4fed3970"
+    );
+  });
+});
+
+// The disambiguating hash belongs to the addRole() path alone. The owner's
+// names are live in released stacks, and re-deriving one through
+// `toIdentitySegment` would rename it — which Pulumi performs as a delete and
+// recreate, regenerating the password in every credential Secret.
+describe("owner naming is never hashed", () => {
+  it.each([
+    ["shared-pg", "analytics"],
+    ["Shared_PG", "An_Alytics"],
+  ])("derives no hash suffix for %s/%s", (clusterName, dbName) => {
+    const owner = ownerRoleNaming(clusterName, dbName);
+
+    for (const name of [...pulumiNames(owner), ...kubernetesNames(owner)]) {
+      expect(name).not.toMatch(/-[0-9a-f]{8}$/);
+    }
   });
 });

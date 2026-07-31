@@ -282,7 +282,7 @@ describe("connection URI encoding", () => {
     addRoleOf(makeDatabase())("reporting", { namespaces: ["app"] });
     await settle();
 
-    expect(stringDataOf("shared-pg-analytics-role-reporting-connection-app")["uri"]).toBe(
+    expect(stringDataOf("shared-pg-analytics-role-reporting-637d7bec-connection-app")["uri"]).toBe(
       "postgresql://reporting:@shared-pg-rw.data.svc.cluster.local:5432/analytics?sslmode=require"
     );
   });
@@ -366,10 +366,10 @@ describe("addRole", () => {
     expect(role.databaseName).toBe("analytics");
     expect(role.clusterName).toBe("shared-pg");
     await expect(unwrap(pulumi.output(role.secrets["app"]))).resolves.toBe(
-      "shared-pg-analytics-role-reader-pg"
+      "shared-pg-analytics-role-reader-3d094196-pg"
     );
-    expect(registered).toContain("shared-pg-analytics-role-reader-cr");
-    expect(registered).toContain("shared-pg-analytics-role-reader-connection-app");
+    expect(registered).toContain("shared-pg-analytics-role-reader-3d094196-cr");
+    expect(registered).toContain("shared-pg-analytics-role-reader-3d094196-connection-app");
     expect(
       registered.some((name) => name.startsWith("cnpg-grants-shared-pg-analytics-reader"))
     ).toBe(true);
@@ -382,7 +382,7 @@ describe("addRole", () => {
     addRoleOf(db)("reader", { namespaces: ["app"] });
     await settle();
 
-    expect(registered).toContain("shared-pg-analytics-role-reader-cr");
+    expect(registered).toContain("shared-pg-analytics-role-reader-3d094196-cr");
     expect(grantJobNameFor("reader")).toBeUndefined();
   });
 
@@ -412,7 +412,7 @@ describe("addRole", () => {
     await settle();
 
     expect(registered.indexOf(grantJobNameFor("reader") as string)).toBeLessThan(
-      registered.indexOf("shared-pg-analytics-role-reader-connection-app")
+      registered.indexOf("shared-pg-analytics-role-reader-3d094196-connection-app")
     );
   });
   // Validation lives in one shared choke point (`assertValidRoleName`) rather

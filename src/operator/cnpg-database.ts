@@ -166,7 +166,10 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
   // are the same the compiler emits no revoke preamble either way, so this only
   // ever runs the supplied statements — and creates nothing at all when `sql`
   // is omitted.
-  createPostgresGrantJob({
+  //
+  // It is also the head of this database's grant-Job chain: see
+  // `previousGrantJob` below.
+  const ownerJob = createPostgresGrantJob({
     clusterName,
     databaseName: dbName,
     roleName: username,
@@ -180,6 +183,12 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
     provider,
     dependsOn: [database, owner.role, owner.credentials.userSecret],
   });
+
+  // Last grant Job created for THIS database, or `undefined` until one exists.
+  // Each new Job is chained after it so the database's grant transactions run
+  // one at a time — see the note on the `dependsOn` passed below, and
+  // {@link createPostgresGrantJob}'s own documentation of the requirement.
+  let previousGrantJob: k8s.batch.v1.Job | undefined = ownerJob;
 
   return {
     name: dbName,
@@ -231,6 +240,17 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
 
       // Grants are applied as the database owner — never as superuser — so the
       // Job depends on the owner's credential Secret as well as both CRs.
+      //
+      // It also depends on the previous grant Job for this database, which is
+      // what serializes them. Each Job's script revokes and re-grants across
+      // every schema of the same database, so two running at once contend for
+      // the same catalog rows and can abort with `tuple concurrently updated`.
+      // A Job that exhausts its backoffLimit is never retried — the name is
+      // content-addressed, so an unchanged spec re-derives the same name and
+      // Pulumi diffs it as a no-op — which turns a transient collision into a
+      // permanent failure needing a manual `kubectl delete job`. Jobs for
+      // OTHER databases are deliberately not chained: they are separate
+      // transactions on separate databases and cannot contend.
       const grantJob = createPostgresGrantJob({
         clusterName,
         databaseName: dbName,
@@ -243,8 +263,17 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
         pgVersion,
         labels,
         provider,
-        dependsOn: [database, provisioned.role, owner.credentials.userSecret],
+        dependsOn: [
+          database,
+          provisioned.role,
+          owner.credentials.userSecret,
+          ...(previousGrantJob ? [previousGrantJob] : []),
+        ],
       });
+
+      if (grantJob) {
+        previousGrantJob = grantJob;
+      }
 
       // The connection Secret waits on the grant Job so a consumer cannot read
       // working credentials, connect, and hit permission errors before the

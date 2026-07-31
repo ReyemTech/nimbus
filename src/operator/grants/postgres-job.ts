@@ -103,7 +103,13 @@ export interface IGrantJobOptions {
   readonly labels: Record<string, string>;
   /** Kubernetes provider. */
   readonly provider: k8s.Provider;
-  /** Resources the Job and ConfigMap must be created after. */
+  /**
+   * Resources the Job and ConfigMap must be created after.
+   *
+   * Include the previously created grant Job for the **same database** here:
+   * that is what serializes this database's grant transactions. See
+   * {@link createPostgresGrantJob}.
+   */
   readonly dependsOn: pulumi.Resource[];
 }
 
@@ -196,6 +202,18 @@ function deriveJobName(
  * (failed) Job. Recovering from a permanent failure requires deleting the
  * failed Job manually (e.g. `kubectl delete job <name>`) before re-running
  * Pulumi, so a new Job is created and actually runs.
+ *
+ * **Callers must serialize the Jobs they create for one database.** Every
+ * script revokes and re-grants across all of that database's schemas inside a
+ * single transaction, so two Jobs running concurrently against the same
+ * database contend for the same `pg_class`/`pg_namespace` rows and one can
+ * abort with `tuple concurrently updated`. Combined with the content-addressed
+ * name above, a transient collision that exhausts `backoffLimit` becomes a
+ * permanent, manually-recoverable failure. This function does not enforce the
+ * ordering itself — it has no view of the other Jobs — so the caller chains it,
+ * by passing the previously created Job for the same database in
+ * {@link IGrantJobOptions.dependsOn}. Jobs for *different* databases need no
+ * such chain: they are separate transactions on separate databases.
  *
  * @param options - Cluster, role, owner, grants, and dependencies
  * @returns The Job, or `undefined` when privileges are unmanaged (`grants` is

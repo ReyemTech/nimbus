@@ -147,6 +147,18 @@ describe("createSingleCnpgDatabaseInstance", () => {
     expect(registered).toContain(name);
   });
 
+  // An empty database name used to pass straight through: the owner defaults to
+  // the database name and would have been caught by the role validator, but the
+  // default config here sets `owner: "etl"` — exactly the case a caller is most
+  // likely to have configured — so nothing looked at the name at all and a full
+  // set of CRs, Jobs and Secrets was registered for a database with no name.
+  it.each(["", " "])("rejects a blank database name (%p)", (dbName) => {
+    expect(() => makeDatabase({ namespaces: ["app"], owner: "etl" }, dbName)).toThrow(
+      AnyCloudError
+    );
+    expect(() => makeDatabase({ namespaces: ["app"], owner: "etl" }, dbName)).toThrow(/is empty/);
+  });
+
   it("applies config.sql as an owner-scoped Job and nothing when omitted", async () => {
     makeDatabase({ namespaces: ["app"], owner: "etl", sql: ["CREATE EXTENSION IF NOT EXISTS x;"] });
     await settle();
@@ -483,6 +495,27 @@ describe("addRole", () => {
     }
 
     expect(() => addRole("reader", { grants: [{ privileges: ["SELECT"] }] })).not.toThrow();
+  });
+
+  // An empty role name is not a creatable PostgreSQL role. Accepted, the
+  // DatabaseRole CR, its Secrets and its grant Job were all registered and the
+  // deploy failed inside the CNPG controller, after `pulumi up` succeeded.
+  it.each(["", " "])("rejects a blank role name (%p)", (roleName) => {
+    const addRole = addRoleOf(makeDatabase());
+
+    expect(() => addRole(roleName)).toThrow(AnyCloudError);
+    expect(() => addRole(roleName)).toThrow(/is empty/);
+  });
+
+  it("provisions nothing before rejecting a blank role name", async () => {
+    const addRole = addRoleOf(makeDatabase());
+    await settle();
+    const before = [...registered];
+
+    expect(() => addRole("")).toThrow(AnyCloudError);
+    await settle();
+
+    expect(registered).toEqual(before);
   });
 
   it("provisions nothing before rejecting a privilege", async () => {

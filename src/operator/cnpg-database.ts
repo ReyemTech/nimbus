@@ -29,7 +29,11 @@ import {
 } from "./cnpg-roles.js";
 import { createPostgresGrantJob } from "./grants/postgres-job.js";
 import { assertSupportedPrivileges } from "./grants/postgres-sql.js";
-import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
+import {
+  assertValidDatabaseName,
+  assertValidRoleName,
+  resolveRoleConfig,
+} from "./grants/role-config.js";
 import { ENGINE_NAMES, assertNoForeignEngineOptions } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type { IRoleRegistry } from "./role-registry.js";
@@ -88,8 +92,9 @@ export interface ICnpgDatabaseOptions {
  * @throws {AnyCloudError} code `INVALID_GRANT` when a role's grant lists no privileges
  * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a grant names a
  *   privilege the SQL compiler cannot emit
- * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `addRole()` is
- *   called with the database owner's own name, with a role name any other
+ * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `dbName` or the
+ *   resolved owner name is blank, or when `addRole()` is called with a blank
+ *   name, with the database owner's own name, with a role name any other
  *   database on the same cluster has already claimed, or with an
  *   `engineOptions` block belonging to another engine
  */
@@ -97,6 +102,7 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
   const { clusterName, dbName, config, endpoint, port, pgVersion, cluster, provider } = options;
   const { roleRegistry } = options;
 
+  assertValidDatabaseName(dbName);
   const username = config.owner ?? dbName;
   assertValidRoleName(username, dbName);
   // The owner is a cluster-global role like any other, so it claims its name

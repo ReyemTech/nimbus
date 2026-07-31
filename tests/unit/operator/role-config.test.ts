@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  assertValidDatabaseName,
   assertValidRoleName,
   resolveRoleConfig,
 } from "../../../src/operator/grants/role-config.js";
@@ -89,10 +90,70 @@ describe("assertValidRoleName", () => {
     expect(() => assertValidRoleName("x` SET PASSWORD 'pwned' //", "graph")).toThrow(AnyCloudError);
   });
 
+  // An empty account name is not creatable on any of the three engines, and a
+  // whitespace-only one narrows to nothing — so every resource would be named
+  // after a bare hash. Accepted, all three backends registered a full set of
+  // resources and the deploy failed inside the controller or provisioning Job,
+  // after `pulumi up` had reported success.
+  it.each([
+    ["the empty string", ""],
+    ["a single space", " "],
+    ["a tab", "\t"],
+    ["whitespace only", "   \n "],
+  ])("rejects %s", (_label, roleName) => {
+    expect(() => assertValidRoleName(roleName, "analytics")).toThrow(AnyCloudError);
+    expect(() => assertValidRoleName(roleName, "analytics")).toThrow(/is empty/);
+  });
+
+  it("reports UNSUPPORTED_ROLE_OPTION for an empty name", () => {
+    try {
+      assertValidRoleName("", "analytics");
+      expect.unreachable("assertValidRoleName should have thrown for an empty name");
+    } catch (error) {
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
+      expect((error as AnyCloudError).message).toContain('"analytics"');
+    }
+  });
+
   it.each(["reader", "read_only", "etl-writer", "Read.Only", "grafana@db", "użytkownik"])(
     "accepts %s",
     (roleName) => {
       expect(() => assertValidRoleName(roleName, "analytics")).not.toThrow();
     }
   );
+
+  // A name that is merely padded still names a real account, so it is trimmed
+  // by neither the validator nor the engines — only a wholly blank one throws.
+  it("accepts a name with surrounding whitespace around real characters", () => {
+    expect(() => assertValidRoleName(" reader ", "analytics")).not.toThrow();
+  });
+});
+
+// The same hole one level up: a database whose name resolved to an empty string
+// reached the backends and had every CR, Job and Secret registered for it before
+// anything noticed. On CloudNativePG and Neo4j the owner defaults to the
+// database name and would have been caught by assertValidRoleName — but only
+// while no explicit `owner` was configured.
+describe("assertValidDatabaseName", () => {
+  it.each([
+    ["the empty string", ""],
+    ["a single space", " "],
+    ["whitespace only", "\t\n"],
+  ])("rejects %s", (_label, databaseName) => {
+    expect(() => assertValidDatabaseName(databaseName)).toThrow(AnyCloudError);
+    expect(() => assertValidDatabaseName(databaseName)).toThrow(/is empty/);
+  });
+
+  it("reports UNSUPPORTED_ROLE_OPTION for an empty name", () => {
+    try {
+      assertValidDatabaseName("");
+      expect.unreachable("assertValidDatabaseName should have thrown for an empty name");
+    } catch (error) {
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
+    }
+  });
+
+  it.each(["analytics", "billing-prod", "An_Alytics"])("accepts %s", (databaseName) => {
+    expect(() => assertValidDatabaseName(databaseName)).not.toThrow();
+  });
 });

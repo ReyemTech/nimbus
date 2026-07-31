@@ -399,6 +399,22 @@ describe("assertNoEnvironments", () => {
 // applied here at all. Every other unhonourable option on this branch throws
 // (`grants`, `login: false`, `environments`); accepting `sql` and dropping it
 // would leave the config claiming a schema was seeded when nothing ran.
+// A database with no name is not creatable, and the owner's account defaults to
+// being named after it — so accepting one registered the credential Secret, the
+// provisioning Job and every connection Secret for something that cannot exist.
+describe("blank database name", () => {
+  it.each(["", " "])("rejects %p", (dbName) => {
+    expect(() => makeDatabase({ namespaces: ["app"] }, dbName)).toThrow(AnyCloudError);
+    expect(() => makeDatabase({ namespaces: ["app"] }, dbName)).toThrow(/is empty/);
+  });
+
+  // The owner is validated as a role name, but only the database name catches
+  // this when an explicit owner is configured.
+  it("rejects a blank name even with a valid explicit owner", () => {
+    expect(() => makeDatabase({ namespaces: ["app"], owner: "etl" }, "")).toThrow(/is empty/);
+  });
+});
+
 describe("config.sql", () => {
   it("rejects sql, which Neo4j cannot apply", () => {
     expect(() => makeDatabase({ namespaces: ["app"], sql: ["SELECT 1;"] })).toThrow(AnyCloudError);
@@ -651,6 +667,27 @@ describe("addRole", () => {
     const before = [...registered];
 
     expect(() => db.addRole("read`er")).toThrow(AnyCloudError);
+    await flushBehindAnchorRole(db);
+
+    expect(registeredWithoutAnchor()).toEqual(before);
+  });
+
+  // An empty username is not creatable in Neo4j. Accepted, the credential
+  // Secret and the cypher-shell Job were both registered and the deploy failed
+  // inside the Job, after `pulumi up` reported success.
+  it.each(["", " "])("rejects a blank username (%p)", (roleName) => {
+    const db = makeDatabase();
+
+    expect(() => db.addRole(roleName)).toThrow(AnyCloudError);
+    expect(() => db.addRole(roleName)).toThrow(/is empty/);
+  });
+
+  it("provisions nothing before rejecting a blank username", async () => {
+    const db = makeDatabase();
+    await awaitRegistered(...OWNER_RESOURCES);
+    const before = [...registered];
+
+    expect(() => db.addRole("")).toThrow(AnyCloudError);
     await flushBehindAnchorRole(db);
 
     expect(registeredWithoutAnchor()).toEqual(before);

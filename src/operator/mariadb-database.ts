@@ -29,7 +29,11 @@ import {
   replicateMariadbConnectionSecrets,
   toMariadbGrants,
 } from "./mariadb-roles.js";
-import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
+import {
+  assertValidDatabaseName,
+  assertValidRoleName,
+  resolveRoleConfig,
+} from "./grants/role-config.js";
 import { ENGINE_NAMES, assertNoForeignEngineOptions, assertNoSql } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type { IRoleRegistry } from "./role-registry.js";
@@ -91,7 +95,8 @@ export interface IMariadbDatabaseOptions {
  * @throws {AnyCloudError} code `INVALID_GRANT` when a role's grant lists no privileges
  * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a role's grant names
  *   a privilege a database-scoped MariaDB `GRANT` cannot carry
- * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `config.sql` is
+ * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `dbName` is blank
+ *   or `addRole()` is called with a blank name, when `config.sql` is
  *   set (MariaDB runs no SQL), when `config.owner` is set to anything but the
  *   database name, when `addRole()` is called with the database owner's own
  *   name, when `addRole()` is called with a `user`@`host` pair any other
@@ -104,6 +109,8 @@ export function createSingleMariadbDatabaseInstance(
 ): IDatabaseInstance {
   const { clusterName, dbName, config, endpoint, port, mariadb, provider } = options;
   const { roleRegistry } = options;
+
+  assertValidDatabaseName(dbName);
 
   // Nothing here executes SQL — provisioning is CRs all the way down — so
   // `sql` is refused rather than dropped on the floor.

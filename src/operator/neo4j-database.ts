@@ -31,7 +31,11 @@ import {
   provisionNeo4jRole,
   replicateNeo4jConnectionSecrets,
 } from "./neo4j-roles.js";
-import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
+import {
+  assertValidDatabaseName,
+  assertValidRoleName,
+  resolveRoleConfig,
+} from "./grants/role-config.js";
 import { toLabelValue } from "./resource-identity.js";
 import { ENGINE_NAMES, assertNoForeignEngineOptions, assertNoSql } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
@@ -120,11 +124,12 @@ export interface INeo4jDatabaseOptions {
  * @param options - Deployment, database name, configuration, and provider
  * @returns The database instance, with `addRole()` bound to it
  * @throws {AnyCloudError} code `INVALID_GRANT` when a role's grant lists no privileges
- * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `config.sql` is
- *   set (Neo4j runs no SQL), or when `addRole()` is called with the database
- *   owner's own name, with a username any other database on the same deployment
- *   has already claimed, is passed `grants` (Neo4j Community has no RBAC), is
- *   passed `login: false`, or is passed any `engineOptions` block
+ * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `dbName` or the
+ *   resolved owner name is blank, when `config.sql` is set (Neo4j runs no SQL),
+ *   or when `addRole()` is called with a blank name, with the database owner's
+ *   own name, with a username any other database on the same deployment has
+ *   already claimed, is passed `grants` (Neo4j Community has no RBAC), is passed
+ *   `login: false`, or is passed any `engineOptions` block
  */
 export function createSingleNeo4jDatabaseInstance(
   options: INeo4jDatabaseOptions
@@ -132,6 +137,8 @@ export function createSingleNeo4jDatabaseInstance(
   const { clusterName, dbName, config, endpoint, port, adminSecretName, release, provider } =
     options;
   const { roleRegistry } = options;
+
+  assertValidDatabaseName(dbName);
 
   // The provisioning Job speaks Cypher, not SQL, and there is no second Job to
   // put statements in — so `sql` is refused rather than dropped on the floor.

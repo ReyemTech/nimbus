@@ -173,6 +173,11 @@ interface IDatabaseRole {
   what is rejected, so an empty `{}` block throws too.
 - `name` contains a backtick, single quote, double quote, backslash, or NUL byte,
   on any engine.
+- `name` is empty or holds nothing but whitespace, on any engine. No engine can
+  create an account without a name, and nothing readable narrows out of one, so
+  it is refused up front rather than registering a CR, a Secret and a Job that
+  fail inside the controller after the deploy has reported success. The database
+  name passed to `createDatabase()` is refused on the same terms.
 
 Each replicated Secret carries `host`, `port`, `username`, `password`, `database`
 and `uri` (Neo4j adds `httpPort` and the `NEO4J_*` driver aliases). **Only `uri`

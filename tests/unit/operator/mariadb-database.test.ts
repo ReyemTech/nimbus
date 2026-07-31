@@ -253,6 +253,16 @@ describe("createSingleMariadbDatabaseInstance", () => {
 // `grants`); accepting `sql` and dropping it would be the one exception, and a
 // silently skipped `CREATE EXTENSION` is exactly the kind of gap nothing in the
 // Pulumi diff would explain.
+// A database with no name is not creatable, and the owner's account is named
+// after it — so accepting one registered a Database CR, a User CR and every
+// Secret for a database and an account that could never exist.
+describe("blank database name", () => {
+  it.each(["", " "])("rejects %p", (dbName) => {
+    expect(() => makeDatabase({ namespaces: ["app"] }, dbName)).toThrow(AnyCloudError);
+    expect(() => makeDatabase({ namespaces: ["app"] }, dbName)).toThrow(/is empty/);
+  });
+});
+
 describe("config.sql", () => {
   it("rejects sql, which MariaDB cannot apply", () => {
     expect(() => makeDatabase({ namespaces: ["app"], sql: ["SELECT 1;"] })).toThrow(AnyCloudError);
@@ -800,6 +810,27 @@ describe("addRole", () => {
     }
 
     expect(() => addRole("reader", { grants: [{ privileges: ["SELECT"] }] })).not.toThrow();
+  });
+
+  // An empty account name is not creatable in MariaDB. Accepted, the User CR,
+  // its password Secret and its connection Secrets were all registered and the
+  // deploy failed inside mariadb-operator, after `pulumi up` succeeded.
+  it.each(["", " "])("rejects a blank role name (%p)", (roleName) => {
+    const addRole = addRoleOf(makeDatabase());
+
+    expect(() => addRole(roleName)).toThrow(AnyCloudError);
+    expect(() => addRole(roleName)).toThrow(/is empty/);
+  });
+
+  it("provisions nothing before rejecting a blank role name", async () => {
+    const db = makeDatabase();
+    await awaitRegistered(...OWNER_RESOURCES);
+    const before = [...registered];
+
+    expect(() => addRoleOf(db)("")).toThrow(AnyCloudError);
+    await flushBehindAnchorRole(db);
+
+    expect(registeredWithoutAnchor()).toEqual(before);
   });
 
   it("provisions nothing before rejecting a privilege", async () => {

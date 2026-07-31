@@ -2,6 +2,8 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import * as pulumi from "@pulumi/pulumi";
 import * as k8s from "@pulumi/kubernetes";
 import { createSingleMariadbDatabaseInstance } from "../../../src/operator/mariadb-database.js";
+import { createMariadbRoleRegistry } from "../../../src/operator/mariadb-common.js";
+import type { IRoleRegistry } from "../../../src/operator/role-registry.js";
 import type {
   IDatabaseInstance,
   IDatabaseRole,
@@ -102,7 +104,9 @@ const OWNER_RESOURCES = [
 function makeDatabase(
   config: Parameters<typeof createSingleMariadbDatabaseInstance>[0]["config"] = {
     namespaces: ["app"],
-  }
+  },
+  dbName = "analytics",
+  roleRegistry: IRoleRegistry = createMariadbRoleRegistry("shared-maria")
 ): IDatabaseInstance {
   const provider = new k8s.Provider("test-provider", {});
   const mariadb = new k8s.apiextensions.CustomResource(
@@ -113,11 +117,12 @@ function makeDatabase(
 
   return createSingleMariadbDatabaseInstance({
     clusterName: "shared-maria",
-    dbName: "analytics",
+    dbName,
     config,
     endpoint: pulumi.output("shared-maria.data.svc.cluster.local"),
     port: pulumi.output(3306),
     mariadb,
+    roleRegistry,
     provider,
   });
 }
@@ -319,6 +324,7 @@ describe("config.owner", () => {
         endpoint: pulumi.output("shared-maria.data.svc.cluster.local"),
         port: pulumi.output(3306),
         mariadb,
+        roleRegistry: createMariadbRoleRegistry("shared-maria"),
         provider,
       })
     ).toThrow(AnyCloudError);
@@ -331,6 +337,7 @@ describe("config.owner", () => {
       endpoint: pulumi.output("shared-maria.data.svc.cluster.local"),
       port: pulumi.output(3306),
       mariadb,
+      roleRegistry: createMariadbRoleRegistry("shared-maria"),
       provider,
     });
     await awaitRegistered(
@@ -349,6 +356,88 @@ describe("config.owner", () => {
     await awaitRegistered(...OWNER_RESOURCES);
 
     expect(specOf("shared-maria-analytics-user")).toMatchObject({ name: "analytics" });
+  });
+});
+
+// MariaDB accounts live at the instance level, so two databases on one instance
+// asking for `reader`@`%` are asking for the SAME account — each pointing it at
+// its own generated password Secret. Their Pulumi logical names differ (they are
+// derived from the database name), so preview reports nothing and the two User
+// controllers reconcile the password against each other in production.
+describe("instance-scoped role identities", () => {
+  it("rejects the same user@host added on two databases in one instance", () => {
+    const registry = createMariadbRoleRegistry("shared-maria");
+    const billing = addRoleOf(makeDatabase({ namespaces: ["app"] }, "billing", registry));
+    const analytics = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics", registry));
+
+    billing("reader");
+
+    expect(() => analytics("reader")).toThrow(AnyCloudError);
+    expect(() => analytics("reader")).toThrow(/instance-global/);
+  });
+
+  it("names the account, both databases, and the instance", () => {
+    const registry = createMariadbRoleRegistry("shared-maria");
+    const billing = addRoleOf(makeDatabase({ namespaces: ["app"] }, "billing", registry));
+    const analytics = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics", registry));
+    billing("reader");
+
+    try {
+      analytics("reader");
+      expect.unreachable("addRole should have thrown for an instance-global collision");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AnyCloudError);
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
+      const { message } = error as AnyCloudError;
+      expect(message).toContain('"reader"@"%"');
+      expect(message).toContain('"billing"');
+      expect(message).toContain('"analytics"');
+      expect(message).toContain('instance "shared-maria"');
+    }
+  });
+
+  // Two accounts sharing a username but reachable from different hosts are two
+  // genuinely different MariaDB accounts, with their own passwords and grants.
+  it("allows the same username on genuinely different hosts", () => {
+    const registry = createMariadbRoleRegistry("shared-maria");
+    const billing = addRoleOf(makeDatabase({ namespaces: ["app"] }, "billing", registry));
+    const analytics = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics", registry));
+
+    expect(() => {
+      billing("reader", { engineOptions: { mariadb: { host: "10.0.0.1" } } });
+      analytics("reader", { engineOptions: { mariadb: { host: "10.0.0.2" } } });
+    }).not.toThrow();
+  });
+
+  // The owner's CRs omit spec.host and take the operator's default, which is the
+  // same "%" an addRole() with no host gets — so they are one account.
+  it("rejects an addRole() name that is another database's owner on the default host", () => {
+    const registry = createMariadbRoleRegistry("shared-maria");
+    makeDatabase({ namespaces: ["app"] }, "billing", registry);
+    const analytics = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics", registry));
+
+    expect(() => analytics("billing")).toThrow(/already claimed by database "billing"/);
+  });
+
+  it("rejects the same role added twice on one database", () => {
+    const addRole = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics"));
+    addRole("reader");
+
+    expect(() => addRole("reader")).toThrow(/already claimed by database "analytics"/);
+  });
+
+  it("allows the same account on separate instances", () => {
+    const billing = addRoleOf(
+      makeDatabase({ namespaces: ["app"] }, "billing", createMariadbRoleRegistry("maria-a"))
+    );
+    const analytics = addRoleOf(
+      makeDatabase({ namespaces: ["app"] }, "analytics", createMariadbRoleRegistry("maria-b"))
+    );
+
+    expect(() => {
+      billing("reader");
+      analytics("reader");
+    }).not.toThrow();
   });
 });
 

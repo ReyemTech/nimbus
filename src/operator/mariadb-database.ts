@@ -19,6 +19,7 @@ import {
   DATA_NAMESPACE,
   DEFAULT_GRANT_HOST,
   MARIADB_API_VERSION,
+  claimMariadbRoleName,
 } from "./mariadb-common.js";
 import {
   OWNER_GRANT,
@@ -31,6 +32,7 @@ import {
 import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
 import { assertNoSql } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
+import type { IRoleRegistry } from "./role-registry.js";
 import type {
   IDatabaseInstance,
   IDatabaseRole,
@@ -65,6 +67,14 @@ export interface IMariadbDatabaseOptions {
   readonly port: pulumi.Output<number>;
   /** The `MariaDB` CR. */
   readonly mariadb: k8s.apiextensions.CustomResource;
+  /**
+   * Account identities already claimed on this instance, shared by every
+   * database on it.
+   *
+   * MariaDB accounts are instance-global, so this cannot be per-database: see
+   * {@link IRoleRegistry}.
+   */
+  readonly roleRegistry: IRoleRegistry;
   /** Kubernetes provider. */
   readonly provider: k8s.Provider;
 }
@@ -82,12 +92,15 @@ export interface IMariadbDatabaseOptions {
  * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `config.sql` is
  *   set (MariaDB runs no SQL), when `config.owner` is set to anything but the
  *   database name, when `addRole()` is called with the database owner's own
- *   name, or when `addRole()` is passed `login: false`
+ *   name, when `addRole()` is called with a `user`@`host` pair any other
+ *   database on the same instance has already claimed, or when `addRole()` is
+ *   passed `login: false`
  */
 export function createSingleMariadbDatabaseInstance(
   options: IMariadbDatabaseOptions
 ): IDatabaseInstance {
   const { clusterName, dbName, config, endpoint, port, mariadb, provider } = options;
+  const { roleRegistry } = options;
 
   // Nothing here executes SQL — provisioning is CRs all the way down — so
   // `sql` is refused rather than dropped on the floor.
@@ -117,6 +130,11 @@ export function createSingleMariadbDatabaseInstance(
   }
   const username = dbName;
   assertValidRoleName(username, dbName);
+  // The owner's CRs omit `spec.host` and rely on the operator's own default,
+  // which is DEFAULT_GRANT_HOST — so that is the host its account effectively
+  // has, and the host it must claim. Claiming it matters because a later
+  // addRole() on a *different* database could otherwise take the same pair.
+  claimMariadbRoleName(roleRegistry, username, DEFAULT_GRANT_HOST, dbName);
   const labels = {
     [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
     "nimbus/cluster": clusterName,
@@ -218,6 +236,15 @@ export function createSingleMariadbDatabaseInstance(
       }
 
       const mariadbOptions = roleConfig?.engineOptions?.mariadb;
+      const host = mariadbOptions?.host ?? DEFAULT_GRANT_HOST;
+
+      // Same hazard one scope wider: the check above only sees this database's
+      // own owner, while this `user`@`host` pair may already belong to a sibling
+      // database on the same instance — the same account, since MariaDB has only
+      // one. The registry is what notices. A different host is a different
+      // account, and stays allowed.
+      claimMariadbRoleName(roleRegistry, roleName, host, dbName);
+
       const naming = additionalRoleNaming(clusterName, dbName, roleName);
 
       const provisioned = provisionMariadbRole({
@@ -230,7 +257,7 @@ export function createSingleMariadbDatabaseInstance(
         // and mariadb-operator issues the `REVOKE`, so the revoke semantics
         // `grants: []` asks for are what the declarative path already gives.
         grants: toMariadbGrants(resolved.grants ?? []),
-        host: mariadbOptions?.host ?? DEFAULT_GRANT_HOST,
+        host,
         maxUserConnections: mariadbOptions?.maxUserConnections,
         labels,
         mariadb,

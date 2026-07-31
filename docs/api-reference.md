@@ -158,8 +158,8 @@ interface IDatabaseRole {
 - `name` equals the database's owner — the owner's role already exists (created by
   `createDatabase()`); a second CR/Job for the same account would fight the first
   over its password.
-- `name` is already claimed by another role **anywhere on the same cluster**, on
-  CloudNativePG — see "Role names are unique per cluster" below.
+- `name` is already claimed by another role **anywhere on the same cluster** — see
+  "Role names are unique per cluster" below.
 - `grants` is passed on Neo4j — including `grants: []`. Community edition has no
   RBAC, so neither a privilege set nor "this role holds no privileges" can be
   honoured: every Neo4j account can read and write the whole graph.
@@ -170,10 +170,10 @@ interface IDatabaseRole {
 
 #### Role names are unique per cluster, not per database
 
-`addRole()` is called on a database, but a **PostgreSQL role is not a database
-object** — it lives at the cluster level and serves every database in it. So on
-CloudNativePG the role name you pass must be unique across the whole cluster,
-not just the database:
+`addRole()` is called on a database, but a **login identity is not a database
+object** — on both CloudNativePG and MariaDB it lives at the cluster/instance
+level and serves every database on it. So the role name you pass must be unique
+across the whole cluster, not just the database:
 
 ```typescript
 const pg = operator.createCluster("pgsql-main");
@@ -200,6 +200,18 @@ back would not be the one you asked for. If you genuinely want *one* role readin
 from both databases, call `addRole()` once and grant it on the second database
 through that database's `sql` escape hatch — nimbus models a role's privileges
 only in the database it was added to.
+
+**MariaDB is the same rule keyed on `user`@`host`**, because that pair is what
+MariaDB treats as one account. `reader`@`%` claimed by one database blocks
+`reader`@`%` on another, but `reader`@`10.0.0.1` and `reader`@`10.0.0.2` are two
+genuinely distinct accounts and are both allowed. The host comes from
+`engineOptions.mariadb.host` and defaults to `%`; a database's owner counts as
+holding `<database>`@`%`, since its `User` CR omits `spec.host` and takes the
+operator's default.
+
+Neo4j has no such registry: its provisioning Job runs `CREATE USER ... IF NOT
+EXISTS`, which never rewrites an existing account's password, so a duplicate name
+cannot produce the password-flapping this rule prevents.
 
 It throws code `INVALID_GRANT` when a grant lists zero privileges, and code
 `UNSUPPORTED_PRIVILEGE` when a grant names a privilege the engine's grant path

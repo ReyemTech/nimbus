@@ -27,6 +27,7 @@ import {
   DATA_NAMESPACE,
   MARIADB_API_VERSION,
   MARIADB_KIND,
+  createMariadbRoleRegistry,
 } from "./mariadb-common.js";
 import { createSingleMariadbDatabaseInstance } from "./mariadb-database.js";
 
@@ -210,6 +211,10 @@ function createSingleMariadbCluster(
   const endpoint = pulumi.output(`${name}.${DATA_NAMESPACE}.svc.cluster.local`);
   const port = pulumi.output(3306);
 
+  // One registry per instance, because that is the scope a MariaDB account
+  // exists at. Every database created below shares it.
+  const roleRegistry = createMariadbRoleRegistry(name);
+
   nimbus.register(name, {
     name,
     type: "database",
@@ -246,6 +251,7 @@ function createSingleMariadbCluster(
             endpoint,
             port,
             mariadb,
+            roleRegistry,
             provider,
           });
         }
@@ -259,6 +265,7 @@ function createSingleMariadbCluster(
           endpoint,
           port,
           mariadb,
+          roleRegistry,
           provider,
         });
       }

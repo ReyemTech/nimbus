@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  toCompositeIdentitySegment,
   toDnsSegment,
   toIdentitySegment,
   toLabelValue,
@@ -98,6 +99,57 @@ describe("toIdentitySegment", () => {
   it("returns a valid DNS-1123 label for every input", () => {
     for (const value of ["Read_Only", "@@", "_x_", "sales.eu", "reader", "A".repeat(40)]) {
       expect(toIdentitySegment(value)).toMatch(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/);
+    }
+  });
+});
+
+describe("toCompositeIdentitySegment", () => {
+  // A MariaDB account is the `username`@`host` pair: `reader`@`%` and
+  // `reader`@`10.0.0.1` exist at once, with their own passwords and grants.
+  it("keeps one name on two hosts apart", () => {
+    expect(toCompositeIdentitySegment(["reader", "%"])).not.toBe(
+      toCompositeIdentitySegment(["reader", "10.0.0.1"])
+    );
+  });
+
+  it("keeps the first part as a readable head", () => {
+    expect(toCompositeIdentitySegment(["reader", "10.0.0.1"])).toMatch(/^reader-[0-9a-f]{8}$/);
+    expect(toCompositeIdentitySegment(["Read_Only", "%"])).toMatch(/^read-only-[0-9a-f]{8}$/);
+  });
+
+  it("is deterministic across calls", () => {
+    expect(toCompositeIdentitySegment(["reader", "%"])).toBe("reader-c3d518ab");
+    expect(toCompositeIdentitySegment(["reader", "%"])).toBe(
+      toCompositeIdentitySegment(["reader", "%"])
+    );
+  });
+
+  // The parts are serialized, not joined: a separator that appears inside a part
+  // would otherwise let two different identities produce one hash input.
+  it("is injective across identities whose parts share a separator", () => {
+    const identities: ReadonlyArray<readonly [string, string]> = [
+      ["reader", "%"],
+      ["reader@%", ""],
+      ["reader", "@%"],
+      ["reader@", "%"],
+      ["read", "er@%"],
+    ];
+
+    expect(new Set(identities.map((parts) => toCompositeIdentitySegment(parts))).size).toBe(
+      identities.length
+    );
+  });
+
+  it("returns a bare hash when nothing of the head survives sanitizing", () => {
+    expect(toCompositeIdentitySegment(["@@", "%"])).toMatch(/^[0-9a-f]{8}$/);
+    expect(toCompositeIdentitySegment(["@@", "%"])).not.toBe(
+      toCompositeIdentitySegment(["@@", "10.0.0.1"])
+    );
+  });
+
+  it("returns a valid DNS-1123 label for every input", () => {
+    for (const value of ["Read_Only", "@@", "_x_", "reader", "A".repeat(40)]) {
+      expect(toCompositeIdentitySegment([value, "%"])).toMatch(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/);
     }
   });
 });

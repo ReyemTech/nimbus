@@ -37,7 +37,7 @@ import {
   type IRoleCredentials,
 } from "./credentials.js";
 import { encodeUriComponentValue } from "./connection-uri.js";
-import { toIdentitySegment } from "./resource-identity.js";
+import { toCompositeIdentitySegment, toIdentitySegment } from "./resource-identity.js";
 import { normalizePrivilegeAgainst } from "./grants/privileges.js";
 import type { IDatabaseGrant } from "./interfaces.js";
 
@@ -130,7 +130,17 @@ export function ownerRoleNaming(clusterName: string, dbName: string): IMariadbRo
  * Grants are named for the table they cover (`*` renders as `all`), never for
  * their position, so reordering a role's `grants` array changes nothing.
  *
- * The role segment comes from {@link toIdentitySegment}, not from plain
+ * **The identity is the `username`@`host` pair, not the username.** MariaDB
+ * treats those two together as one account, which is why the role registry
+ * permits `reader`@`%` and `reader`@`10.0.0.1` to coexist — and a name derived
+ * from the username alone made the second of them register under the first's
+ * logical names, aborting the preview with a duplicate URN so that the account
+ * the registry had just allowed could never actually be created. Folding the
+ * host in also keeps a host *change* honest: it derives new names rather than
+ * attempting an in-place update of `spec.host`, which mariadb-operator treats as
+ * immutable.
+ *
+ * The role segment comes from {@link toCompositeIdentitySegment}, not from plain
  * sanitizing: `Read_Only` and `read_only` are two distinct, simultaneously valid
  * MariaDB usernames that sanitize alike, and two resources deriving one logical
  * name abort the entire preview with a duplicate-URN error. Every segment
@@ -140,14 +150,16 @@ export function ownerRoleNaming(clusterName: string, dbName: string): IMariadbRo
  * @param clusterName - MariaDB instance name
  * @param dbName - Database name
  * @param roleName - Role name as it exists in MariaDB
+ * @param host - Effective host pattern, as returned by `resolveMariadbHost`
  * @returns Naming for the additional user's resources
  */
 export function additionalRoleNaming(
   clusterName: string,
   dbName: string,
-  roleName: string
+  roleName: string,
+  host: string
 ): IMariadbRoleNaming {
-  const base = `${clusterName}-${dbName}-role-${toIdentitySegment(roleName)}`;
+  const base = `${clusterName}-${dbName}-role-${toCompositeIdentitySegment([roleName, host])}`;
   return {
     credentialResource: `${base}-secret`,
     credentialSecret: base,

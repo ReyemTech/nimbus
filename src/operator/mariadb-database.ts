@@ -289,7 +289,11 @@ export function createSingleMariadbDatabaseInstance(
       // reject leaves no claim behind.
       claimMariadbRoleName(roleRegistry, roleName, host, dbName);
 
-      const naming = additionalRoleNaming(clusterName, dbName, roleName);
+      // Named for the `user`@`host` pair the claim above was made on, not for
+      // the username: the registry lets one username exist on two hosts because
+      // MariaDB does, and names derived from the username alone would then
+      // register the second account under the first's logical names.
+      const naming = additionalRoleNaming(clusterName, dbName, roleName, host);
 
       const provisioned = provisionMariadbRole({
         clusterName,

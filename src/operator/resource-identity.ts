@@ -123,6 +123,38 @@ export function toIdentitySegment(value: string): string {
 }
 
 /**
+ * Derive a resource-name segment for an identity made of more than one part.
+ *
+ * Not every engine identifies an account by its name alone: a MariaDB account is
+ * the `username`@`host` pair, and `reader`@`%` and `reader`@`10.0.0.1` are two
+ * accounts that exist at once with their own passwords and their own grants.
+ * Deriving names from the username alone made the second of them register under
+ * the first's Pulumi logical names, which aborts the preview with a duplicate
+ * URN — so the second account could never be created at all.
+ *
+ * The head stays readable by sanitizing the **first** part only, which is the
+ * one a human recognises the resource by; every part is folded into the hash, so
+ * the mapping stays injective the way {@link toIdentitySegment}'s is. The hash
+ * covers `JSON.stringify(parts)` rather than the parts joined by a separator,
+ * because a part may itself contain any separator: `["a@b", "c"]` and
+ * `["a", "b@c"]` are different identities and must not serialize alike.
+ *
+ * @param parts - The identity's raw parts, most identifying first
+ * @returns A DNS-1123-safe segment, distinct for every distinct identity
+ *
+ * @example
+ * ```typescript
+ * toCompositeIdentitySegment(["reader", "%"]); // "reader-8b6a1a09"
+ * toCompositeIdentitySegment(["reader", "10.0.0.1"]); // "reader-…" — another account
+ * ```
+ */
+export function toCompositeIdentitySegment(parts: readonly [string, ...string[]]): string {
+  const sanitized = toDnsSegment(parts[0]);
+  const hash = shortHash(JSON.stringify(parts));
+  return sanitized === "" ? hash : `${sanitized}-${hash}`;
+}
+
+/**
  * Derive a Kubernetes label *value* from a raw identifier.
  *
  * Label values are far more restricted than the identifiers engines accept: the

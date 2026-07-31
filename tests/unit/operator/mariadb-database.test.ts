@@ -79,9 +79,9 @@ const ANCHOR = "anchor-role";
 async function flushBehindAnchorRole(db: IDatabaseInstance): Promise<void> {
   addRoleOf(db)(ANCHOR, { namespaces: ["app"] });
   await awaitRegistered(
-    `shared-maria-analytics-role-${ANCHOR}-9048712e-secret`,
-    `shared-maria-analytics-role-${ANCHOR}-9048712e-user`,
-    `shared-maria-analytics-role-${ANCHOR}-9048712e-connection-app`
+    `shared-maria-analytics-role-${ANCHOR}-463ca1d6-secret`,
+    `shared-maria-analytics-role-${ANCHOR}-463ca1d6-user`,
+    `shared-maria-analytics-role-${ANCHOR}-463ca1d6-connection-app`
   );
 }
 
@@ -419,6 +419,41 @@ describe("instance-scoped role identities", () => {
     }).not.toThrow();
   });
 
+  // Allowing the second account is only half the job: while its names were
+  // derived from the username alone, both accounts on ONE database registered
+  // under one set of Pulumi logical names and the preview aborted with a
+  // duplicate URN — so the account the registry had just permitted could never
+  // be created.
+  it("registers one username on two hosts as two sets of resources", async () => {
+    const addRole = addRoleOf(makeDatabase());
+
+    addRole("reader", {
+      namespaces: ["app"],
+      engineOptions: { mariadb: { host: "10.0.0.1" } },
+    });
+    addRole("reader", {
+      namespaces: ["app"],
+      engineOptions: { mariadb: { host: "10.0.0.2" } },
+    });
+    await awaitRegistered(
+      "shared-maria-analytics-role-reader-3a917bcf-user",
+      "shared-maria-analytics-role-reader-91e5acf2-user"
+    );
+
+    // Two User CRs, under two logical names, for the two accounts MariaDB will
+    // hold — rather than two registrations of one name, which aborts preview.
+    expect(registered).toContain("shared-maria-analytics-role-reader-3a917bcf-connection-app");
+    expect(registered).toContain("shared-maria-analytics-role-reader-91e5acf2-connection-app");
+    expect(specOf("shared-maria-analytics-role-reader-3a917bcf-user")).toMatchObject({
+      name: "reader",
+      host: "10.0.0.1",
+    });
+    expect(specOf("shared-maria-analytics-role-reader-91e5acf2-user")).toMatchObject({
+      name: "reader",
+      host: "10.0.0.2",
+    });
+  });
+
   // A configured "" is not nullish, so `?? DEFAULT_GRANT_HOST` let it through:
   // the registry recorded `reader`@`""` while the User CR — which omitted a
   // falsy host — inherited the operator's own "%" default. Two databases then
@@ -471,14 +506,14 @@ describe("instance-scoped role identities", () => {
       engineOptions: { mariadb: { host: "" } },
     });
     await awaitRegistered(
-      "shared-maria-analytics-role-reader-3d094196-user",
-      "shared-maria-analytics-role-reader-3d094196-grant-all"
+      "shared-maria-analytics-role-reader-c3d518ab-user",
+      "shared-maria-analytics-role-reader-c3d518ab-grant-all"
     );
 
-    expect(specOf("shared-maria-analytics-role-reader-3d094196-user")).toMatchObject({
+    expect(specOf("shared-maria-analytics-role-reader-c3d518ab-user")).toMatchObject({
       host: "%",
     });
-    expect(specOf("shared-maria-analytics-role-reader-3d094196-grant-all")).toMatchObject({
+    expect(specOf("shared-maria-analytics-role-reader-c3d518ab-grant-all")).toMatchObject({
       host: "%",
     });
   });
@@ -487,9 +522,9 @@ describe("instance-scoped role identities", () => {
     addRoleOf(makeDatabase())("reader", {
       engineOptions: { mariadb: { host: " 10.0.0.1 " } },
     });
-    await awaitRegistered("shared-maria-analytics-role-reader-3d094196-user");
+    await awaitRegistered("shared-maria-analytics-role-reader-3a917bcf-user");
 
-    expect(specOf("shared-maria-analytics-role-reader-3d094196-user")).toMatchObject({
+    expect(specOf("shared-maria-analytics-role-reader-3a917bcf-user")).toMatchObject({
       host: "10.0.0.1",
     });
   });
@@ -532,8 +567,8 @@ describe("instance-scoped role identities", () => {
 // perfectly correct — the two disagree and only the URI is wrong.
 describe("connection URI encoding", () => {
   it.each([
-    ["reporting@corp", "reporting-corp-796adff4", "reporting%40corp"],
-    ["reader:ro", "reader-ro-9e580d70", "reader%3Aro"],
+    ["reporting@corp", "reporting-corp-30e2901d", "reporting%40corp"],
+    ["reader:ro", "reader-ro-8db6f740", "reader%3Aro"],
   ])("percent-encodes %s in the uri", async (roleName, resourceStem, encoded) => {
     addRoleOf(makeDatabase())(roleName, { namespaces: ["app"] });
     await awaitRegistered(`shared-maria-analytics-role-${resourceStem}-connection-app`);
@@ -552,10 +587,10 @@ describe("connection URI encoding", () => {
 
   it("parses back to the username it was built from", async () => {
     addRoleOf(makeDatabase())("reporting@corp", { namespaces: ["app"] });
-    await awaitRegistered("shared-maria-analytics-role-reporting-corp-796adff4-connection-app");
+    await awaitRegistered("shared-maria-analytics-role-reporting-corp-30e2901d-connection-app");
 
     const stringData = unwrapSecret(
-      inputsByName["shared-maria-analytics-role-reporting-corp-796adff4-connection-app"]?.[
+      inputsByName["shared-maria-analytics-role-reporting-corp-30e2901d-connection-app"]?.[
         "stringData"
       ]
     );
@@ -568,10 +603,10 @@ describe("connection URI encoding", () => {
 
   it("leaves an ordinary username unencoded", async () => {
     addRoleOf(makeDatabase())("reporting", { namespaces: ["app"] });
-    await awaitRegistered("shared-maria-analytics-role-reporting-637d7bec-connection-app");
+    await awaitRegistered("shared-maria-analytics-role-reporting-c5591e35-connection-app");
 
     const stringData = unwrapSecret(
-      inputsByName["shared-maria-analytics-role-reporting-637d7bec-connection-app"]?.["stringData"]
+      inputsByName["shared-maria-analytics-role-reporting-c5591e35-connection-app"]?.["stringData"]
     );
 
     expect(stringData["uri"]).toBe(
@@ -644,16 +679,16 @@ describe("addRole", () => {
       namespaces: ["app"],
       grants: [{ privileges: ["select"], schema: "marts" }],
     });
-    await awaitRegistered("shared-maria-analytics-role-reader-3d094196-connection-app");
+    await awaitRegistered("shared-maria-analytics-role-reader-c3d518ab-connection-app");
 
     expect(role.name).toBe("reader");
     expect(role.databaseName).toBe("analytics");
     expect(role.clusterName).toBe("shared-maria");
     await expect(unwrap(pulumi.output(role.secrets["app"]))).resolves.toBe(
-      "shared-maria-analytics-role-reader-3d094196-mariadb"
+      "shared-maria-analytics-role-reader-c3d518ab-mariadb"
     );
-    expect(registered).toContain("shared-maria-analytics-role-reader-3d094196-user");
-    expect(registered).toContain("shared-maria-analytics-role-reader-3d094196-connection-app");
+    expect(registered).toContain("shared-maria-analytics-role-reader-c3d518ab-user");
+    expect(registered).toContain("shared-maria-analytics-role-reader-c3d518ab-connection-app");
   });
 
   // Grant CRs are named for the table they cover, so the pair below lands on
@@ -667,11 +702,11 @@ describe("addRole", () => {
       ],
     });
     await awaitRegistered(
-      "shared-maria-analytics-role-reader-3d094196-grant-all",
-      "shared-maria-analytics-role-reader-3d094196-grant-events-862417b9"
+      "shared-maria-analytics-role-reader-c3d518ab-grant-all",
+      "shared-maria-analytics-role-reader-c3d518ab-grant-events-862417b9"
     );
 
-    expect(specOf("shared-maria-analytics-role-reader-3d094196-grant-all")).toMatchObject({
+    expect(specOf("shared-maria-analytics-role-reader-c3d518ab-grant-all")).toMatchObject({
       privileges: ["SELECT"],
       database: "analytics",
       table: "*",
@@ -680,7 +715,7 @@ describe("addRole", () => {
       grantOption: false,
     });
     expect(
-      specOf("shared-maria-analytics-role-reader-3d094196-grant-events-862417b9")
+      specOf("shared-maria-analytics-role-reader-c3d518ab-grant-events-862417b9")
     ).toMatchObject({
       privileges: ["INSERT", "UPDATE"],
       table: "events",
@@ -699,17 +734,17 @@ describe("addRole", () => {
       ],
     });
     await awaitRegistered(
-      "shared-maria-analytics-role-reader-3d094196-grant-all",
-      "shared-maria-analytics-role-reader-3d094196-grant-events-862417b9"
+      "shared-maria-analytics-role-reader-c3d518ab-grant-all",
+      "shared-maria-analytics-role-reader-c3d518ab-grant-events-862417b9"
     );
 
     expect(
-      specOf("shared-maria-analytics-role-reader-3d094196-grant-events-862417b9")
+      specOf("shared-maria-analytics-role-reader-c3d518ab-grant-events-862417b9")
     ).toMatchObject({
       privileges: ["INSERT"],
       table: "events",
     });
-    expect(specOf("shared-maria-analytics-role-reader-3d094196-grant-all")).toMatchObject({
+    expect(specOf("shared-maria-analytics-role-reader-c3d518ab-grant-all")).toMatchObject({
       privileges: ["SELECT"],
       table: "*",
     });
@@ -722,16 +757,16 @@ describe("addRole", () => {
       engineOptions: { mariadb: { host: "10.0.%", maxUserConnections: 5 } },
     });
     await awaitRegistered(
-      "shared-maria-analytics-role-reader-3d094196-user",
-      "shared-maria-analytics-role-reader-3d094196-grant-all"
+      "shared-maria-analytics-role-reader-848e0631-user",
+      "shared-maria-analytics-role-reader-848e0631-grant-all"
     );
 
-    expect(specOf("shared-maria-analytics-role-reader-3d094196-user")).toMatchObject({
+    expect(specOf("shared-maria-analytics-role-reader-848e0631-user")).toMatchObject({
       name: "reader",
       host: "10.0.%",
       maxUserConnections: 5,
     });
-    expect(specOf("shared-maria-analytics-role-reader-3d094196-grant-all")).toMatchObject({
+    expect(specOf("shared-maria-analytics-role-reader-848e0631-grant-all")).toMatchObject({
       host: "10.0.%",
     });
   });
@@ -746,15 +781,15 @@ describe("addRole", () => {
         { privileges: ["insert"], objects: "events" },
       ],
     });
-    await awaitRegistered("shared-maria-analytics-role-reader-3d094196-grant-events-862417b9");
+    await awaitRegistered("shared-maria-analytics-role-reader-c3d518ab-grant-events-862417b9");
 
     expect(
       registered.filter(
-        (name) => name === "shared-maria-analytics-role-reader-3d094196-grant-events-862417b9"
+        (name) => name === "shared-maria-analytics-role-reader-c3d518ab-grant-events-862417b9"
       )
     ).toHaveLength(1);
     expect(
-      specOf("shared-maria-analytics-role-reader-3d094196-grant-events-862417b9")
+      specOf("shared-maria-analytics-role-reader-c3d518ab-grant-events-862417b9")
     ).toMatchObject({
       privileges: ["INSERT", "SELECT"],
       table: "events",
@@ -769,10 +804,10 @@ describe("addRole", () => {
         { privileges: ["select"], objects: "events" },
       ],
     });
-    await awaitRegistered("shared-maria-analytics-role-reader-3d094196-grant-events-862417b9");
+    await awaitRegistered("shared-maria-analytics-role-reader-c3d518ab-grant-events-862417b9");
 
     expect(
-      specOf("shared-maria-analytics-role-reader-3d094196-grant-events-862417b9")
+      specOf("shared-maria-analytics-role-reader-c3d518ab-grant-events-862417b9")
     ).toMatchObject({
       privileges: ["INSERT", "SELECT"],
       table: "events",
@@ -791,20 +826,20 @@ describe("addRole", () => {
       ],
     });
     await awaitRegistered(
-      "shared-maria-analytics-role-reader-3d094196-grant-sales-eu-d6cd8bd8",
-      "shared-maria-analytics-role-reader-3d094196-grant-sales-eu-0abb0838"
+      "shared-maria-analytics-role-reader-c3d518ab-grant-sales-eu-d6cd8bd8",
+      "shared-maria-analytics-role-reader-c3d518ab-grant-sales-eu-0abb0838"
     );
 
     const grantNames = registered.filter((name) => name.includes("-grant-sales-eu"));
     expect(new Set(grantNames).size).toBe(grantNames.length);
     // Each CR still carries the raw table it was named for.
     expect(
-      specOf("shared-maria-analytics-role-reader-3d094196-grant-sales-eu-d6cd8bd8")
+      specOf("shared-maria-analytics-role-reader-c3d518ab-grant-sales-eu-d6cd8bd8")
     ).toMatchObject({
       table: "sales.eu",
     });
     expect(
-      specOf("shared-maria-analytics-role-reader-3d094196-grant-sales-eu-0abb0838")
+      specOf("shared-maria-analytics-role-reader-c3d518ab-grant-sales-eu-0abb0838")
     ).toMatchObject({
       table: "sales_eu",
     });
@@ -813,10 +848,10 @@ describe("addRole", () => {
   it("creates no Grant CR for a role with no grants", async () => {
     const db = makeDatabase();
     addRoleOf(db)("reader", { namespaces: ["app"] });
-    await awaitRegistered("shared-maria-analytics-role-reader-3d094196-connection-app");
+    await awaitRegistered("shared-maria-analytics-role-reader-c3d518ab-connection-app");
 
-    expect(registered).toContain("shared-maria-analytics-role-reader-3d094196-user");
-    expect(registered.some((name) => name.includes("role-reader-3d094196-grant"))).toBe(false);
+    expect(registered).toContain("shared-maria-analytics-role-reader-c3d518ab-user");
+    expect(registered.some((name) => name.includes("role-reader-c3d518ab-grant"))).toBe(false);
   });
   // Validation lives in one shared choke point (`assertValidRoleName`) rather
   // than being argued separately per engine. MariaDB routes privileges through

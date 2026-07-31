@@ -8,7 +8,6 @@
  * @module operator/cnpg
  */
 
-import * as crypto from "node:crypto";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import { ensureNamespace } from "../utils/ensure-namespace";
@@ -23,191 +22,16 @@ import type {
 import { createCnpgClusterDashboard } from "../observability/dashboards";
 import { createPrometheusRule } from "../observability/alerts";
 import { nimbus } from "../nimbus";
+import {
+  CNPG_API_VERSION,
+  DATA_NAMESPACE,
+  DEFAULT_PG_VERSION,
+  createCnpgRoleRegistry,
+} from "./cnpg-common.js";
+import { createSingleCnpgDatabaseInstance } from "./cnpg-database.js";
 
-const DATA_NAMESPACE = "data";
-const DEFAULT_PG_VERSION = "17";
 const DEFAULT_REPLICAS = 1;
 const DEFAULT_STORAGE_GB = 10;
-
-/**
- * Create a single database instance within a CNPG cluster.
- *
- * Creates a dedicated user with a random password, then runs a psql Job
- * against the cluster's superuser to CREATE DATABASE + CREATE ROLE + GRANT.
- * Connection secrets with the per-user credentials are replicated to target
- * namespaces.
- */
-function createSingleCnpgDatabaseInstance(
-  clusterName: string,
-  dbName: string,
-  dbConfig: Omit<IOperatorDatabaseConfig, "environments">,
-  endpoint: pulumi.Output<string>,
-  port: pulumi.Output<number>,
-  cluster: k8s.apiextensions.CustomResource,
-  provider: k8s.Provider
-): IDatabaseInstance {
-  const username = dbConfig.owner ?? dbName;
-  const clusterSecretName = `${clusterName}-superuser`;
-  const userSecretName = `${clusterName}-${dbName}-user`;
-
-  // Generate a random password for the database user (deterministic per Pulumi resource)
-  const generatedPassword = pulumi.secret(crypto.randomBytes(24).toString("base64url"));
-
-  // Store user credentials in a Secret in the data namespace
-  const userSecret = new k8s.core.v1.Secret(
-    `${clusterName}-${dbName}-user-secret`,
-    {
-      metadata: {
-        name: userSecretName,
-        namespace: DATA_NAMESPACE,
-        labels: {
-          "app.kubernetes.io/managed-by": "nimbus",
-          "nimbus/cluster": clusterName,
-          "nimbus/database": dbName,
-        },
-      },
-      stringData: {
-        username,
-        password: generatedPassword,
-      },
-    },
-    { provider, dependsOn: [cluster], ignoreChanges: ["data", "stringData"] }
-  );
-
-  // Job: create database and user via psql against the CNPG superuser
-  const jobName = `cnpg-init-db-${clusterName}-${dbName}`;
-  const initJob = new k8s.batch.v1.Job(
-    jobName,
-    {
-      metadata: {
-        name: jobName,
-        namespace: DATA_NAMESPACE,
-        labels: {
-          "app.kubernetes.io/managed-by": "nimbus",
-          "nimbus/cluster": clusterName,
-          "nimbus/database": dbName,
-        },
-      },
-      spec: {
-        ttlSecondsAfterFinished: 300,
-        backoffLimit: 5,
-        template: {
-          metadata: {
-            labels: { "nimbus/database": dbName },
-          },
-          spec: {
-            restartPolicy: "Never",
-            containers: [
-              {
-                name: "psql",
-                image: `ghcr.io/cloudnative-pg/postgresql:${DEFAULT_PG_VERSION}`,
-                command: [
-                  "sh",
-                  "-c",
-                  [
-                    // Create the role if it doesn't exist, then set password
-                    `psql -h "$PGHOST" -U postgres -d postgres -c "DO \\$\\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '$DB_USER') THEN CREATE ROLE \\"$DB_USER\\" LOGIN; END IF; END \\$\\$;"`,
-                    `psql -h "$PGHOST" -U postgres -d postgres -c "ALTER ROLE \\"$DB_USER\\" PASSWORD '$DB_PASSWORD';"`,
-                    // Create the database if it doesn't exist
-                    `psql -h "$PGHOST" -U postgres -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1 || psql -h "$PGHOST" -U postgres -d postgres -c "CREATE DATABASE \\"$DB_NAME\\" OWNER \\"$DB_USER\\";"`,
-                    // Grant all privileges
-                    `psql -h "$PGHOST" -U postgres -d postgres -c "GRANT ALL PRIVILEGES ON DATABASE \\"$DB_NAME\\" TO \\"$DB_USER\\";"`,
-                  ].join(" && "),
-                ],
-                env: [
-                  {
-                    name: "PGHOST",
-                    value: endpoint,
-                  },
-                  {
-                    // psql reads PGPASSWORD automatically for authentication
-                    name: "PGPASSWORD",
-                    valueFrom: {
-                      secretKeyRef: { name: clusterSecretName, key: "password" },
-                    },
-                  },
-                  {
-                    name: "PGSSLMODE",
-                    value: "require",
-                  },
-                  { name: "DB_NAME", value: dbName },
-                  { name: "DB_USER", value: username },
-                  {
-                    name: "DB_PASSWORD",
-                    valueFrom: {
-                      secretKeyRef: { name: userSecretName, key: "password" },
-                    },
-                  },
-                ],
-              },
-            ],
-          },
-        },
-      },
-    },
-    { provider, dependsOn: [cluster, userSecret] }
-  );
-
-  // Read password back from the stored secret (stable across deploys)
-  const storedSecret = k8s.core.v1.Secret.get(
-    `${clusterName}-${dbName}-user-secret-read`,
-    pulumi.interpolate`${DATA_NAMESPACE}/${userSecretName}`,
-    { provider, dependsOn: [userSecret] }
-  );
-  const stablePassword = storedSecret.data.apply((d) =>
-    Buffer.from(d?.["password"] ?? "", "base64").toString()
-  );
-
-  // Replicate connection secrets with per-user credentials to target namespaces
-  const secrets: Record<string, pulumi.Output<string>> = {};
-  const dbHost = endpoint;
-  const dbPort = port;
-
-  for (const targetNs of dbConfig.namespaces) {
-    const nsResource = ensureNamespace(targetNs, provider);
-    const secretName = `${clusterName}-${dbName}-pg`;
-
-    new k8s.core.v1.Secret(
-      `${clusterName}-${dbName}-secret-${targetNs}`,
-      {
-        metadata: {
-          name: secretName,
-          namespace: targetNs,
-          labels: {
-            "app.kubernetes.io/managed-by": "nimbus",
-            "nimbus/cluster": clusterName,
-            "nimbus/database": dbName,
-          },
-        },
-        stringData: {
-          host: dbHost,
-          port: dbPort.apply((p) => String(p)),
-          username,
-          password: stablePassword,
-          database: dbName,
-          uri: pulumi
-            .all([dbHost, dbPort, stablePassword])
-            .apply(
-              ([h, p, pw]) => `postgresql://${username}:${pw}@${h}:${p}/${dbName}?sslmode=require`
-            ),
-        },
-      },
-      { provider, dependsOn: [initJob, nsResource] }
-    );
-
-    secrets[targetNs] = pulumi.output(secretName);
-  }
-
-  return {
-    name: dbName,
-    clusterName,
-    host: endpoint,
-    port,
-    database: pulumi.output(dbName),
-    secrets,
-    nativeResource: initJob,
-  };
-}
 
 /**
  * Create a single PostgreSQL cluster via the CloudNativePG operator (no environment awareness).
@@ -224,6 +48,7 @@ function createSingleCnpgCluster(
   const version = config?.version ?? DEFAULT_PG_VERSION;
   const replicas = config?.replicas ?? DEFAULT_REPLICAS;
   const storageGb = config?.storageGb ?? DEFAULT_STORAGE_GB;
+  const superuserAccess = config?.superuserAccess ?? false;
 
   // Merge backup: per-cluster config overrides operator defaults
   const backup: IBackupDefaults | undefined =
@@ -258,8 +83,10 @@ function createSingleCnpgCluster(
   const clusterSpec: Record<string, unknown> = {
     instances: replicas,
     imageName: `ghcr.io/cloudnative-pg/postgresql:${version}`,
-    // Enable superuser access so createDatabase() Jobs can CREATE DATABASE/ROLE
-    enableSuperuserAccess: true,
+    // Off by default: databases and roles are provisioned by the operator's own
+    // Database/DatabaseRole controllers, which run inside the instance manager
+    // and never authenticate over the network as `postgres`.
+    enableSuperuserAccess: superuserAccess,
     postgresql: {
       parameters: config?.parameters ?? {},
     },
@@ -313,7 +140,7 @@ function createSingleCnpgCluster(
   const cluster = new k8s.apiextensions.CustomResource(
     `${name}-cnpg-cluster`,
     {
-      apiVersion: "postgresql.cnpg.io/v1",
+      apiVersion: CNPG_API_VERSION,
       kind: "Cluster",
       metadata: {
         name,
@@ -370,7 +197,7 @@ function createSingleCnpgCluster(
     new k8s.apiextensions.CustomResource(
       `${name}-cnpg-scheduled-backup`,
       {
-        apiVersion: "postgresql.cnpg.io/v1",
+        apiVersion: CNPG_API_VERSION,
         kind: "ScheduledBackup",
         metadata: {
           name: `${name}-scheduled-backup`,
@@ -390,16 +217,25 @@ function createSingleCnpgCluster(
   const endpoint = pulumi.output(`${name}-rw.${DATA_NAMESPACE}.svc.cluster.local`);
   const port = pulumi.output(5432);
 
+  // One registry per cluster, because that is the scope a PostgreSQL role
+  // exists at. Every database created below shares it.
+  const roleRegistry = createCnpgRoleRegistry(name);
+
   nimbus.register(name, {
     name,
     type: "database",
     namespace: DATA_NAMESPACE,
     endpoint,
     port: 5432,
-    secretRef: {
-      name: `${name}-superuser`,
-      keys: { password: "password" },
-    },
+    // CNPG only publishes {cluster}-superuser while superuser access is enabled.
+    ...(superuserAccess
+      ? {
+          secretRef: {
+            name: `${name}-superuser`,
+            keys: { password: "password" },
+          },
+        }
+      : {}),
     nativeResource: cluster,
   });
 
@@ -419,28 +255,32 @@ function createSingleCnpgCluster(
             ...baseConfig,
             ...envOverrides,
           };
-          envResult[env] = createSingleCnpgDatabaseInstance(
-            `${name}`,
-            `${dbName}-${env}`,
-            mergedConfig,
+          envResult[env] = createSingleCnpgDatabaseInstance({
+            clusterName: name,
+            dbName: `${dbName}-${env}`,
+            config: mergedConfig,
             endpoint,
             port,
+            pgVersion: version,
             cluster,
-            provider
-          );
+            roleRegistry,
+            provider,
+          });
         }
         result = envResult;
       } else {
         const { environments: _, ...cleanConfig } = dbConfig;
-        result = createSingleCnpgDatabaseInstance(
-          name,
+        result = createSingleCnpgDatabaseInstance({
+          clusterName: name,
           dbName,
-          cleanConfig,
+          config: cleanConfig,
           endpoint,
           port,
+          pgVersion: version,
           cluster,
-          provider
-        );
+          roleRegistry,
+          provider,
+        });
       }
       // Runtime: environments → Record, otherwise → IDatabaseInstance.
       // Overload signatures on IClusterInstance narrow the type for callers.

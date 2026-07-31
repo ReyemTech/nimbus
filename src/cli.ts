@@ -9,6 +9,7 @@
  *   npx @reyemtech/nimbus install azure       → npm install @pulumi/azure-native
  *   npx @reyemtech/nimbus install aws azure   → npm install @pulumi/aws @pulumi/azure-native
  *   npx @reyemtech/nimbus check               → reports which providers are installed/missing
+ *   npx @reyemtech/nimbus migrate [version]   → read-only pre-flight checks before upgrading
  *
  * @module cli
  */
@@ -25,6 +26,7 @@ import {
 } from "./cli/templates.js";
 import type { TemplateName, ITemplateOptions } from "./cli/templates.js";
 import { requiresAzurePrompts, promptForAzureOptions } from "./cli/azure-prompts.js";
+import { runMigrateChecks } from "./cli/migrate.js";
 
 const PROVIDER_PACKAGES: Readonly<Record<string, ReadonlyArray<string>>> = {
   aws: ["@pulumi/aws"],
@@ -203,12 +205,18 @@ async function main(): Promise<void> {
     case "check":
       await check();
       break;
+    case "migrate":
+      process.exit(runMigrateChecks(args[1] ?? "v3"));
+      break;
     default:
       console.log("@reyemtech/nimbus CLI\n");
       console.log("Commands:");
       console.log("  new <name> <template>            Scaffold a new project from a template");
       console.log("  install <provider> [provider...]  Install cloud provider packages");
       console.log("  check                             Check which providers are installed");
+      console.log(
+        "  migrate [version]                 Read-only pre-flight checks before upgrading"
+      );
       console.log(`\nAvailable providers: ${ALL_PROVIDERS.join(", ")}`);
       console.log(`Available templates: ${TEMPLATE_NAMES.join(", ")}`);
       if (command && command !== "help" && command !== "--help" && command !== "-h") {

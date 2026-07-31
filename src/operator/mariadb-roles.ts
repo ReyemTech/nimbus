@@ -84,6 +84,10 @@ export interface IMariadbRoleNaming {
    * the argument entirely, which is how its pre-existing unsuffixed name
    * survives.
    *
+   * The key must be injective over table names for the same reason a role's
+   * name must be: two Grant CRs deriving one logical name abort the preview
+   * with a duplicate URN. See {@link toIdentitySegment}.
+   *
    * @param table - The grant's `spec.table`, `"*"` for the whole database
    * @returns The grant's Pulumi logical and Kubernetes names
    */
@@ -151,7 +155,14 @@ export function additionalRoleNaming(
     connectionResourcePrefix: `${base}-connection`,
     connectionSecret: `${base}-mariadb`,
     grantNaming: (table: string) => {
-      const suffix = toResourceName(table === ALL_TABLES ? ALL_OBJECTS : table);
+      // Table names are narrowed the same collision-resistant way role names
+      // are: `sales.eu` and `sales_eu` are two distinct tables that sanitize to
+      // `sales-eu`, and {@link toMariadbGrants} merges grants by raw table, so
+      // both survive as separate Grant CRs and would then register under one
+      // Pulumi logical name. `*` is not a table name but the whole-database
+      // sentinel, and renders as the constant `all` — `objects: "all"` is the
+      // only way to ask for it, so no literal table can reach that value.
+      const suffix = table === ALL_TABLES ? ALL_OBJECTS : toIdentitySegment(table);
       return {
         resource: `${base}-grant-${suffix}`,
         metadataName: toResourceName(`${base}-grant-${suffix}`),

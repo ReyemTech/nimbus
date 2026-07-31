@@ -96,7 +96,29 @@ describe("additionalRoleNaming", () => {
   it("sanitizes table names that are not valid DNS-1123 labels", () => {
     const role = additionalRoleNaming("c", "d", "reader");
 
-    expect(role.grantNaming("Order_Items").resource).toBe("c-d-role-reader-grant-order-items");
+    expect(role.grantNaming("Order_Items").resource).toBe(
+      "c-d-role-reader-grant-order-items-62753264"
+    );
+  });
+
+  // `sales.eu` and `sales_eu` are two distinct tables MariaDB will hold at once,
+  // and both sanitize to `sales-eu`. toMariadbGrants merges grants by the RAW
+  // table, so both survive as separate Grant CRs — which then registered under
+  // one Pulumi logical name and aborted the preview with a duplicate URN.
+  it("keeps table names apart that sanitize to the same value", () => {
+    const role = additionalRoleNaming("c", "d", "reader");
+
+    expect(role.grantNaming("sales.eu").resource).not.toBe(role.grantNaming("sales_eu").resource);
+    expect(role.grantNaming("sales.eu").metadataName).not.toBe(
+      role.grantNaming("sales_eu").metadataName
+    );
+  });
+
+  // A table name that is already a valid DNS-1123 label keeps its plain form.
+  it("leaves a table name that needs no sanitizing unsuffixed", () => {
+    expect(additionalRoleNaming("c", "d", "reader").grantNaming("events").resource).toBe(
+      "c-d-role-reader-grant-events"
+    );
   });
 
   // Grant names must be a function of the table alone: stable for one table, so
@@ -114,7 +136,7 @@ describe("additionalRoleNaming", () => {
 
   it("gives different tables different names", () => {
     const role = additionalRoleNaming("c", "d", "reader");
-    const tables = ["events", "orders", "Order_Items", "*", "invoices"];
+    const tables = ["events", "orders", "Order_Items", "*", "invoices", "sales.eu", "sales_eu"];
 
     const names = tables.map((table) => role.grantNaming(table).resource);
 
@@ -122,9 +144,11 @@ describe("additionalRoleNaming", () => {
     expect(names).toEqual([
       "c-d-role-reader-grant-events",
       "c-d-role-reader-grant-orders",
-      "c-d-role-reader-grant-order-items",
+      "c-d-role-reader-grant-order-items-62753264",
       "c-d-role-reader-grant-all",
       "c-d-role-reader-grant-invoices",
+      "c-d-role-reader-grant-sales-eu-d6cd8bd8",
+      "c-d-role-reader-grant-sales-eu-0abb0838",
     ]);
   });
 

@@ -684,6 +684,33 @@ describe("addRole", () => {
     });
   });
 
+  // Merging is keyed on the raw table, so `sales.eu` and `sales_eu` stay two
+  // grants — as they must, being two distinct tables. Naming them by sanitizing
+  // alone gave both `-grant-sales-eu`, and two resources under one logical name
+  // abort the whole preview with a duplicate URN.
+  it("renders grants on tables that sanitize alike as distinct CRs", async () => {
+    addRoleOf(makeDatabase())("reader", {
+      grants: [
+        { privileges: ["select"], objects: "sales.eu" },
+        { privileges: ["select"], objects: "sales_eu" },
+      ],
+    });
+    await awaitRegistered(
+      "shared-maria-analytics-role-reader-grant-sales-eu-d6cd8bd8",
+      "shared-maria-analytics-role-reader-grant-sales-eu-0abb0838"
+    );
+
+    const grantNames = registered.filter((name) => name.includes("-grant-sales-eu"));
+    expect(new Set(grantNames).size).toBe(grantNames.length);
+    // Each CR still carries the raw table it was named for.
+    expect(specOf("shared-maria-analytics-role-reader-grant-sales-eu-d6cd8bd8")).toMatchObject({
+      table: "sales.eu",
+    });
+    expect(specOf("shared-maria-analytics-role-reader-grant-sales-eu-0abb0838")).toMatchObject({
+      table: "sales_eu",
+    });
+  });
+
   it("creates no Grant CR for a role with no grants", async () => {
     const db = makeDatabase();
     addRoleOf(db)("reader", { namespaces: ["app"] });

@@ -18,7 +18,6 @@ export default defineConfig({
         "src/observability/dashboards.ts",
         "src/backup/**",
         "src/operator/*.ts",
-        "src/operator/grants/postgres-job.ts",
         "src/cache/cache.ts",
         "src/cli.ts",
         "src/cli/**",

@@ -99,12 +99,33 @@ describe("additionalRoleNaming", () => {
     expect(role.grantNaming("Order_Items").resource).toBe("c-d-role-reader-grant-order-items");
   });
 
-  // Two grants on the same table would derive one shared logical name. That is
-  // a hard duplicate-URN error at preview, before anything is applied.
-  it("gives the same name to two grants on the same table", () => {
+  // Grant names must be a function of the table alone: stable for one table, so
+  // reordering a role's `grants` array is a no-op rather than a rename that
+  // deletes and recreates every Grant CR — and distinct across tables, since two
+  // tables sharing a logical name is a duplicate-URN error at preview. Comparing
+  // `grantNaming(t)` against itself would assert neither; both halves are
+  // asserted against fixed expected values instead.
+  it("derives a stable name from the table alone", () => {
     const role = additionalRoleNaming("c", "d", "reader");
 
-    expect(role.grantNaming("events").resource).toBe(role.grantNaming("events").resource);
+    expect(role.grantNaming("events").resource).toBe("c-d-role-reader-grant-events");
+    expect(role.grantNaming("events").metadataName).toBe("c-d-role-reader-grant-events");
+  });
+
+  it("gives different tables different names", () => {
+    const role = additionalRoleNaming("c", "d", "reader");
+    const tables = ["events", "orders", "Order_Items", "*", "invoices"];
+
+    const names = tables.map((table) => role.grantNaming(table).resource);
+
+    expect(new Set(names).size).toBe(tables.length);
+    expect(names).toEqual([
+      "c-d-role-reader-grant-events",
+      "c-d-role-reader-grant-orders",
+      "c-d-role-reader-grant-order-items",
+      "c-d-role-reader-grant-all",
+      "c-d-role-reader-grant-invoices",
+    ]);
   });
 
   // A role literally named "user", "grant", or "secret" is the case most likely

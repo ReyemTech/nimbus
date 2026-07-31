@@ -42,11 +42,11 @@ const NEO4J_ROLE_SCOPE_NOUN = "deployment";
 const NEO4J_ROLE_SCOPE_EXPLANATION =
   "Neo4j users are deployment-global, not database-scoped: one account serves every " +
   "database on the deployment. Each nimbus role provisions its own cypher-shell Job " +
-  "and its own generated password Secret, and `CREATE USER ... IF NOT EXISTS` makes " +
-  "whichever Job runs second a silent no-op — the account keeps the first password " +
-  "while the second role's replicated connection Secrets hold one that was never set " +
-  "and can never authenticate. Their Pulumi logical names differ, so `pulumi preview` " +
-  "cannot see the clash, and neither Job reports a failure.";
+  "and its own generated password Secret, and each Job sets the account's password to " +
+  "its own — so whichever Job runs last wins, and every other role's replicated " +
+  "connection Secrets are left holding a password the account no longer has. Their " +
+  "Pulumi logical names differ, so `pulumi preview` cannot see the clash, and no Job " +
+  "reports a failure.";
 
 /**
  * Create the username registry for one Neo4j deployment.
@@ -86,8 +86,9 @@ export function claimNeo4jUsername(
  * Normalize a string into a DNS-1123 subdomain usable as `metadata.name`.
  *
  * Only the Kubernetes object name is sanitized — the Neo4j usernames passed to
- * `cypher-shell` go through verbatim so that `CREATE USER ... IF NOT EXISTS`
- * adopts an account that already exists under its original name.
+ * `cypher-shell` go through verbatim so that `CREATE OR REPLACE USER` addresses
+ * an account that already exists under its original name rather than creating a
+ * second one beside it.
  *
  * Sanitizing is lossy, so this is not safe for anything that has to identify a
  * resource: see {@link toIdentitySegment}.

@@ -233,7 +233,7 @@ describe("createSingleNeo4jDatabaseInstance", () => {
 
     const stringData = inputsOf("shared-neo4j-graph-neo4j-password")["stringData"];
     expect(unwrapSecret(stringData)["username"]).toBe("etl");
-    expect(jobScriptOf("neo4j-init-user-shared-neo4j-graph")).toContain("CREATE USER");
+    expect(jobScriptOf("neo4j-init-user-shared-neo4j-graph")).toContain("CREATE OR REPLACE USER");
   });
 
   // config.owner was the only way an unsafe identifier could reach the Cypher
@@ -259,8 +259,8 @@ describe("createSingleNeo4jDatabaseInstance", () => {
 // asking for `reader` are asking for the SAME account — each pointing it at its
 // own generated password Secret. Their Pulumi logical names differ (they are
 // derived from the database name), so preview reports nothing; in production
-// `CREATE USER ... IF NOT EXISTS` makes whichever Job runs second a silent
-// no-op, and that role's Secrets hold a password that was never set.
+// each Job sets that one account's password to its own generated value, so
+// whichever runs last wins and the other role's Secrets stop authenticating.
 describe("deployment-scoped usernames", () => {
   it("rejects the same username added on two databases in one deployment", () => {
     const registry = createNeo4jRoleRegistry("shared-neo4j");
@@ -273,7 +273,7 @@ describe("deployment-scoped usernames", () => {
     expect(() => analytics.addRole("reader")).toThrow(/already claimed by database "billing"/);
   });
 
-  it("reports UNSUPPORTED_ROLE_OPTION and explains the silent no-op", () => {
+  it("reports UNSUPPORTED_ROLE_OPTION and explains the clash", () => {
     const registry = createNeo4jRoleRegistry("shared-neo4j");
     const billing = makeDatabase({ namespaces: ["app"] }, "billing", registry);
     const analytics = makeDatabase({ namespaces: ["app"] }, "analytics", registry);
@@ -286,7 +286,7 @@ describe("deployment-scoped usernames", () => {
       expect(error).toBeInstanceOf(AnyCloudError);
       expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
       expect((error as AnyCloudError).message).toContain('deployment "shared-neo4j"');
-      expect((error as AnyCloudError).message).toContain("no-op");
+      expect((error as AnyCloudError).message).toContain("runs last wins");
     }
   });
 
@@ -349,16 +349,52 @@ describe("deployment-scoped usernames", () => {
 // second cypher-shell invocation always failed and `|| true` discarded the
 // failure. An operation that can never be honoured must not be issued at all.
 describe("provisioning Job script", () => {
-  it("issues CREATE USER and nothing else", async () => {
+  it("issues one user statement and nothing else", async () => {
     makeDatabase();
     await awaitRegistered("neo4j-init-user-shared-neo4j-graph");
 
     const script = jobScriptOf("neo4j-init-user-shared-neo4j-graph");
-    expect(script).toContain("CREATE USER");
-    expect(script).toContain("IF NOT EXISTS SET PLAINTEXT PASSWORD");
+    expect(script).toContain("SET PLAINTEXT PASSWORD");
     expect(script).not.toContain("GRANT ROLE");
     expect(script).not.toContain("|| true");
     expect(script.match(/cypher-shell/g)).toHaveLength(1);
+  });
+
+  // A Neo4j user is deployment-global and outlives its Pulumi resources.
+  // `CREATE USER ... IF NOT EXISTS` succeeded as a no-op against a surviving
+  // account, so a role dropped from config and re-added got a fresh password in
+  // every Secret and an unchanged one in Neo4j — credentials that cannot
+  // authenticate, reported by the Job as a success.
+  it("sets the password unconditionally", async () => {
+    makeDatabase();
+    await awaitRegistered("neo4j-init-user-shared-neo4j-graph");
+
+    const script = jobScriptOf("neo4j-init-user-shared-neo4j-graph");
+    expect(script).toContain("CREATE OR REPLACE USER");
+    expect(script).not.toContain("IF NOT EXISTS");
+  });
+
+  // Neo4j rejects an ALTER that sets the password a user already has ("Old
+  // password and new password cannot be the same"), which is the state right
+  // after the create and on every re-run — so the create/alter pairing would
+  // fail the Job on the normal path. `OR REPLACE` carries no such restriction.
+  it("does not follow the create with an ALTER USER", async () => {
+    makeDatabase();
+    await awaitRegistered("neo4j-init-user-shared-neo4j-graph");
+
+    expect(jobScriptOf("neo4j-init-user-shared-neo4j-graph")).not.toContain("ALTER USER");
+  });
+
+  // The password must reach Cypher as a shell expansion of the mounted Secret
+  // key, single-quoted as a Cypher string literal. Interpolating it at build
+  // time would bake the secret into the manifest and into Pulumi state.
+  it("leaves the password to be expanded by the shell at run time", async () => {
+    makeDatabase();
+    await awaitRegistered("neo4j-init-user-shared-neo4j-graph");
+
+    const script = jobScriptOf("neo4j-init-user-shared-neo4j-graph");
+    expect(script).toContain("SET PLAINTEXT PASSWORD '$DB_PASSWORD'");
+    expect(script).toContain("\\`$DB_USER\\`");
   });
 });
 
@@ -489,9 +525,9 @@ describe("connection URI encoding", () => {
 });
 
 describe("addRole", () => {
-  // `CREATE USER ... IF NOT EXISTS` makes a second Job for the same username a
-  // silent no-op, so the role's own Secrets would hold a password that was
-  // never set — credentials that never authenticate, with nothing in the Pulumi
+  // A second Job for the same username sets that one account's password to its
+  // own generated value, so either the owner's Secrets or this role's are left
+  // holding a password the account no longer has — with nothing in the Pulumi
   // diff to say why.
   it("rejects the database owner's own name", () => {
     const db = makeDatabase();
@@ -616,8 +652,8 @@ describe("addRole", () => {
   });
 
   // The role name lands between escaped backticks in the Job's Cypher
-  // `CREATE USER` statement, so a backtick in it would close the identifier and
-  // let the rest of the name run as Cypher.
+  // `CREATE OR REPLACE USER` statement, so a backtick in it would close the
+  // identifier and let the rest of the name run as Cypher.
   it("rejects a role name that would break out of Cypher identifier quoting", () => {
     const db = makeDatabase();
 
@@ -731,8 +767,11 @@ describe("addRole", () => {
     await awaitRegistered("neo4j-init-user-shared-neo4j-graph-role-reader-3d094196");
 
     const script = jobScriptOf("neo4j-init-user-shared-neo4j-graph-role-reader-3d094196");
-    expect(script).toContain("CREATE USER");
+    expect(script).toContain("CREATE OR REPLACE USER");
     expect(script).not.toContain("GRANT ROLE");
+    // The addRole() path is the one a removed-and-re-added role travels, so its
+    // Job in particular must rewrite the surviving account's password.
+    expect(script).not.toContain("IF NOT EXISTS");
     expect(
       inputsOf("neo4j-init-user-shared-neo4j-graph-role-reader-3d094196")["metadata"]
     ).toMatchObject({

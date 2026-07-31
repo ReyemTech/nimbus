@@ -124,7 +124,7 @@ across engines; the mechanism and the guarantees behind it are not:
 | --- | --- |
 | CloudNativePG | `DatabaseRole` CR for the role itself. Grants have no CRD, so they are applied by a `psql` Job that authenticates as the **database owner**, never superuser — one transaction that revokes every privilege the role currently holds and re-grants the requested set, so removing a grant from config actually revokes it. |
 | MariaDB | `User` CR for the account, one `Grant` CR per requested grant. Fully declarative — no SQL, no Job. |
-| Neo4j (Community) | a one-shot `cypher-shell` Job running `CREATE USER ... IF NOT EXISTS`. There is no RBAC to reconcile — any `grants` value throws, `[]` included. |
+| Neo4j (Community) | a one-shot `cypher-shell` Job running `CREATE OR REPLACE USER`. There is no RBAC to reconcile — any `grants` value throws, `[]` included. |
 
 ```typescript
 interface IDatabaseRoleConfig {
@@ -240,11 +240,11 @@ holding `<database>`@`%`, since its `User` CR omits `spec.host` and takes the
 operator's default.
 
 **Neo4j enforces the rule per deployment**, keyed on the username alone — there
-is no host component. Its failure mode is quieter than the other two rather than
-absent: `CREATE USER ... IF NOT EXISTS` never rewrites an existing account's
-password, so nothing flaps, but the second role's provisioning Job is a silent
-no-op and its replicated connection Secrets end up holding a password that was
-never set and can never authenticate. Neither Job reports a failure.
+is no host component. Its failure mode is as quiet as the other two and less
+stable: both roles' provisioning Jobs set the one shared account's password to
+their own generated value, so whichever runs last wins and the other role's
+replicated connection Secrets are left holding a password the account no longer
+has. Neither Job reports a failure.
 
 The check is scoped to one `createCluster()` call in one Pulumi program, which is
 the whole picture whenever a physical cluster is owned by a single stack. If two

@@ -6,8 +6,9 @@
  * {@link provisionNeo4jRole}. Neo4j is the odd backend out: it has no
  * Kubernetes operator and no CRDs, so there is nothing to reconcile an account
  * declaratively. A user is created by a one-shot `cypher-shell` Job running
- * `CREATE USER ... IF NOT EXISTS`, which is idempotent and therefore safe to
- * re-run, but is applied once rather than continuously — drift is not corrected.
+ * `CREATE OR REPLACE USER`, which is idempotent in effect — every run leaves the
+ * account existing with exactly the password its Secret holds — but is applied
+ * once rather than continuously, so drift between runs is not corrected.
  *
  * Nothing here grants privileges. `neo4j:community` has no RBAC at all, so a
  * provisioned user is simply an account that can log in; `addRole()` rejects
@@ -187,12 +188,39 @@ export interface INeo4jProvisionedRole {
  * Provision one Neo4j user: a password Secret and the `cypher-shell` Job that
  * creates the account with it.
  *
- * The Job runs `CREATE USER ... IF NOT EXISTS` and nothing else. It used to
- * follow that with `GRANT ROLE reader, editor`, suffixed `|| true` because the
- * statement is Enterprise-only — which meant the command failed on every
- * Community deployment and the failure was discarded. A grant that cannot be
- * honoured must not be issued at all, so the statement is gone rather than
- * silenced.
+ * The Job runs one statement and nothing else. It used to follow the create with
+ * `GRANT ROLE reader, editor`, suffixed `|| true` because the statement is
+ * Enterprise-only — which meant the command failed on every Community deployment
+ * and the failure was discarded. A grant that cannot be honoured must not be
+ * issued at all, so the statement is gone rather than silenced.
+ *
+ * That statement is `CREATE OR REPLACE USER`, which sets the password
+ * unconditionally. `CREATE USER ... IF NOT EXISTS` did not: a Neo4j user is
+ * deployment-global and outlives the Pulumi resources that provisioned it, so
+ * removing an `addRole()` call and later re-adding it destroyed the credential
+ * Secret, generated a fresh password — and then found the account still there.
+ * The create was a no-op, every replicated connection Secret carried a password
+ * that could not authenticate, and the Job reported success.
+ *
+ * `CREATE USER ... IF NOT EXISTS` followed by `ALTER USER ... SET PASSWORD` is
+ * not the fix it looks like: Neo4j rejects an `ALTER` that sets the password a
+ * user already has ("Old password and new password cannot be the same"), which
+ * is the state immediately after the create and on every re-run of an unchanged
+ * deployment. That pairing would fail the Job on the normal path.
+ *
+ * What `OR REPLACE` costs is the account itself: it drops and recreates the
+ * user. On `neo4j:community` there is nothing else to lose — a user is a name, a
+ * password and the change-required flag, all three of which this statement
+ * sets — because Community has no roles and no fine-grained privileges. On
+ * Enterprise it would discard role grants, which is one more reason `addRole()`
+ * rejects `grants` outright rather than pretending to honour them.
+ *
+ * Re-running is safe. `command` is immutable, so this statement replaces the Job
+ * on existing deployments and it runs once more; it writes the password the
+ * credential Secret already holds ({@link createRoleCredentials} stores it under
+ * `ignoreChanges` and reads it back), so the live account is set to exactly what
+ * every connection Secret in the cluster already carries. A re-run cannot
+ * desynchronise a working credential — it can only repair a broken one.
  *
  * @param options - Username, pinned naming, admin Secret, and dependencies
  * @returns The provisioning Job and the credentials the account authenticates with
@@ -229,10 +257,16 @@ export function provisionNeo4jRole(options: INeo4jRoleOptions): INeo4jProvisione
               {
                 name: CYPHER_SHELL_CONTAINER,
                 image: CYPHER_SHELL_IMAGE,
+                // `$DB_USER` and `$DB_PASSWORD` are expanded by the shell at run
+                // time, never interpolated into the manifest: the password stays
+                // inside the Secret it is read from. The username is validated to
+                // hold no backtick, so it cannot close the Cypher identifier it
+                // sits inside, and the password is base64url, so it cannot close
+                // the single-quoted Cypher string literal it sits inside.
                 command: [
                   "sh",
                   "-c",
-                  `cypher-shell -a "bolt://$NEO4J_HOST:${NEO4J_BOLT_PORT}" -u ${NEO4J_ADMIN_USER} -p "$NEO4J_ADMIN_PASSWORD" "CREATE USER \\\`$DB_USER\\\` IF NOT EXISTS SET PLAINTEXT PASSWORD '$DB_PASSWORD' SET PASSWORD CHANGE NOT REQUIRED"`,
+                  `cypher-shell -a "bolt://$NEO4J_HOST:${NEO4J_BOLT_PORT}" -u ${NEO4J_ADMIN_USER} -p "$NEO4J_ADMIN_PASSWORD" "CREATE OR REPLACE USER \\\`$DB_USER\\\` SET PLAINTEXT PASSWORD '$DB_PASSWORD' SET PASSWORD CHANGE NOT REQUIRED"`,
                 ],
                 env: [
                   { name: "NEO4J_HOST", value: endpoint },

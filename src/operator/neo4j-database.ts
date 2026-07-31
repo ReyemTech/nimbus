@@ -15,9 +15,10 @@
  *
  * Usernames are deployment-global here as they are cluster-global on the other
  * two backends, so a per-deployment {@link IRoleRegistry} refuses a name claimed
- * twice. Neo4j's failure mode is quieter than theirs: `CREATE USER ... IF NOT
- * EXISTS` does not fight over the password, it simply does nothing, leaving the
- * losing role's replicated Secrets holding a credential that never existed.
+ * twice. Neo4j's failure mode is as quiet as theirs and less stable: each Job
+ * sets the shared account's password to its own, so whichever runs last wins and
+ * the losing role's replicated Secrets hold a password the account no longer
+ * has — with nothing in the Pulumi diff, and no Job failure, to say so.
  *
  * @module operator/neo4j-database
  */
@@ -194,17 +195,17 @@ export function createSingleNeo4jDatabaseInstance(
 
     addRole(roleName: string, roleConfig?: IDatabaseRoleConfig): IDatabaseRole {
       // The name lands between escaped backticks in the Job's Cypher
-      // `CREATE USER` statement, so a backtick in it would break out of the
-      // identifier quoting.
+      // `CREATE OR REPLACE USER` statement, so a backtick in it would break out
+      // of the identifier quoting.
       assertValidRoleName(roleName, dbName);
 
       // The owner's account is already created by createDatabase(). Adding it
-      // again would create a SECOND Job issuing `CREATE USER ... IF NOT EXISTS`
-      // for the same username, bound to a different password Secret. `IF NOT
-      // EXISTS` makes that Job a silent no-op, so the owner's replicated
-      // connection Secrets would keep working while this role's Secrets would
-      // hold a password that was never set — credentials that simply never
-      // authenticate, with nothing in the Pulumi diff to say why.
+      // again would create a SECOND Job issuing `CREATE OR REPLACE USER` for the
+      // same username, bound to a different password Secret — and each Job sets
+      // the account's password to its own. Whichever runs last wins, so either
+      // the owner's replicated connection Secrets or this role's are left
+      // holding a password the account no longer has, with nothing in the Pulumi
+      // diff to say why.
       if (roleName === username) {
         throw new AnyCloudError(
           `Role "${roleName}" is the owner of database "${dbName}" and is created by ` +
@@ -260,9 +261,9 @@ export function createSingleNeo4jDatabaseInstance(
       // Same hazard one scope wider: the check above only sees this database's
       // own owner, while a user of this name may already belong to a sibling
       // database on the same deployment — the same account, since Neo4j users
-      // are deployment-global. Two Jobs then issue `CREATE USER ... IF NOT
-      // EXISTS` for it, the second no-ops, and its role's Secrets hold a
-      // password that was never set. The registry is what notices.
+      // are deployment-global. Two Jobs then set that one account's password to
+      // two different generated values, and the loser's Secrets stop
+      // authenticating. The registry is what notices.
       //
       // Claimed here rather than at the top of the method so that a call
       // rejected by one of the guards above leaves no claim behind — the role

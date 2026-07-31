@@ -150,8 +150,29 @@ describe("additionalRoleNaming", () => {
   it("sanitizes role names that are not valid DNS-1123 labels", () => {
     const role = additionalRoleNaming("c", "d", "Read_Only");
 
-    expect(role.credentialSecret).toBe("c-d-role-read-only");
-    expect(role.userMetadataName).toBe("c-d-role-read-only");
+    expect(role.credentialSecret).toBe("c-d-role-read-only-7b1060cf");
+    expect(role.userMetadataName).toBe("c-d-role-read-only-7b1060cf");
+  });
+
+  // `Read_Only` and `read_only` are two distinct accounts MariaDB will happily
+  // hold at once, and sanitizing maps both to `read-only`. Two resources under
+  // one Pulumi logical name is a duplicate-URN error that aborts the whole
+  // preview — nothing is provisioned, including everything unrelated to the
+  // clash — so the sanitized form is disambiguated by a hash of the raw name.
+  it("keeps role names apart that sanitize to the same value", () => {
+    const upper = additionalRoleNaming("c", "d", "Read_Only");
+    const lower = additionalRoleNaming("c", "d", "read_only");
+
+    expect(upper.credentialResource).not.toBe(lower.credentialResource);
+    expect(upper.userResource).not.toBe(lower.userResource);
+    expect(upper.connectionResourcePrefix).not.toBe(lower.connectionResourcePrefix);
+    expect(upper.grantNaming("*").resource).not.toBe(lower.grantNaming("*").resource);
+  });
+
+  // The disambiguator applies only where sanitizing lost something: an ordinary
+  // role name keeps the plain, readable form it has always had.
+  it("leaves a name that needs no sanitizing unsuffixed", () => {
+    expect(additionalRoleNaming("c", "d", "read-only").credentialSecret).toBe("c-d-role-read-only");
   });
 });
 

@@ -9,6 +9,7 @@
  */
 
 import { createRoleRegistry, type IRoleRegistry } from "./role-registry.js";
+import { toDnsSegment } from "./resource-identity.js";
 
 /** Namespace every MariaDB instance, database, and credential Secret is created in. */
 export const DATA_NAMESPACE = "data";
@@ -109,13 +110,12 @@ export function claimMariadbRoleName(
  * `spec.name` / `spec.username` are passed through verbatim so that CRs adopt
  * databases and users that already exist under their original names.
  *
+ * Sanitizing is lossy, so this is not safe for anything that has to identify a
+ * resource: see {@link toIdentitySegment}.
+ *
  * @param value - Raw name
  * @returns A lowercase, `-`-separated name safe for `metadata.name`
  */
 export function toResourceName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
+  return toDnsSegment(value);
 }

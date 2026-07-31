@@ -248,8 +248,8 @@ describe("cluster-scoped role names", () => {
 // `password` keys would be perfectly correct all the while.
 describe("connection URI encoding", () => {
   it.each([
-    ["reporting@corp", "reporting-corp", "reporting%40corp"],
-    ["reader:ro", "reader-ro", "reader%3Aro"],
+    ["reporting@corp", "reporting-corp-796adff4", "reporting%40corp"],
+    ["reader:ro", "reader-ro-9e580d70", "reader%3Aro"],
   ])("percent-encodes %s in the uri", async (roleName, resourceStem, encoded) => {
     addRoleOf(makeDatabase())(roleName, { namespaces: ["app"] });
     await settle();
@@ -268,7 +268,7 @@ describe("connection URI encoding", () => {
     addRoleOf(makeDatabase())("reporting@corp", { namespaces: ["app"] });
     await settle();
 
-    const uri = stringDataOf("shared-pg-analytics-role-reporting-corp-connection-app")[
+    const uri = stringDataOf("shared-pg-analytics-role-reporting-corp-796adff4-connection-app")[
       "uri"
     ] as string;
     const parsed = new URL(uri);
@@ -285,6 +285,24 @@ describe("connection URI encoding", () => {
     expect(stringDataOf("shared-pg-analytics-role-reporting-connection-app")["uri"]).toBe(
       "postgresql://reporting:@shared-pg-rw.data.svc.cluster.local:5432/analytics?sslmode=require"
     );
+  });
+});
+
+// The role registry keys raw names, so `Read_Only` and `read_only` are both
+// accepted — they are two distinct roles PostgreSQL will hold at once. Deriving
+// their resource names by sanitizing alone gave them ONE logical name each, and
+// a duplicate URN aborts the entire preview rather than just those resources.
+describe("resource names for roles that sanitize alike", () => {
+  it("registers distinct resources for Read_Only and read_only", async () => {
+    const addRole = addRoleOf(makeDatabase());
+
+    addRole("Read_Only", { namespaces: ["app"] });
+    addRole("read_only", { namespaces: ["app"] });
+    await settle();
+
+    const roleResources = registered.filter((name) => name.includes("-role-read-only"));
+    expect(new Set(roleResources).size).toBe(roleResources.length);
+    expect(roleResources.length).toBeGreaterThan(0);
   });
 });
 

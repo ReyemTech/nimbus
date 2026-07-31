@@ -447,8 +447,8 @@ describe("instance-scoped role identities", () => {
 // perfectly correct — the two disagree and only the URI is wrong.
 describe("connection URI encoding", () => {
   it.each([
-    ["reporting@corp", "reporting-corp", "reporting%40corp"],
-    ["reader:ro", "reader-ro", "reader%3Aro"],
+    ["reporting@corp", "reporting-corp-796adff4", "reporting%40corp"],
+    ["reader:ro", "reader-ro-9e580d70", "reader%3Aro"],
   ])("percent-encodes %s in the uri", async (roleName, resourceStem, encoded) => {
     addRoleOf(makeDatabase())(roleName, { namespaces: ["app"] });
     await awaitRegistered(`shared-maria-analytics-role-${resourceStem}-connection-app`);
@@ -467,10 +467,12 @@ describe("connection URI encoding", () => {
 
   it("parses back to the username it was built from", async () => {
     addRoleOf(makeDatabase())("reporting@corp", { namespaces: ["app"] });
-    await awaitRegistered("shared-maria-analytics-role-reporting-corp-connection-app");
+    await awaitRegistered("shared-maria-analytics-role-reporting-corp-796adff4-connection-app");
 
     const stringData = unwrapSecret(
-      inputsByName["shared-maria-analytics-role-reporting-corp-connection-app"]?.["stringData"]
+      inputsByName["shared-maria-analytics-role-reporting-corp-796adff4-connection-app"]?.[
+        "stringData"
+      ]
     );
     const parsed = new URL(stringData["uri"] as string);
 

@@ -28,6 +28,7 @@ import {
   type IRoleCredentials,
 } from "./credentials.js";
 import { encodeUriComponentValue } from "./connection-uri.js";
+import { toIdentitySegment } from "./resource-identity.js";
 import type { IResolvedRoleConfig } from "./grants/role-config.js";
 
 /** CNPG reads role passwords from Secrets of this type (username + password keys). */
@@ -92,6 +93,12 @@ export function ownerRoleNaming(clusterName: string, dbName: string): ICnpgRoleN
  * collide with the owner's pinned names above — the owner's shortest stem is
  * `{cluster}-{database}-role`, which this only matches for an empty role name.
  *
+ * The role segment comes from {@link toIdentitySegment}, not from plain
+ * sanitizing: `Read_Only` and `read_only` are two distinct, simultaneously valid
+ * PostgreSQL roles that sanitize alike, and two resources deriving one logical
+ * name abort the entire preview with a duplicate-URN error. Names that are
+ * already valid DNS-1123 labels are unaffected.
+ *
  * @param clusterName - CNPG cluster name
  * @param dbName - Database name
  * @param roleName - Role name as it exists in PostgreSQL
@@ -102,7 +109,7 @@ export function additionalRoleNaming(
   dbName: string,
   roleName: string
 ): ICnpgRoleNaming {
-  const base = `${clusterName}-${dbName}-role-${toResourceName(roleName)}`;
+  const base = `${clusterName}-${dbName}-role-${toIdentitySegment(roleName)}`;
   return {
     credentialResource: `${base}-secret`,
     credentialSecret: base,

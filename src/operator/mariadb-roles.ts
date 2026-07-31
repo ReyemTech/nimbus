@@ -37,6 +37,7 @@ import {
   type IRoleCredentials,
 } from "./credentials.js";
 import { encodeUriComponentValue } from "./connection-uri.js";
+import { toIdentitySegment } from "./resource-identity.js";
 import { normalizePrivilegeAgainst } from "./grants/privileges.js";
 import type { IDatabaseGrant } from "./interfaces.js";
 
@@ -125,6 +126,12 @@ export function ownerRoleNaming(clusterName: string, dbName: string): IMariadbRo
  * Grants are named for the table they cover (`*` renders as `all`), never for
  * their position, so reordering a role's `grants` array changes nothing.
  *
+ * The role segment comes from {@link toIdentitySegment}, not from plain
+ * sanitizing: `Read_Only` and `read_only` are two distinct, simultaneously valid
+ * MariaDB usernames that sanitize alike, and two resources deriving one logical
+ * name abort the entire preview with a duplicate-URN error. Names that are
+ * already valid DNS-1123 labels are unaffected.
+ *
  * @param clusterName - MariaDB instance name
  * @param dbName - Database name
  * @param roleName - Role name as it exists in MariaDB
@@ -135,7 +142,7 @@ export function additionalRoleNaming(
   dbName: string,
   roleName: string
 ): IMariadbRoleNaming {
-  const base = `${clusterName}-${dbName}-role-${toResourceName(roleName)}`;
+  const base = `${clusterName}-${dbName}-role-${toIdentitySegment(roleName)}`;
   return {
     credentialResource: `${base}-secret`,
     credentialSecret: base,

@@ -176,6 +176,14 @@ make a parser read the wrong user, password and host. Every other key holds the
 raw value, since clients consume those literally. See
 [Secrets](secrets.md#standardized-keys).
 
+The Kubernetes objects a role creates are named `{cluster}-{database}-role-{role}`,
+with the role segment narrowed into the DNS-1123 character set. That narrowing is
+lossy — `Read_Only` and `read_only` are two distinct roles that both narrow to
+`read-only` — so **a role name that is not already a valid DNS-1123 label gains a
+short hash of the raw name** (`read-only-7b1060cf`), which keeps the two apart.
+A name that needs no narrowing keeps its plain form: `reader` stays `reader`. The
+raw name is what reaches the database and the Secret payload either way.
+
 #### Role names are unique per cluster, not per database
 
 `addRole()` is called on a database, but a **login identity is not a database

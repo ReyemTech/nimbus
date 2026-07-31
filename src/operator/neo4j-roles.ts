@@ -39,6 +39,7 @@ import {
   type IRoleCredentials,
 } from "./credentials.js";
 import { encodeUriComponentValue } from "./connection-uri.js";
+import { toIdentitySegment } from "./resource-identity.js";
 
 /** Seconds a completed provisioning Job is kept before Kubernetes reaps it. */
 const JOB_TTL_SECONDS = 300;
@@ -103,6 +104,12 @@ export function ownerRoleNaming(clusterName: string, dbName: string): INeo4jRole
  * collide with the owner's pinned names above — the owner's names have no
  * `-role-` segment following `{cluster}-{database}`.
  *
+ * The role segment comes from {@link toIdentitySegment}, not from plain
+ * sanitizing: `Read_Only` and `read_only` are two distinct, simultaneously valid
+ * Neo4j usernames that sanitize alike, and two resources deriving one logical
+ * name abort the entire preview with a duplicate-URN error. Names that are
+ * already valid DNS-1123 labels are unaffected.
+ *
  * @param clusterName - Neo4j deployment name
  * @param dbName - Database name
  * @param roleName - Username as it exists in Neo4j
@@ -113,7 +120,7 @@ export function additionalRoleNaming(
   dbName: string,
   roleName: string
 ): INeo4jRoleNaming {
-  const base = `${clusterName}-${dbName}-role-${toResourceName(roleName)}`;
+  const base = `${clusterName}-${dbName}-role-${toIdentitySegment(roleName)}`;
   return {
     credentialResource: `${base}-neo4j-password`,
     credentialSecret: `${base}-neo4j-user`,

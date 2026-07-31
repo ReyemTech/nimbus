@@ -430,8 +430,8 @@ describe("config.sql", () => {
 // perfectly correct — the two disagree and only the URI is wrong.
 describe("connection URI encoding", () => {
   it.each([
-    ["reporting@corp", "reporting-corp", "reporting%40corp"],
-    ["reader:ro", "reader-ro", "reader%3Aro"],
+    ["reporting@corp", "reporting-corp-796adff4", "reporting%40corp"],
+    ["reader:ro", "reader-ro-9e580d70", "reader%3Aro"],
   ])("percent-encodes %s in the uri", async (roleName, resourceStem, encoded) => {
     makeDatabase().addRole(roleName, { namespaces: ["app"] });
     await awaitRegistered(`shared-neo4j-graph-role-${resourceStem}-neo4j-secret-app`);
@@ -448,10 +448,10 @@ describe("connection URI encoding", () => {
 
   it("parses back to the username it was built from", async () => {
     makeDatabase().addRole("reporting@corp", { namespaces: ["app"] });
-    await awaitRegistered("shared-neo4j-graph-role-reporting-corp-neo4j-secret-app");
+    await awaitRegistered("shared-neo4j-graph-role-reporting-corp-796adff4-neo4j-secret-app");
 
     const stringData = unwrapSecret(
-      inputsOf("shared-neo4j-graph-role-reporting-corp-neo4j-secret-app")["stringData"]
+      inputsOf("shared-neo4j-graph-role-reporting-corp-796adff4-neo4j-secret-app")["stringData"]
     );
     const parsed = new URL(stringData["uri"] as string);
 
@@ -662,15 +662,36 @@ describe("addRole", () => {
     });
   });
 
+  // The registry keys raw usernames, so `Read_Only` and `read_only` are both
+  // accepted — Neo4j will hold the two accounts at once. Deriving their resource
+  // names by sanitizing alone gave them ONE logical name each, and a duplicate
+  // URN aborts the entire preview rather than just those resources.
+  it("registers distinct resources for usernames that sanitize alike", async () => {
+    const db = makeDatabase();
+    db.addRole("Read_Only", { namespaces: ["app"] });
+    db.addRole("read_only", { namespaces: ["app"] });
+    await awaitRegistered(
+      "shared-neo4j-graph-role-read-only-7b1060cf-neo4j-password",
+      "shared-neo4j-graph-role-read-only-9c586a9b-neo4j-password"
+    );
+
+    const roleResources = registered.filter((name) => name.includes("read-only"));
+    expect(new Set(roleResources).size).toBe(roleResources.length);
+  });
+
   it("stores the role's username in its credential Secret", async () => {
     const db = makeDatabase();
     db.addRole("Read_Only");
-    await awaitRegistered("shared-neo4j-graph-role-read-only-neo4j-password");
+    await awaitRegistered("shared-neo4j-graph-role-read-only-7b1060cf-neo4j-password");
 
-    const stringData = inputsOf("shared-neo4j-graph-role-read-only-neo4j-password")["stringData"];
+    const stringData = inputsOf("shared-neo4j-graph-role-read-only-7b1060cf-neo4j-password")[
+      "stringData"
+    ];
     expect(unwrapSecret(stringData)["username"]).toBe("Read_Only");
-    expect(inputsOf("shared-neo4j-graph-role-read-only-neo4j-password")["metadata"]).toMatchObject({
-      name: "shared-neo4j-graph-role-read-only-neo4j-user",
+    expect(
+      inputsOf("shared-neo4j-graph-role-read-only-7b1060cf-neo4j-password")["metadata"]
+    ).toMatchObject({
+      name: "shared-neo4j-graph-role-read-only-7b1060cf-neo4j-user",
     });
   });
 });

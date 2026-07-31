@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  SEQUENCE_GRANT_PRIVILEGES,
   quoteIdentifier,
   normalizePrivilege,
   compileGrantSql,
 } from "../../../src/operator/grants/postgres-sql.js";
+import type { IDatabaseGrant } from "../../../src/operator/interfaces.js";
 import { AnyCloudError, ERROR_CODES } from "../../../src/types/errors.js";
 
 /** One `REVOKE` the preamble emits: the privileges it strips, and from what. */
@@ -28,6 +30,31 @@ function revokedTargets(sql: string): IRevokedTarget[] {
     privileges: match[1] as string,
     target: match[2] as string,
   }));
+}
+
+/** Split a SQL privilege list (`"USAGE, SELECT"`) into its individual keywords. */
+function splitPrivileges(list: string): string[] {
+  return list.split(",").map((privilege) => privilege.trim());
+}
+
+/**
+ * Every privilege the script grants on a sequence, from both sequence grant
+ * shapes: `GRANT ... ON ALL SEQUENCES IN SCHEMA "x"` and the
+ * `ALTER DEFAULT PRIVILEGES ... GRANT ... ON SEQUENCES` that covers future ones.
+ */
+function grantedSequencePrivileges(sql: string): string[] {
+  const pattern = /GRANT ([A-Z][A-Z, ]*?) ON (?:ALL SEQUENCES IN SCHEMA "[^"]*"|SEQUENCES) TO /g;
+  return [...sql.matchAll(pattern)].flatMap((match) => splitPrivileges(match[1] as string));
+}
+
+/**
+ * Every privilege the revoke preamble strips from a sequence, from both revoke
+ * shapes. The preamble builds its statements with `format()`, so the schema is
+ * still a `%I` placeholder here.
+ */
+function revokedSequencePrivileges(sql: string): string[] {
+  const pattern = /REVOKE ([A-Z][A-Z, ]*?) ON (?:ALL SEQUENCES IN SCHEMA %I|SEQUENCES) FROM /g;
+  return [...sql.matchAll(pattern)].flatMap((match) => splitPrivileges(match[1] as string));
 }
 
 /** Extract the `$tag$` used to open the compiled script's `DO` block. */
@@ -334,12 +361,13 @@ describe("compileGrantSql", () => {
       grants: [{ privileges: ["ALL PRIVILEGES"], schema: "public", objects: "all" }],
     });
 
+    const sequenceClause = SEQUENCE_GRANT_PRIVILEGES.join(", ");
     expect(revokedTargets(sql)).toEqual([
       { privileges: "ALL", target: "ALL TABLES IN SCHEMA %I" },
-      { privileges: "USAGE, SELECT", target: "ALL SEQUENCES IN SCHEMA %I" },
+      { privileges: sequenceClause, target: "ALL SEQUENCES IN SCHEMA %I" },
       { privileges: "USAGE", target: "SCHEMA %I" },
       { privileges: "ALL", target: "TABLES" },
-      { privileges: "USAGE, SELECT", target: "SEQUENCES" },
+      { privileges: sequenceClause, target: "SEQUENCES" },
     ]);
 
     // revokedTargets() only recognises three target shapes. Pin the count of
@@ -352,7 +380,7 @@ describe("compileGrantSql", () => {
 
     // ...and each of those five is put back by the maximal spec.
     expect(sql).toContain('GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA "public" TO "app";');
-    expect(sql).toContain('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "public" TO "app";');
+    expect(sql).toContain(`GRANT ${sequenceClause} ON ALL SEQUENCES IN SCHEMA "public" TO "app";`);
     expect(sql).toContain('GRANT USAGE ON SCHEMA "public" TO "app";');
     expect(sql).toContain(
       'ALTER DEFAULT PRIVILEGES FOR ROLE "etl" IN SCHEMA "public" ' +
@@ -360,8 +388,61 @@ describe("compileGrantSql", () => {
     );
     expect(sql).toContain(
       'ALTER DEFAULT PRIVILEGES FOR ROLE "etl" IN SCHEMA "public" ' +
-        'GRANT USAGE, SELECT ON SEQUENCES TO "app";'
+        `GRANT ${sequenceClause} ON SEQUENCES TO "app";`
     );
+  });
+
+  // The other half of the same invariant, asserted directly rather than by
+  // eyeballing two hand-maintained lists: whatever the grant path emits for
+  // sequences must also appear in the revoke preamble, or a role could acquire
+  // a sequence privilege that nothing ever takes away. Both directions are
+  // rendered from SEQUENCE_GRANT_PRIVILEGES, so this reads the emitted SQL back
+  // and compares the two sets — widening only one of them is not expressible,
+  // and widening the constant keeps this passing without an edit here.
+  describe("sequence grant/revoke symmetry", () => {
+    /** Grant specs that between them exercise every sequence-emitting path. */
+    const SEQUENCE_EMITTING_SPECS: ReadonlyArray<ReadonlyArray<IDatabaseGrant>> = [
+      [{ privileges: ["INSERT"], schema: "marts", objects: "all" }],
+      [{ privileges: ["UPDATE"], schema: "marts", objects: "orders" }],
+      [{ privileges: ["ALL PRIVILEGES"], schema: "public", objects: "all" }],
+      [
+        { privileges: ["SELECT"], schema: "reporting", objects: "all" },
+        { privileges: ["INSERT", "UPDATE"], schema: "staging", objects: "all" },
+      ],
+    ];
+
+    it.each(SEQUENCE_EMITTING_SPECS.map((grants, index) => [index, grants] as const))(
+      "revokes every sequence privilege spec %i grants",
+      (_index, grants) => {
+        const sql = compileGrantSql({ role: "app", owner: "etl", grants });
+        const granted = new Set(grantedSequencePrivileges(sql));
+        const revoked = new Set(revokedSequencePrivileges(sql));
+
+        // Non-vacuity: the parser must actually have seen the grants, and it
+        // must have seen exactly the constant both paths render.
+        expect([...granted].sort()).toEqual([...SEQUENCE_GRANT_PRIVILEGES].sort());
+
+        for (const privilege of granted) {
+          expect([...revoked]).toContain(privilege);
+        }
+      }
+    );
+
+    // Sequence UPDATE is `setval()`: it would let a write role rewind a sequence
+    // and force primary-key collisions. It is excluded from the granted set on
+    // purpose, which is also why the preamble does not revoke it.
+    it("never grants sequence UPDATE", () => {
+      expect(SEQUENCE_GRANT_PRIVILEGES).not.toContain("UPDATE");
+
+      const sql = compileGrantSql({
+        role: "app",
+        owner: "etl",
+        grants: [{ privileges: ["ALL PRIVILEGES"], schema: "public", objects: "all" }],
+      });
+
+      expect(grantedSequencePrivileges(sql)).not.toContain("UPDATE");
+      expect(revokedSequencePrivileges(sql)).not.toContain("UPDATE");
+    });
   });
 
   // Schema CREATE and sequence UPDATE (setval) are the two privileges no grant

@@ -148,6 +148,28 @@ export function normalizePrivilege(privilege: string): string {
 }
 
 /**
+ * Reject any privilege {@link compileGrantSql} would refuse, without compiling.
+ *
+ * `compileGrantSql` is the only thing that validates privileges, and it runs
+ * deep inside grant-Job creation — after the caller has already mutated shared
+ * state such as the cluster's role registry. Callers that must fail before
+ * mutating anything run this first: it applies exactly the check the compiler
+ * applies and produces exactly the same error, so the two cannot diverge into
+ * a config the guard accepts and the compiler then rejects.
+ *
+ * @param grants - Desired grants, or `undefined` when privileges are unmanaged
+ * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a privilege is not
+ *   in the allowlist
+ */
+export function assertSupportedPrivileges(grants: ReadonlyArray<IDatabaseGrant> | undefined): void {
+  for (const grant of grants ?? []) {
+    for (const privilege of grant.privileges) {
+      normalizePrivilege(privilege);
+    }
+  }
+}
+
+/**
  * Quote a string as a SQL literal, escaping embedded single quotes.
  *
  * Used for values passed to functions such as `has_schema_privilege(...)` and

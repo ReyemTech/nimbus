@@ -89,6 +89,8 @@ export interface IMariadbDatabaseOptions {
  * @param options - Instance, database name, configuration, and provider
  * @returns The database instance, with `addRole()` bound to it
  * @throws {AnyCloudError} code `INVALID_GRANT` when a role's grant lists no privileges
+ * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a role's grant names
+ *   a privilege a database-scoped MariaDB `GRANT` cannot carry
  * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `config.sql` is
  *   set (MariaDB runs no SQL), when `config.owner` is set to anything but the
  *   database name, when `addRole()` is called with the database owner's own
@@ -250,11 +252,27 @@ export function createSingleMariadbDatabaseInstance(
       const mariadbOptions = roleConfig?.engineOptions?.mariadb;
       const host = mariadbOptions?.host ?? DEFAULT_GRANT_HOST;
 
+      // Translated before the claim below, not where the CRs are built, because
+      // this throws: a privilege MariaDB cannot carry in a database-scoped
+      // GRANT is rejected here. Claiming first and translating afterwards left
+      // the account claimed for a role that was never provisioned, so a caller
+      // who fixed the privilege and retried in the same program run was refused
+      // as a duplicate.
+      //
+      // `grants: []` and an omitted `grants` both come to the same thing on
+      // MariaDB: no `Grant` CRs. Removing a grant from config deletes its CR and
+      // mariadb-operator issues the `REVOKE`, so the revoke semantics
+      // `grants: []` asks for are what the declarative path already gives.
+      const grants = toMariadbGrants(resolved.grants ?? []);
+
       // Same hazard one scope wider: the check above only sees this database's
       // own owner, while this `user`@`host` pair may already belong to a sibling
       // database on the same instance — the same account, since MariaDB has only
       // one. The registry is what notices. A different host is a different
       // account, and stays allowed.
+      //
+      // Claimed after every rejecting guard, not before them, so a call they
+      // reject leaves no claim behind.
       claimMariadbRoleName(roleRegistry, roleName, host, dbName);
 
       const naming = additionalRoleNaming(clusterName, dbName, roleName);
@@ -264,11 +282,7 @@ export function createSingleMariadbDatabaseInstance(
         dbName,
         roleName,
         naming,
-        // `grants: []` and an omitted `grants` both come to the same thing on
-        // MariaDB: no `Grant` CRs. Removing a grant from config deletes its CR
-        // and mariadb-operator issues the `REVOKE`, so the revoke semantics
-        // `grants: []` asks for are what the declarative path already gives.
-        grants: toMariadbGrants(resolved.grants ?? []),
+        grants,
         host,
         maxUserConnections: mariadbOptions?.maxUserConnections,
         labels,

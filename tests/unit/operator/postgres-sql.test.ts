@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   SEQUENCE_GRANT_PRIVILEGES,
+  assertSupportedPrivileges,
   quoteIdentifier,
   normalizePrivilege,
   compileGrantSql,
@@ -464,5 +465,42 @@ describe("compileGrantSql", () => {
     const tag = extractDollarTag(sql);
     expect(tag).not.toBe("$nimbus$");
     expect(tag).not.toBe("$nimbus0$");
+  });
+});
+
+// Callers that must fail before mutating shared state — the CNPG role registry
+// above all — cannot wait for the compiler to run inside grant-Job creation.
+// This is the same check, hoisted, so the two cannot diverge into a config the
+// guard accepts and the compiler then rejects.
+describe("assertSupportedPrivileges", () => {
+  it.each(["USAGE", "CONNECT", "EXECUTE", "SUPER", "SELCT"])("rejects %s", (privilege) => {
+    expect(() => assertSupportedPrivileges([{ privileges: [privilege] }])).toThrow(AnyCloudError);
+  });
+
+  it("reports the same code the compiler reports", () => {
+    try {
+      assertSupportedPrivileges([{ privileges: ["USAGE"] }]);
+      expect.unreachable("assertSupportedPrivileges should have thrown for USAGE");
+    } catch (error) {
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_PRIVILEGE);
+    }
+  });
+
+  it("checks every grant, not only the first", () => {
+    expect(() =>
+      assertSupportedPrivileges([{ privileges: ["SELECT"] }, { privileges: ["INSERT", "CONNECT"] }])
+    ).toThrow(AnyCloudError);
+  });
+
+  it("accepts what the compiler accepts", () => {
+    expect(() =>
+      assertSupportedPrivileges([{ privileges: ["select", "INSERT"], schema: "marts" }])
+    ).not.toThrow();
+  });
+
+  // `undefined` means privileges are unmanaged and `[]` means the role should
+  // hold none; neither names a privilege, so neither can be unsupported.
+  it.each([[undefined], [[]]])("accepts %s", (grants) => {
+    expect(() => assertSupportedPrivileges(grants as undefined)).not.toThrow();
   });
 });

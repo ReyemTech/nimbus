@@ -28,6 +28,7 @@ import {
   replicateCnpgConnectionSecrets,
 } from "./cnpg-roles.js";
 import { createPostgresGrantJob } from "./grants/postgres-job.js";
+import { assertSupportedPrivileges } from "./grants/postgres-sql.js";
 import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
 import { ENGINE_NAMES, assertNoForeignEngineOptions } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
@@ -232,6 +233,14 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
       });
 
       const resolved = resolveRoleConfig(roleConfig);
+
+      // The grant compiler validates privileges, but it does not run until the
+      // grant Job is built further down — long after the claim below. Checking
+      // here keeps every rejecting guard ahead of the claim: an unsupported
+      // privilege otherwise left the role name claimed for a role that was
+      // never provisioned, so correcting it and retrying in the same program
+      // run was refused as a duplicate.
+      assertSupportedPrivileges(resolved.grants);
 
       // Same hazard one scope wider: the check above only sees this database's
       // own owner, while a role of this name may already belong to a sibling

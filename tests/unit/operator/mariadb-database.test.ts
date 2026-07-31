@@ -784,4 +784,34 @@ describe("addRole", () => {
     expect(() => addRole("reader", { engineOptions: { postgresql: {} } })).toThrow(AnyCloudError);
     expect(() => addRole("reader")).not.toThrow();
   });
+
+  // Same rule for the guard that lives furthest from the top of the method:
+  // privilege translation. It used to run after the registry claim, so a
+  // corrected retry in the same program run was refused as a duplicate account
+  // for a role no CR was ever created for.
+  it("leaves the account claimable after a rejected privilege", () => {
+    const addRole = addRoleOf(makeDatabase());
+
+    try {
+      addRole("reader", { grants: [{ privileges: ["SUPER"] }] });
+      expect.unreachable("addRole should have thrown for an unsupported privilege");
+    } catch (error) {
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_PRIVILEGE);
+    }
+
+    expect(() => addRole("reader", { grants: [{ privileges: ["SELECT"] }] })).not.toThrow();
+  });
+
+  it("provisions nothing before rejecting a privilege", async () => {
+    const db = makeDatabase();
+    await awaitRegistered(...OWNER_RESOURCES);
+    const before = [...registered];
+
+    expect(() => addRoleOf(db)("reader", { grants: [{ privileges: ["SUPER"] }] })).toThrow(
+      AnyCloudError
+    );
+    await flushBehindAnchorRole(db);
+
+    expect(registeredWithoutAnchor()).toEqual(before);
+  });
 });

@@ -467,4 +467,32 @@ describe("addRole", () => {
     expect(() => addRole("reader", { engineOptions: { mariadb: {} } })).toThrow(AnyCloudError);
     expect(() => addRole("reader")).not.toThrow();
   });
+
+  // The privilege allowlist is enforced by the grant compiler, which does not
+  // run until the Job is built — after the claim. A role rejected for `USAGE`
+  // used to keep the name reserved, so correcting the privilege and retrying in
+  // the same program run failed as a duplicate for a role that never existed.
+  it("leaves the role name claimable after a rejected privilege", () => {
+    const addRole = addRoleOf(makeDatabase());
+
+    try {
+      addRole("reader", { grants: [{ privileges: ["USAGE"] }] });
+      expect.unreachable("addRole should have thrown for an unsupported privilege");
+    } catch (error) {
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_PRIVILEGE);
+    }
+
+    expect(() => addRole("reader", { grants: [{ privileges: ["SELECT"] }] })).not.toThrow();
+  });
+
+  it("provisions nothing before rejecting a privilege", async () => {
+    const addRole = addRoleOf(makeDatabase());
+    await settle();
+    const before = [...registered];
+
+    expect(() => addRole("reader", { grants: [{ privileges: ["USAGE"] }] })).toThrow(AnyCloudError);
+    await settle();
+
+    expect(registered).toEqual(before);
+  });
 });

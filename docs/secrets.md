@@ -56,6 +56,16 @@ Every database user secret contains the same six keys, regardless of engine:
 | `database` | Database name | `langfuse` | `kimai` |
 | `uri` | Full connection URI | `postgresql://langfuse:...@host:5432/langfuse?sslmode=require` | `mysql://kimai:...@host:3306/kimai` |
 
+**`uri` is percent-encoded; the other keys are not.** A URI is a structured
+string — `:` splits user from password, `@` splits userinfo from host — so the
+username, password and database segment inside `uri` are percent-encoded. A role
+named `reporting@corp` appears there as `reporting%40corp`; interpolated raw it
+would make every conforming parser read the user as `reporting` and take the host
+from the middle of the password. `username`, `password` and `database` stay raw,
+because a client consumes those literally rather than parsing them. Read `uri`
+with a URI parser (which decodes for you) or read the individual keys — never
+split `uri` by hand.
+
 ### Secret Naming Convention
 
 ```

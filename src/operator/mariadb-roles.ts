@@ -36,6 +36,7 @@ import {
   replicateConnectionSecrets,
   type IRoleCredentials,
 } from "./credentials.js";
+import { encodeUriComponentValue } from "./connection-uri.js";
 import { normalizePrivilegeAgainst } from "./grants/privileges.js";
 import type { IDatabaseGrant } from "./interfaces.js";
 
@@ -421,6 +422,10 @@ export interface IMariadbConnectionSecretOptions {
 /**
  * Replicate a user's connection details into each consuming namespace.
  *
+ * The `username`, `password` and `database` keys carry raw values; only the
+ * composed `uri` percent-encodes them, because there a `@` or `:` in a username
+ * would otherwise be read as a URI delimiter. See {@link encodeUriComponentValue}.
+ *
  * @param options - Naming, namespaces, connection details, and dependencies
  * @returns Map of namespace → created Secret name
  */
@@ -428,6 +433,8 @@ export function replicateMariadbConnectionSecrets(
   options: IMariadbConnectionSecretOptions
 ): Record<string, pulumi.Output<string>> {
   const { dbName, username, password, endpoint, port } = options;
+  const uriUsername = encodeUriComponentValue(username);
+  const uriDatabase = encodeUriComponentValue(dbName);
 
   return replicateConnectionSecrets({
     namespaces: options.namespaces,
@@ -441,7 +448,10 @@ export function replicateMariadbConnectionSecrets(
       database: dbName,
       uri: pulumi
         .all([endpoint, port, password])
-        .apply(([h, p, pw]) => `mysql://${username}:${pw}@${h}:${p}/${dbName}`),
+        .apply(
+          ([h, p, pw]) =>
+            `mysql://${uriUsername}:${encodeUriComponentValue(pw)}@${h}:${p}/${uriDatabase}`
+        ),
     },
     labels: options.labels,
     provider: options.provider,

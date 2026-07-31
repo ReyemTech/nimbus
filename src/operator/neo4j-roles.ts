@@ -38,6 +38,7 @@ import {
   replicateConnectionSecrets,
   type IRoleCredentials,
 } from "./credentials.js";
+import { encodeUriComponentValue } from "./connection-uri.js";
 
 /** Seconds a completed provisioning Job is kept before Kubernetes reaps it. */
 const JOB_TTL_SECONDS = 300;
@@ -261,6 +262,12 @@ export interface INeo4jConnectionSecretOptions {
  * and the `NEO4J_*` names the official drivers read from the environment, so a
  * consumer can mount the Secret with `envFrom` and no key remapping.
  *
+ * Only the composed `uri` percent-encodes its components — a `@` or `:` in a
+ * username would otherwise be read there as a URI delimiter. Every other key,
+ * `NEO4J_USERNAME` and `NEO4J_PASSWORD` included, carries the raw value, because
+ * a driver consumes those literally rather than parsing them. See
+ * {@link encodeUriComponentValue}.
+ *
  * @param options - Naming, namespaces, connection details, and dependencies
  * @returns Map of namespace → created Secret name
  */
@@ -268,6 +275,7 @@ export function replicateNeo4jConnectionSecrets(
   options: INeo4jConnectionSecretOptions
 ): Record<string, pulumi.Output<string>> {
   const { dbName, username, password, endpoint } = options;
+  const uriUsername = encodeUriComponentValue(username);
 
   return replicateConnectionSecrets({
     namespaces: options.namespaces,
@@ -282,7 +290,10 @@ export function replicateNeo4jConnectionSecrets(
       database: dbName,
       uri: pulumi
         .all([endpoint, password])
-        .apply(([h, pw]) => `bolt://${username}:${pw}@${h}:${NEO4J_BOLT_PORT}`),
+        .apply(
+          ([h, pw]) =>
+            `bolt://${uriUsername}:${encodeUriComponentValue(pw)}@${h}:${NEO4J_BOLT_PORT}`
+        ),
       // App-friendly keys (mountable as envFrom without key remapping)
       NEO4J_URI: pulumi.interpolate`neo4j://${endpoint}:${NEO4J_BOLT_PORT}`,
       NEO4J_USERNAME: username,

@@ -329,6 +329,54 @@ describe("config.sql", () => {
   });
 });
 
+// A username is caller-controlled and the validator rejects only what would
+// break a Cypher identifier, so `@` and `:` reach the URI builder. Raw, they
+// re-partition the URI while the separate `username` / `password` keys stay
+// perfectly correct — the two disagree and only the URI is wrong.
+describe("connection URI encoding", () => {
+  it.each([
+    ["reporting@corp", "reporting-corp", "reporting%40corp"],
+    ["reader:ro", "reader-ro", "reader%3Aro"],
+  ])("percent-encodes %s in the uri", async (roleName, resourceStem, encoded) => {
+    makeDatabase().addRole(roleName, { namespaces: ["app"] });
+    await awaitRegistered(`shared-neo4j-graph-role-${resourceStem}-neo4j-secret-app`);
+
+    const stringData = unwrapSecret(
+      inputsOf(`shared-neo4j-graph-role-${resourceStem}-neo4j-secret-app`)["stringData"]
+    );
+
+    expect(stringData["uri"]).toBe(`bolt://${encoded}:@shared-neo4j.data.svc.cluster.local:7687`);
+    // The plain keys stay raw — a driver consumes them literally, not as a URI.
+    expect(stringData["username"]).toBe(roleName);
+    expect(stringData["NEO4J_USERNAME"]).toBe(roleName);
+  });
+
+  it("parses back to the username it was built from", async () => {
+    makeDatabase().addRole("reporting@corp", { namespaces: ["app"] });
+    await awaitRegistered("shared-neo4j-graph-role-reporting-corp-neo4j-secret-app");
+
+    const stringData = unwrapSecret(
+      inputsOf("shared-neo4j-graph-role-reporting-corp-neo4j-secret-app")["stringData"]
+    );
+    const parsed = new URL(stringData["uri"] as string);
+
+    expect(decodeURIComponent(parsed.username)).toBe("reporting@corp");
+    expect(parsed.hostname).toBe("shared-neo4j.data.svc.cluster.local");
+    expect(parsed.port).toBe("7687");
+  });
+
+  it("leaves an ordinary username unencoded", async () => {
+    makeDatabase().addRole("reporting", { namespaces: ["app"] });
+    await awaitRegistered("shared-neo4j-graph-role-reporting-neo4j-secret-app");
+
+    const stringData = unwrapSecret(
+      inputsOf("shared-neo4j-graph-role-reporting-neo4j-secret-app")["stringData"]
+    );
+
+    expect(stringData["uri"]).toBe("bolt://reporting:@shared-neo4j.data.svc.cluster.local:7687");
+  });
+});
+
 describe("addRole", () => {
   // `CREATE USER ... IF NOT EXISTS` makes a second Job for the same username a
   // silent no-op, so the role's own Secrets would hold a password that was

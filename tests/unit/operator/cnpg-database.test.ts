@@ -110,6 +110,23 @@ function unwrap<T>(output: pulumi.Output<T>): Promise<T> {
   });
 }
 
+/** Pulumi's wire sentinel marking a serialized secret value. */
+const SECRET_SIGNATURE = "4dabf18193072939515e22adb298388d";
+
+/**
+ * Read a registered Secret's `stringData`.
+ *
+ * A connection Secret's whole `stringData` is hoisted to a secret because the
+ * password inside it is one, so the mock sees `{ <sig>: ..., value: {...} }`.
+ */
+function stringDataOf(name: string): Record<string, unknown> {
+  const value = inputsByName[name]?.["stringData"] as Record<string, unknown> | undefined;
+  if (!value) {
+    throw new Error(`no Secret named ${name} was registered with stringData`);
+  }
+  return SECRET_SIGNATURE in value ? (value["value"] as Record<string, unknown>) : value;
+}
+
 describe("createSingleCnpgDatabaseInstance", () => {
   // Pulumi identifies a resource by its logical name; renaming one deletes and
   // recreates it, and for a credential Secret that regenerates the password and
@@ -221,6 +238,53 @@ describe("cluster-scoped role names", () => {
       billing("reader");
       analytics("reader");
     }).not.toThrow();
+  });
+});
+
+// A role name is caller-controlled and the validator rejects only what would
+// break a database identifier, so `@` and `:` reach the URI builder. Raw, they
+// re-partition the URI: `reporting@corp` makes a parser read user `reporting`
+// and a host taken from the middle of the password. The separate `username` and
+// `password` keys would be perfectly correct all the while.
+describe("connection URI encoding", () => {
+  it.each([
+    ["reporting@corp", "reporting-corp", "reporting%40corp"],
+    ["reader:ro", "reader-ro", "reader%3Aro"],
+  ])("percent-encodes %s in the uri", async (roleName, resourceStem, encoded) => {
+    addRoleOf(makeDatabase())(roleName, { namespaces: ["app"] });
+    await settle();
+
+    const stringData = stringDataOf(`shared-pg-analytics-role-${resourceStem}-connection-app`);
+
+    expect(stringData["uri"]).toBe(
+      `postgresql://${encoded}:@shared-pg-rw.data.svc.cluster.local:5432/analytics?sslmode=require`
+    );
+    // The plain keys stay raw — a client consumes them literally, not as a URI.
+    expect(stringData["username"]).toBe(roleName);
+    expect(stringData["database"]).toBe("analytics");
+  });
+
+  it("parses back to the role name it was built from", async () => {
+    addRoleOf(makeDatabase())("reporting@corp", { namespaces: ["app"] });
+    await settle();
+
+    const uri = stringDataOf("shared-pg-analytics-role-reporting-corp-connection-app")[
+      "uri"
+    ] as string;
+    const parsed = new URL(uri);
+
+    expect(decodeURIComponent(parsed.username)).toBe("reporting@corp");
+    expect(parsed.hostname).toBe("shared-pg-rw.data.svc.cluster.local");
+    expect(decodeURIComponent(parsed.pathname)).toBe("/analytics");
+  });
+
+  it("leaves an ordinary role name unencoded", async () => {
+    addRoleOf(makeDatabase())("reporting", { namespaces: ["app"] });
+    await settle();
+
+    expect(stringDataOf("shared-pg-analytics-role-reporting-connection-app")["uri"]).toBe(
+      "postgresql://reporting:@shared-pg-rw.data.svc.cluster.local:5432/analytics?sslmode=require"
+    );
   });
 });
 

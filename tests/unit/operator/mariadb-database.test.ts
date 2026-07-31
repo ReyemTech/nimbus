@@ -441,6 +441,58 @@ describe("instance-scoped role identities", () => {
   });
 });
 
+// A username is caller-controlled and the validator rejects only what would
+// break a database identifier, so `@` and `:` reach the URI builder. Raw, they
+// re-partition the URI while the separate `username` / `password` keys stay
+// perfectly correct — the two disagree and only the URI is wrong.
+describe("connection URI encoding", () => {
+  it.each([
+    ["reporting@corp", "reporting-corp", "reporting%40corp"],
+    ["reader:ro", "reader-ro", "reader%3Aro"],
+  ])("percent-encodes %s in the uri", async (roleName, resourceStem, encoded) => {
+    addRoleOf(makeDatabase())(roleName, { namespaces: ["app"] });
+    await awaitRegistered(`shared-maria-analytics-role-${resourceStem}-connection-app`);
+
+    const stringData = unwrapSecret(
+      inputsByName[`shared-maria-analytics-role-${resourceStem}-connection-app`]?.["stringData"]
+    );
+
+    expect(stringData["uri"]).toBe(
+      `mysql://${encoded}:@shared-maria.data.svc.cluster.local:3306/analytics`
+    );
+    // The plain keys stay raw — a client consumes them literally, not as a URI.
+    expect(stringData["username"]).toBe(roleName);
+    expect(stringData["database"]).toBe("analytics");
+  });
+
+  it("parses back to the username it was built from", async () => {
+    addRoleOf(makeDatabase())("reporting@corp", { namespaces: ["app"] });
+    await awaitRegistered("shared-maria-analytics-role-reporting-corp-connection-app");
+
+    const stringData = unwrapSecret(
+      inputsByName["shared-maria-analytics-role-reporting-corp-connection-app"]?.["stringData"]
+    );
+    const parsed = new URL(stringData["uri"] as string);
+
+    expect(decodeURIComponent(parsed.username)).toBe("reporting@corp");
+    expect(parsed.hostname).toBe("shared-maria.data.svc.cluster.local");
+    expect(decodeURIComponent(parsed.pathname)).toBe("/analytics");
+  });
+
+  it("leaves an ordinary username unencoded", async () => {
+    addRoleOf(makeDatabase())("reporting", { namespaces: ["app"] });
+    await awaitRegistered("shared-maria-analytics-role-reporting-connection-app");
+
+    const stringData = unwrapSecret(
+      inputsByName["shared-maria-analytics-role-reporting-connection-app"]?.["stringData"]
+    );
+
+    expect(stringData["uri"]).toBe(
+      "mysql://reporting:@shared-maria.data.svc.cluster.local:3306/analytics"
+    );
+  });
+});
+
 describe("addRole", () => {
   // A second User CR for the same MariaDB account would bind it to a different
   // password Secret; both CRs then reconcile that password forever and the

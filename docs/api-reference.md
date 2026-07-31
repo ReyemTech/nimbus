@@ -168,6 +168,14 @@ interface IDatabaseRole {
 - `name` contains a backtick, single quote, double quote, backslash, or NUL byte,
   on any engine.
 
+Each replicated Secret carries `host`, `port`, `username`, `password`, `database`
+and `uri` (Neo4j adds `httpPort` and the `NEO4J_*` driver aliases). **Only `uri`
+is percent-encoded** — a role named `reporting@corp` appears in it as
+`reporting%40corp`, because `@` is a URI delimiter and interpolating it raw would
+make a parser read the wrong user, password and host. Every other key holds the
+raw value, since clients consume those literally. See
+[Secrets](secrets.md#standardized-keys).
+
 #### Role names are unique per cluster, not per database
 
 `addRole()` is called on a database, but a **login identity is not a database

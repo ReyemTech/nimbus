@@ -27,6 +27,7 @@ import {
   replicateConnectionSecrets,
   type IRoleCredentials,
 } from "./credentials.js";
+import { encodeUriComponentValue } from "./connection-uri.js";
 import type { IResolvedRoleConfig } from "./grants/role-config.js";
 
 /** CNPG reads role passwords from Secrets of this type (username + password keys). */
@@ -259,6 +260,10 @@ export interface ICnpgConnectionSecretOptions {
 /**
  * Replicate a role's connection details into each consuming namespace.
  *
+ * The `username`, `password` and `database` keys carry raw values; only the
+ * composed `uri` percent-encodes them, because there a `@` or `:` in a role name
+ * would otherwise be read as a URI delimiter. See {@link encodeUriComponentValue}.
+ *
  * @param options - Naming, namespaces, connection details, and dependencies
  * @returns Map of namespace → created Secret name
  */
@@ -266,6 +271,8 @@ export function replicateCnpgConnectionSecrets(
   options: ICnpgConnectionSecretOptions
 ): Record<string, pulumi.Output<string>> {
   const { dbName, username, password, endpoint, port } = options;
+  const uriUsername = encodeUriComponentValue(username);
+  const uriDatabase = encodeUriComponentValue(dbName);
 
   return replicateConnectionSecrets({
     namespaces: options.namespaces,
@@ -281,7 +288,8 @@ export function replicateCnpgConnectionSecrets(
         .all([endpoint, port, password])
         .apply(
           ([h, p, pw]) =>
-            `postgresql://${username}:${pw}@${h}:${p}/${dbName}?sslmode=${CONNECTION_SSL_MODE}`
+            `postgresql://${uriUsername}:${encodeUriComponentValue(pw)}@${h}:${p}/` +
+            `${uriDatabase}?sslmode=${CONNECTION_SSL_MODE}`
         ),
     },
     labels: options.labels,

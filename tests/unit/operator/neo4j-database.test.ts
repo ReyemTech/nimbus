@@ -5,6 +5,8 @@ import {
   assertNoEnvironments,
   createSingleNeo4jDatabaseInstance,
 } from "../../../src/operator/neo4j-database.js";
+import { createNeo4jRoleRegistry } from "../../../src/operator/neo4j-common.js";
+import type { IRoleRegistry } from "../../../src/operator/role-registry.js";
 import type { IDatabaseInstance } from "../../../src/operator/interfaces.js";
 import { AnyCloudError, ERROR_CODES } from "../../../src/types/errors.js";
 
@@ -99,7 +101,9 @@ const OWNER_RESOURCES = [
 function makeDatabase(
   config: Parameters<typeof createSingleNeo4jDatabaseInstance>[0]["config"] = {
     namespaces: ["app"],
-  }
+  },
+  dbName = "graph",
+  roleRegistry: IRoleRegistry = createNeo4jRoleRegistry("shared-neo4j")
 ): IDatabaseInstance {
   const provider = new k8s.Provider("test-provider", {});
   const release = new k8s.helm.v3.Release(
@@ -110,12 +114,13 @@ function makeDatabase(
 
   return createSingleNeo4jDatabaseInstance({
     clusterName: "shared-neo4j",
-    dbName: "graph",
+    dbName,
     config,
     endpoint: pulumi.output("shared-neo4j.data.svc.cluster.local"),
     port: pulumi.output(7687),
     adminSecretName: "shared-neo4j-neo4j-auth",
     release,
+    roleRegistry,
     provider,
   });
 }
@@ -247,6 +252,96 @@ describe("createSingleNeo4jDatabaseInstance", () => {
     );
     expect(db.name).toBe("graph");
     expect(db.clusterName).toBe("shared-neo4j");
+  });
+});
+
+// Neo4j users live at the deployment level, so two databases on one deployment
+// asking for `reader` are asking for the SAME account — each pointing it at its
+// own generated password Secret. Their Pulumi logical names differ (they are
+// derived from the database name), so preview reports nothing; in production
+// `CREATE USER ... IF NOT EXISTS` makes whichever Job runs second a silent
+// no-op, and that role's Secrets hold a password that was never set.
+describe("deployment-scoped usernames", () => {
+  it("rejects the same username added on two databases in one deployment", () => {
+    const registry = createNeo4jRoleRegistry("shared-neo4j");
+    const billing = makeDatabase({ namespaces: ["app"] }, "billing", registry);
+    const analytics = makeDatabase({ namespaces: ["app"] }, "analytics", registry);
+
+    billing.addRole("reader");
+
+    expect(() => analytics.addRole("reader")).toThrow(AnyCloudError);
+    expect(() => analytics.addRole("reader")).toThrow(/already claimed by database "billing"/);
+  });
+
+  it("reports UNSUPPORTED_ROLE_OPTION and explains the silent no-op", () => {
+    const registry = createNeo4jRoleRegistry("shared-neo4j");
+    const billing = makeDatabase({ namespaces: ["app"] }, "billing", registry);
+    const analytics = makeDatabase({ namespaces: ["app"] }, "analytics", registry);
+    billing.addRole("reader");
+
+    try {
+      analytics.addRole("reader");
+      expect.unreachable("addRole should have thrown for a claimed username");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AnyCloudError);
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
+      expect((error as AnyCloudError).message).toContain('deployment "shared-neo4j"');
+      expect((error as AnyCloudError).message).toContain("no-op");
+    }
+  });
+
+  // The owner is created by createDatabase() on the same deployment-global
+  // account space, so it claims its name too.
+  it("rejects a username another database already holds as its owner", () => {
+    const registry = createNeo4jRoleRegistry("shared-neo4j");
+    makeDatabase({ namespaces: ["app"] }, "billing", registry);
+    const analytics = makeDatabase({ namespaces: ["app"] }, "analytics", registry);
+
+    expect(() => analytics.addRole("billing")).toThrow(/already claimed by database "billing"/);
+  });
+
+  it("rejects a database whose owner another database already claimed", () => {
+    const registry = createNeo4jRoleRegistry("shared-neo4j");
+    makeDatabase({ namespaces: ["app"] }, "billing", registry);
+
+    expect(() =>
+      makeDatabase({ namespaces: ["app"], owner: "billing" }, "analytics", registry)
+    ).toThrow(/already claimed by database "billing"/);
+  });
+
+  it("rejects the same username added twice on one database", () => {
+    const db = makeDatabase({ namespaces: ["app"] }, "graph");
+    db.addRole("reader");
+
+    expect(() => db.addRole("reader")).toThrow(/already claimed by database "graph"/);
+  });
+
+  it("allows the same username on separate deployments", () => {
+    const billing = makeDatabase(
+      { namespaces: ["app"] },
+      "billing",
+      createNeo4jRoleRegistry("neo4j-a")
+    );
+    const analytics = makeDatabase(
+      { namespaces: ["app"] },
+      "analytics",
+      createNeo4jRoleRegistry("neo4j-b")
+    );
+
+    expect(() => {
+      billing.addRole("reader");
+      analytics.addRole("reader");
+    }).not.toThrow();
+  });
+
+  // A call rejected by one of the option guards provisioned nothing, so it must
+  // not leave the name claimed — otherwise fixing the config would fail with a
+  // duplicate-name error about a role that was never created.
+  it("leaves the username claimable after a rejected call", () => {
+    const db = makeDatabase({ namespaces: ["app"] }, "graph");
+
+    expect(() => db.addRole("reader", { grants: [] })).toThrow(AnyCloudError);
+    expect(() => db.addRole("reader")).not.toThrow();
   });
 });
 

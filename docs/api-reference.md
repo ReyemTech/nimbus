@@ -179,9 +179,9 @@ raw value, since clients consume those literally. See
 #### Role names are unique per cluster, not per database
 
 `addRole()` is called on a database, but a **login identity is not a database
-object** — on both CloudNativePG and MariaDB it lives at the cluster/instance
-level and serves every database on it. So the role name you pass must be unique
-across the whole cluster, not just the database:
+object** — on all three engines it lives at the cluster/instance/deployment level
+and serves every database on it. So the role name you pass must be unique across
+the whole cluster, not just the database:
 
 ```typescript
 const pg = operator.createCluster("pgsql-main");
@@ -217,9 +217,12 @@ genuinely distinct accounts and are both allowed. The host comes from
 holding `<database>`@`%`, since its `User` CR omits `spec.host` and takes the
 operator's default.
 
-Neo4j has no such registry: its provisioning Job runs `CREATE USER ... IF NOT
-EXISTS`, which never rewrites an existing account's password, so a duplicate name
-cannot produce the password-flapping this rule prevents.
+**Neo4j enforces the rule per deployment**, keyed on the username alone — there
+is no host component. Its failure mode is quieter than the other two rather than
+absent: `CREATE USER ... IF NOT EXISTS` never rewrites an existing account's
+password, so nothing flaps, but the second role's provisioning Job is a silent
+no-op and its replicated connection Secrets end up holding a password that was
+never set and can never authenticate. Neither Job reports a failure.
 
 The check is scoped to one `createCluster()` call in one Pulumi program, which is
 the whole picture whenever a physical cluster is owned by a single stack. If two

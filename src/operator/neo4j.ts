@@ -32,6 +32,7 @@ import {
   MANAGED_BY_VALUE,
   NEO4J_BOLT_PORT,
   NEO4J_METRICS_PORT,
+  createNeo4jRoleRegistry,
 } from "./neo4j-common.js";
 import { assertNoEnvironments, createSingleNeo4jDatabaseInstance } from "./neo4j-database.js";
 
@@ -355,6 +356,11 @@ export function createNeo4jCluster(
   // -------------------------------------------------------------------------
   // 6. Return IClusterInstance with createDatabase()
   // -------------------------------------------------------------------------
+
+  // One registry per deployment, because that is the scope a Neo4j user exists
+  // at. Every database created below shares it.
+  const roleRegistry = createNeo4jRoleRegistry(name);
+
   return {
     name,
     engine: "neo4j" as const,
@@ -376,6 +382,7 @@ export function createNeo4jCluster(
         port,
         adminSecretName: passwordSecretName,
         release,
+        roleRegistry,
         provider,
       });
       // Runtime: always a single instance. The overload signatures on

@@ -13,12 +13,18 @@
  * `grants` and `login: false` both throw. So does `config.sql` — the only
  * statements this backend can run are the Cypher its provisioning Job carries.
  *
+ * Usernames are deployment-global here as they are cluster-global on the other
+ * two backends, so a per-deployment {@link IRoleRegistry} refuses a name claimed
+ * twice. Neo4j's failure mode is quieter than theirs: `CREATE USER ... IF NOT
+ * EXISTS` does not fight over the password, it simply does nothing, leaving the
+ * losing role's replicated Secrets holding a credential that never existed.
+ *
  * @module operator/neo4j-database
  */
 
 import type * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
-import { MANAGED_BY_LABEL, MANAGED_BY_VALUE } from "./neo4j-common.js";
+import { MANAGED_BY_LABEL, MANAGED_BY_VALUE, claimNeo4jUsername } from "./neo4j-common.js";
 import {
   additionalRoleNaming,
   ownerRoleNaming,
@@ -28,6 +34,7 @@ import {
 import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
 import { assertNoSql } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
+import type { IRoleRegistry } from "./role-registry.js";
 import type {
   IDatabaseInstance,
   IDatabaseRole,
@@ -78,6 +85,14 @@ export interface INeo4jDatabaseOptions {
   readonly adminSecretName: string;
   /** The Helm release the deployment comes from. */
   readonly release: k8s.helm.v3.Release;
+  /**
+   * Usernames already claimed on this deployment, shared by every database on
+   * it.
+   *
+   * Neo4j users are deployment-global, so this cannot be per-database: see
+   * {@link IRoleRegistry}.
+   */
+  readonly roleRegistry: IRoleRegistry;
   /** Kubernetes provider. */
   readonly provider: k8s.Provider;
 }
@@ -94,7 +109,8 @@ export interface INeo4jDatabaseOptions {
  * @throws {AnyCloudError} code `INVALID_GRANT` when a role's grant lists no privileges
  * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `config.sql` is
  *   set (Neo4j runs no SQL), or when `addRole()` is called with the database
- *   owner's own name, is passed `grants` (Neo4j Community has no RBAC), or is
+ *   owner's own name, with a username any other database on the same deployment
+ *   has already claimed, is passed `grants` (Neo4j Community has no RBAC), or is
  *   passed `login: false`
  */
 export function createSingleNeo4jDatabaseInstance(
@@ -102,6 +118,7 @@ export function createSingleNeo4jDatabaseInstance(
 ): IDatabaseInstance {
   const { clusterName, dbName, config, endpoint, port, adminSecretName, release, provider } =
     options;
+  const { roleRegistry } = options;
 
   // The provisioning Job speaks Cypher, not SQL, and there is no second Job to
   // put statements in — so `sql` is refused rather than dropped on the floor.
@@ -109,6 +126,10 @@ export function createSingleNeo4jDatabaseInstance(
 
   const username = config.owner ?? dbName;
   assertValidRoleName(username, dbName);
+  // The owner is a deployment-global user like any other, so it claims its name
+  // too — otherwise a later addRole() on a *different* database could take it,
+  // and its Job would no-op against this account.
+  claimNeo4jUsername(roleRegistry, username, dbName);
   const labels = {
     [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
     "nimbus/cluster": clusterName,
@@ -205,6 +226,18 @@ export function createSingleNeo4jDatabaseInstance(
           ERROR_CODES.UNSUPPORTED_ROLE_OPTION
         );
       }
+
+      // Same hazard one scope wider: the check above only sees this database's
+      // own owner, while a user of this name may already belong to a sibling
+      // database on the same deployment — the same account, since Neo4j users
+      // are deployment-global. Two Jobs then issue `CREATE USER ... IF NOT
+      // EXISTS` for it, the second no-ops, and its role's Secrets hold a
+      // password that was never set. The registry is what notices.
+      //
+      // Claimed here rather than at the top of the method so that a call
+      // rejected by one of the guards above leaves no claim behind — the role
+      // was never provisioned, so its name must stay available.
+      claimNeo4jUsername(roleRegistry, roleName, dbName);
 
       const naming = additionalRoleNaming(clusterName, dbName, roleName);
       const roleLabels = { ...labels, "nimbus/role": roleName };

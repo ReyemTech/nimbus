@@ -32,6 +32,7 @@ import {
   replicateNeo4jConnectionSecrets,
 } from "./neo4j-roles.js";
 import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
+import { toLabelValue } from "./resource-identity.js";
 import { ENGINE_NAMES, assertNoForeignEngineOptions, assertNoSql } from "./database-options.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
 import type { IRoleRegistry } from "./role-registry.js";
@@ -44,6 +45,18 @@ import type {
 
 /** Engine name used in errors about options Neo4j cannot honour. */
 const NEO4J_ENGINE_NAME = ENGINE_NAMES.NEO4J;
+
+/** Label naming the deployment an object belongs to. */
+const CLUSTER_LABEL = "nimbus/cluster";
+/** Label naming the database an object belongs to. */
+const DATABASE_LABEL = "nimbus/database";
+/**
+ * Label naming the role an object belongs to.
+ *
+ * Its value is a sanitized form of the username — see {@link toLabelValue} —
+ * because label values accept far less than a Neo4j username does.
+ */
+const ROLE_LABEL = "nimbus/role";
 
 /**
  * Reject `environments`, which Neo4j cannot fan a database out across.
@@ -132,8 +145,8 @@ export function createSingleNeo4jDatabaseInstance(
   claimNeo4jUsername(roleRegistry, username, dbName);
   const labels = {
     [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
-    "nimbus/cluster": clusterName,
-    "nimbus/database": dbName,
+    [CLUSTER_LABEL]: clusterName,
+    [DATABASE_LABEL]: dbName,
   };
 
   const ownerNaming = ownerRoleNaming(clusterName, dbName);
@@ -146,7 +159,7 @@ export function createSingleNeo4jDatabaseInstance(
     adminSecretName,
     endpoint,
     labels,
-    podLabels: { "nimbus/database": dbName },
+    podLabels: { [DATABASE_LABEL]: dbName },
     provider,
     dependsOn: [release],
   });
@@ -250,7 +263,16 @@ export function createSingleNeo4jDatabaseInstance(
       claimNeo4jUsername(roleRegistry, roleName, dbName);
 
       const naming = additionalRoleNaming(clusterName, dbName, roleName);
-      const roleLabels = { ...labels, "nimbus/role": roleName };
+
+      // The label carries a sanitized form of the username, never the raw one.
+      // The shared validator deliberately permits `reporting@corp`, and `@` is
+      // not a legal label character — the Kubernetes API rejects the whole
+      // object at apply time, after preview has passed, so the Job carrying the
+      // label never runs and the account is never created. The raw name still
+      // goes verbatim into the Cypher statement and the Secret payload, which
+      // are the two places it must be exact.
+      const roleLabel = toLabelValue(roleName);
+      const roleLabels = { ...labels, [ROLE_LABEL]: roleLabel };
 
       const provisioned = provisionNeo4jRole({
         dbName,
@@ -259,7 +281,7 @@ export function createSingleNeo4jDatabaseInstance(
         adminSecretName,
         endpoint,
         labels: roleLabels,
-        podLabels: { "nimbus/database": dbName, "nimbus/role": roleName },
+        podLabels: { [DATABASE_LABEL]: dbName, [ROLE_LABEL]: roleLabel },
         provider,
         dependsOn: [release],
       });

@@ -698,6 +698,68 @@ describe("addRole", () => {
     });
   });
 
+  // The shared validator deliberately permits `@` in a username, but `@` is not
+  // a legal Kubernetes label value character. Labelling with the raw name made
+  // the API reject the Job and the credential Secret at apply time — after
+  // preview passed — so the account was never created and nothing said why.
+  it("labels objects with a sanitized username, never the raw one", async () => {
+    const db = makeDatabase();
+    db.addRole("reporting@corp", { namespaces: ["app"] });
+    await awaitRegistered(
+      "shared-neo4j-graph-role-reporting-corp-796adff4-neo4j-password",
+      "neo4j-init-user-shared-neo4j-graph-role-reporting-corp-796adff4"
+    );
+
+    const labelled = [
+      "shared-neo4j-graph-role-reporting-corp-796adff4-neo4j-password",
+      "neo4j-init-user-shared-neo4j-graph-role-reporting-corp-796adff4",
+    ];
+    for (const name of labelled) {
+      const metadata = inputsOf(name)["metadata"] as { labels: Record<string, string> };
+      expect(metadata.labels["nimbus/role"]).toMatch(/^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$/);
+      expect(metadata.labels["nimbus/role"]).not.toContain("@");
+    }
+  });
+
+  it("labels the provisioning Job's pod template with the sanitized username too", async () => {
+    const db = makeDatabase();
+    db.addRole("reporting@corp", { namespaces: ["app"] });
+    await awaitRegistered("neo4j-init-user-shared-neo4j-graph-role-reporting-corp-796adff4");
+
+    const spec = inputsOf("neo4j-init-user-shared-neo4j-graph-role-reporting-corp-796adff4")[
+      "spec"
+    ] as { template: { metadata: { labels: Record<string, string> } } };
+
+    expect(spec.template.metadata.labels["nimbus/role"]).not.toContain("@");
+    expect(spec.template.metadata.labels["nimbus/role"]).toMatch(
+      /^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$/
+    );
+  });
+
+  // The raw username must survive everywhere it has to be exact: the Cypher
+  // statement that creates the account, and the Secret applications read.
+  it("keeps the raw username in the Cypher statement and the Secret", async () => {
+    const db = makeDatabase();
+    db.addRole("reporting@corp", { namespaces: ["app"] });
+    await awaitRegistered(
+      "shared-neo4j-graph-role-reporting-corp-796adff4-neo4j-password",
+      "neo4j-init-user-shared-neo4j-graph-role-reporting-corp-796adff4"
+    );
+
+    const stringData = unwrapSecret(
+      inputsOf("shared-neo4j-graph-role-reporting-corp-796adff4-neo4j-password")["stringData"]
+    );
+    expect(stringData["username"]).toBe("reporting@corp");
+
+    const spec = inputsOf("neo4j-init-user-shared-neo4j-graph-role-reporting-corp-796adff4")[
+      "spec"
+    ] as {
+      template: { spec: { containers: { env: { name: string; value?: string }[] }[] } };
+    };
+    const dbUser = spec.template.spec.containers[0]?.env.find((entry) => entry.name === "DB_USER");
+    expect(dbUser?.value).toBe("reporting@corp");
+  });
+
   // The registry keys raw usernames, so `Read_Only` and `read_only` are both
   // accepted — Neo4j will hold the two accounts at once. Deriving their resource
   // names by sanitizing alone gave them ONE logical name each, and a duplicate

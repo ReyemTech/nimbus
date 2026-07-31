@@ -158,6 +158,8 @@ interface IDatabaseRole {
 - `name` equals the database's owner — the owner's role already exists (created by
   `createDatabase()`); a second CR/Job for the same account would fight the first
   over its password.
+- `name` is already claimed by another role **anywhere on the same cluster**, on
+  CloudNativePG — see "Role names are unique per cluster" below.
 - `grants` is passed on Neo4j — including `grants: []`. Community edition has no
   RBAC, so neither a privilege set nor "this role holds no privileges" can be
   honoured: every Neo4j account can read and write the whole graph.
@@ -165,6 +167,39 @@ interface IDatabaseRole {
   account).
 - `name` contains a backtick, single quote, double quote, backslash, or NUL byte,
   on any engine.
+
+#### Role names are unique per cluster, not per database
+
+`addRole()` is called on a database, but a **PostgreSQL role is not a database
+object** — it lives at the cluster level and serves every database in it. So on
+CloudNativePG the role name you pass must be unique across the whole cluster,
+not just the database:
+
+```typescript
+const pg = operator.createCluster("pgsql-main");
+const billing = pg.createDatabase("billing", { namespaces: ["app"] });
+const analytics = pg.createDatabase("analytics", { namespaces: ["app"] });
+
+billing.addRole("reader", { grants: [{ privileges: ["SELECT"] }] });
+analytics.addRole("reader", { grants: [{ privileges: ["SELECT"] }] }); // throws
+```
+
+Both calls describe the one cluster-global role `reader`, each pointing it at a
+different generated password Secret. Their Pulumi logical names are derived from
+the database name and therefore differ, so `pulumi preview` reports no conflict —
+in production the two `DatabaseRole` controllers would then rewrite that role's
+password against each other on every reconcile, until at least one database's
+replicated connection Secrets stopped authenticating. nimbus rejects the second
+claim at build time instead, with code `UNSUPPORTED_ROLE_OPTION`.
+
+The registry covers every role on the cluster, so a database's **owner** counts
+too: `analytics.addRole("billing")` fails because `billing`'s owner already holds
+that name. Give the roles distinct names (`billing-reader`, `analytics-reader`) —
+nimbus deliberately does not rename them for you, because the role you would get
+back would not be the one you asked for. If you genuinely want *one* role reading
+from both databases, call `addRole()` once and grant it on the second database
+through that database's `sql` escape hatch — nimbus models a role's privileges
+only in the database it was added to.
 
 It throws code `INVALID_GRANT` when a grant lists zero privileges, and code
 `UNSUPPORTED_PRIVILEGE` when a grant names a privilege the engine's grant path

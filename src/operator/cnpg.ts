@@ -22,7 +22,12 @@ import type {
 import { createCnpgClusterDashboard } from "../observability/dashboards";
 import { createPrometheusRule } from "../observability/alerts";
 import { nimbus } from "../nimbus";
-import { CNPG_API_VERSION, DATA_NAMESPACE, DEFAULT_PG_VERSION } from "./cnpg-common.js";
+import {
+  CNPG_API_VERSION,
+  DATA_NAMESPACE,
+  DEFAULT_PG_VERSION,
+  createCnpgRoleRegistry,
+} from "./cnpg-common.js";
 import { createSingleCnpgDatabaseInstance } from "./cnpg-database.js";
 
 const DEFAULT_REPLICAS = 1;
@@ -212,6 +217,10 @@ function createSingleCnpgCluster(
   const endpoint = pulumi.output(`${name}-rw.${DATA_NAMESPACE}.svc.cluster.local`);
   const port = pulumi.output(5432);
 
+  // One registry per cluster, because that is the scope a PostgreSQL role
+  // exists at. Every database created below shares it.
+  const roleRegistry = createCnpgRoleRegistry(name);
+
   nimbus.register(name, {
     name,
     type: "database",
@@ -254,6 +263,7 @@ function createSingleCnpgCluster(
             port,
             pgVersion: version,
             cluster,
+            roleRegistry,
             provider,
           });
         }
@@ -268,6 +278,7 @@ function createSingleCnpgCluster(
           port,
           pgVersion: version,
           cluster,
+          roleRegistry,
           provider,
         });
       }

@@ -18,6 +18,7 @@ import {
   DATA_NAMESPACE,
   DATABASE_KIND,
   ENSURE_PRESENT,
+  claimCnpgRoleName,
   toResourceName,
 } from "./cnpg-common.js";
 import {
@@ -29,6 +30,7 @@ import {
 import { createPostgresGrantJob } from "./grants/postgres-job.js";
 import { assertValidRoleName, resolveRoleConfig } from "./grants/role-config.js";
 import { AnyCloudError, ERROR_CODES } from "../types/errors.js";
+import type { IRoleRegistry } from "./role-registry.js";
 import type {
   IDatabaseInstance,
   IDatabaseRole,
@@ -57,6 +59,13 @@ export interface ICnpgDatabaseOptions {
   readonly pgVersion: string;
   /** The CNPG Cluster CR. */
   readonly cluster: k8s.apiextensions.CustomResource;
+  /**
+   * Role names already claimed on this cluster, shared by every database on it.
+   *
+   * PostgreSQL roles are cluster-global, so this cannot be per-database: see
+   * {@link IRoleRegistry}.
+   */
+  readonly roleRegistry: IRoleRegistry;
   /** Kubernetes provider. */
   readonly provider: k8s.Provider;
 }
@@ -78,13 +87,18 @@ export interface ICnpgDatabaseOptions {
  * @throws {AnyCloudError} code `UNSUPPORTED_PRIVILEGE` when a grant names a
  *   privilege the SQL compiler cannot emit
  * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when `addRole()` is
- *   called with the database owner's own name
+ *   called with the database owner's own name, or with a role name any other
+ *   database on the same cluster has already claimed
  */
 export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions): IDatabaseInstance {
   const { clusterName, dbName, config, endpoint, port, pgVersion, cluster, provider } = options;
+  const { roleRegistry } = options;
 
   const username = config.owner ?? dbName;
   assertValidRoleName(username, dbName);
+  // The owner is a cluster-global role like any other, so it claims its name
+  // too — otherwise a later addRole() on a *different* database could take it.
+  claimCnpgRoleName(roleRegistry, username, dbName);
   const labels = {
     [MANAGED_BY_LABEL]: MANAGED_BY_VALUE,
     "nimbus/cluster": clusterName,
@@ -194,6 +208,12 @@ export function createSingleCnpgDatabaseInstance(options: ICnpgDatabaseOptions):
           ERROR_CODES.UNSUPPORTED_ROLE_OPTION
         );
       }
+
+      // Same hazard one scope wider: the check above only sees this database's
+      // own owner, while a role of this name may already belong to a sibling
+      // database on the same cluster — the same role, since PostgreSQL has only
+      // one. The registry is what notices.
+      claimCnpgRoleName(roleRegistry, roleName, dbName);
 
       const resolved = resolveRoleConfig(roleConfig);
       const naming = additionalRoleNaming(clusterName, dbName, roleName);

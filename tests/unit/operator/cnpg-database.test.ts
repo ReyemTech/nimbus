@@ -2,6 +2,8 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import * as pulumi from "@pulumi/pulumi";
 import * as k8s from "@pulumi/kubernetes";
 import { createSingleCnpgDatabaseInstance } from "../../../src/operator/cnpg-database.js";
+import { createCnpgRoleRegistry } from "../../../src/operator/cnpg-common.js";
+import type { IRoleRegistry } from "../../../src/operator/role-registry.js";
 import type {
   IDatabaseInstance,
   IDatabaseRole,
@@ -46,7 +48,9 @@ function makeDatabase(
   config: Parameters<typeof createSingleCnpgDatabaseInstance>[0]["config"] = {
     namespaces: ["app"],
     owner: "etl",
-  }
+  },
+  dbName = "analytics",
+  roleRegistry: IRoleRegistry = createCnpgRoleRegistry("shared-pg")
 ): IDatabaseInstance {
   const provider = new k8s.Provider("test-provider", {});
   const cluster = new k8s.apiextensions.CustomResource(
@@ -57,12 +61,13 @@ function makeDatabase(
 
   return createSingleCnpgDatabaseInstance({
     clusterName: "shared-pg",
-    dbName: "analytics",
+    dbName,
     config,
     endpoint: pulumi.output("shared-pg-rw.data.svc.cluster.local"),
     port: pulumi.output(5432),
     pgVersion: "17",
     cluster,
+    roleRegistry,
     provider,
   });
 }
@@ -138,6 +143,84 @@ describe("createSingleCnpgDatabaseInstance", () => {
     await settle();
 
     expect(registered.some((name) => name.startsWith("cnpg-grants-"))).toBe(false);
+  });
+});
+
+// PostgreSQL roles live at the cluster level, so two databases in one cluster
+// asking for `reader` are asking for the SAME role — each pointing it at its own
+// generated password Secret. Their Pulumi logical names differ (they are derived
+// from the database name), so preview reports nothing and the two DatabaseRole
+// controllers rewrite the password against each other in production.
+describe("cluster-scoped role names", () => {
+  it("rejects the same role name added on two databases in one cluster", () => {
+    const registry = createCnpgRoleRegistry("shared-pg");
+    const billing = addRoleOf(makeDatabase({ namespaces: ["app"] }, "billing", registry));
+    const analytics = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics", registry));
+
+    billing("reader");
+
+    expect(() => analytics("reader")).toThrow(AnyCloudError);
+    expect(() => analytics("reader")).toThrow(/cluster-global/);
+  });
+
+  it("names the role, both databases, and the cluster", () => {
+    const registry = createCnpgRoleRegistry("shared-pg");
+    const billing = addRoleOf(makeDatabase({ namespaces: ["app"] }, "billing", registry));
+    const analytics = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics", registry));
+    billing("reader");
+
+    try {
+      analytics("reader");
+      expect.unreachable("addRole should have thrown for a cluster-global collision");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AnyCloudError);
+      expect((error as AnyCloudError).code).toBe(ERROR_CODES.UNSUPPORTED_ROLE_OPTION);
+      const { message } = error as AnyCloudError;
+      expect(message).toContain('"reader"');
+      expect(message).toContain('"billing"');
+      expect(message).toContain('"analytics"');
+      expect(message).toContain('cluster "shared-pg"');
+    }
+  });
+
+  it("rejects an addRole() name that is another database's owner", () => {
+    const registry = createCnpgRoleRegistry("shared-pg");
+    // "billing"'s owner role is `etl`, which is the same cluster-global role
+    // `analytics` would be asking for.
+    makeDatabase({ namespaces: ["app"], owner: "etl" }, "billing", registry);
+    const analytics = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics", registry));
+
+    expect(() => analytics("etl")).toThrow(/already claimed by database "billing"/);
+  });
+
+  it("rejects two databases in one cluster declaring the same owner", () => {
+    const registry = createCnpgRoleRegistry("shared-pg");
+    makeDatabase({ namespaces: ["app"], owner: "shared" }, "billing", registry);
+
+    expect(() =>
+      makeDatabase({ namespaces: ["app"], owner: "shared" }, "analytics", registry)
+    ).toThrow(/already claimed by database "billing"/);
+  });
+
+  it("rejects the same role added twice on one database", () => {
+    const addRole = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics"));
+    addRole("reader");
+
+    expect(() => addRole("reader")).toThrow(/already claimed by database "analytics"/);
+  });
+
+  it("allows the same role name on separate clusters", () => {
+    const billing = addRoleOf(
+      makeDatabase({ namespaces: ["app"] }, "billing", createCnpgRoleRegistry("pg-a"))
+    );
+    const analytics = addRoleOf(
+      makeDatabase({ namespaces: ["app"] }, "analytics", createCnpgRoleRegistry("pg-b"))
+    );
+
+    expect(() => {
+      billing("reader");
+      analytics("reader");
+    }).not.toThrow();
   });
 });
 

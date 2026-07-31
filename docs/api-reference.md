@@ -221,6 +221,12 @@ Neo4j has no such registry: its provisioning Job runs `CREATE USER ... IF NOT
 EXISTS`, which never rewrites an existing account's password, so a duplicate name
 cannot produce the password-flapping this rule prevents.
 
+The check is scoped to one `createCluster()` call in one Pulumi program, which is
+the whole picture whenever a physical cluster is owned by a single stack. If two
+separate stacks provision roles on the *same* live cluster, nothing at build time
+can see across them — that is a deployment topology to avoid, not a case this
+guard covers.
+
 It throws code `INVALID_GRANT` when a grant lists zero privileges, and code
 `UNSUPPORTED_PRIVILEGE` when a grant names a privilege the engine's grant path
 cannot emit. On CloudNativePG the allowed set is `SELECT`, `INSERT`, `UPDATE`,

@@ -20,6 +20,7 @@ import {
   DEFAULT_GRANT_HOST,
   MARIADB_API_VERSION,
   claimMariadbRoleName,
+  resolveMariadbHost,
 } from "./mariadb-common.js";
 import {
   OWNER_GRANT,
@@ -257,7 +258,13 @@ export function createSingleMariadbDatabaseInstance(
       });
 
       const mariadbOptions = roleConfig?.engineOptions?.mariadb;
-      const host = mariadbOptions?.host ?? DEFAULT_GRANT_HOST;
+      // Resolved once, here, and used for the registry claim, the naming
+      // identity, and `spec.host` alike. A configured `""` is not nullish, so it
+      // used to reach all three as itself while the CRs — which omitted a falsy
+      // host — inherited the operator's `%` default: a second database could
+      // then claim `reader`@`%` for what MariaDB sees as the same account. See
+      // {@link resolveMariadbHost}.
+      const host = resolveMariadbHost(mariadbOptions?.host);
 
       // Translated before the claim below, not where the CRs are built, because
       // this throws: a privilege MariaDB cannot carry in a database-scoped

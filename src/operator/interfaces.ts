@@ -121,7 +121,15 @@ export interface IDatabaseRoleConfig {
       readonly validUntil?: string;
     };
     readonly mariadb?: {
-      /** Host pattern the user may connect from. Default: "%". */
+      /**
+       * Host pattern the user may connect from. Default: `"%"`.
+       *
+       * A blank or whitespace-only pattern resolves to the same `"%"` an
+       * omitted one does — that is what the account ends up with either way, so
+       * it is also the identity nimbus refuses to hand out twice. Two databases
+       * asking for `reader` with and without `host: ""` are asking for one
+       * MariaDB account, and the second is rejected at preview.
+       */
       readonly host?: string;
       /** Maximum concurrent connections. Default: 100. */
       readonly maxUserConnections?: number;

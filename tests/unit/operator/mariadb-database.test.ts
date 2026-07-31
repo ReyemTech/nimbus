@@ -419,6 +419,81 @@ describe("instance-scoped role identities", () => {
     }).not.toThrow();
   });
 
+  // A configured "" is not nullish, so `?? DEFAULT_GRANT_HOST` let it through:
+  // the registry recorded `reader`@`""` while the User CR — which omitted a
+  // falsy host — inherited the operator's own "%" default. Two databases then
+  // reconciled ONE MariaDB account against two generated password Secrets, with
+  // the passwords flapping between them. The blank host is the same account as
+  // the default one, and must be refused as such.
+  it.each(["", " "])("rejects a %p host claimed elsewhere as the default", (blankHost) => {
+    const registry = createMariadbRoleRegistry("shared-maria");
+    const billing = addRoleOf(makeDatabase({ namespaces: ["app"] }, "billing", registry));
+    const analytics = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics", registry));
+
+    billing("reader", { engineOptions: { mariadb: { host: blankHost } } });
+
+    expect(() => analytics("reader")).toThrow(AnyCloudError);
+    expect(() => analytics("reader")).toThrow(/already claimed by database "billing"/);
+  });
+
+  it.each(["", " "])("rejects the default host when %p claimed it first", (blankHost) => {
+    const registry = createMariadbRoleRegistry("shared-maria");
+    const billing = addRoleOf(makeDatabase({ namespaces: ["app"] }, "billing", registry));
+    const analytics = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics", registry));
+
+    billing("reader");
+
+    expect(() => analytics("reader", { engineOptions: { mariadb: { host: blankHost } } })).toThrow(
+      /already claimed by database "billing"/
+    );
+  });
+
+  // Same account, spelt with padding. Claiming both would put two User CRs on
+  // one account again.
+  it("rejects a host that differs from a claimed one only by whitespace", () => {
+    const registry = createMariadbRoleRegistry("shared-maria");
+    const billing = addRoleOf(makeDatabase({ namespaces: ["app"] }, "billing", registry));
+    const analytics = addRoleOf(makeDatabase({ namespaces: ["app"] }, "analytics", registry));
+
+    billing("reader", { engineOptions: { mariadb: { host: "10.0.0.1" } } });
+
+    expect(() =>
+      analytics("reader", { engineOptions: { mariadb: { host: " 10.0.0.1 " } } })
+    ).toThrow(/already claimed by database "billing"/);
+  });
+
+  // The claim, the resource names and the CR must agree on one effective host:
+  // a claim of "%" that provisioned a CR without `spec.host` would be the same
+  // divergence in the other direction.
+  it("writes the resolved host into the CRs a blank host provisions", async () => {
+    addRoleOf(makeDatabase())("reader", {
+      grants: [{ privileges: ["SELECT"] }],
+      engineOptions: { mariadb: { host: "" } },
+    });
+    await awaitRegistered(
+      "shared-maria-analytics-role-reader-3d094196-user",
+      "shared-maria-analytics-role-reader-3d094196-grant-all"
+    );
+
+    expect(specOf("shared-maria-analytics-role-reader-3d094196-user")).toMatchObject({
+      host: "%",
+    });
+    expect(specOf("shared-maria-analytics-role-reader-3d094196-grant-all")).toMatchObject({
+      host: "%",
+    });
+  });
+
+  it("trims a configured host before writing it to the CRs", async () => {
+    addRoleOf(makeDatabase())("reader", {
+      engineOptions: { mariadb: { host: " 10.0.0.1 " } },
+    });
+    await awaitRegistered("shared-maria-analytics-role-reader-3d094196-user");
+
+    expect(specOf("shared-maria-analytics-role-reader-3d094196-user")).toMatchObject({
+      host: "10.0.0.1",
+    });
+  });
+
   // The owner's CRs omit spec.host and take the operator's default, which is the
   // same "%" an addRole() with no host gets — so they are one account.
   it("rejects an addRole() name that is another database's owner on the default host", () => {

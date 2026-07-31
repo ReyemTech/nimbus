@@ -301,11 +301,17 @@ export interface IMariadbRoleOptions {
   /** Grants to create, already translated by {@link toMariadbGrants}. */
   readonly grants: ReadonlyArray<IMariadbGrantSpec>;
   /**
-   * Host pattern the user may connect from.
+   * Effective host pattern the user may connect from.
    *
-   * Omitted entirely from both CRs when undefined, which is how the owner's
-   * pre-existing specs stay byte-identical rather than gaining an explicit
-   * copy of the operator's own default.
+   * Written to both CRs exactly as given, or omitted from both when undefined —
+   * which is how the owner's pre-existing specs stay byte-identical rather than
+   * gaining an explicit copy of the operator's own default.
+   *
+   * Callers pass the *resolved* value, never the raw configuration: see
+   * {@link resolveMariadbHost}. Omitting a blank host instead of writing it
+   * would silently hand the account the operator's default while the registry
+   * and the resource names identified it by the blank value, so a blank string
+   * is deliberately not treated as "unset" here.
    */
   readonly host?: string;
   /** Concurrent connection cap. Default: {@link DEFAULT_MAX_USER_CONNECTIONS}. */
@@ -370,7 +376,7 @@ export function provisionMariadbRole(options: IMariadbRoleOptions): IMariadbProv
           name: naming.credentialSecret,
           key: "password",
         },
-        ...(host ? { host } : {}),
+        ...(host === undefined ? {} : { host }),
         maxUserConnections: options.maxUserConnections ?? DEFAULT_MAX_USER_CONNECTIONS,
       },
     },
@@ -399,7 +405,7 @@ export function provisionMariadbRole(options: IMariadbRoleOptions): IMariadbProv
           database: dbName,
           table: grant.table,
           username: roleName,
-          ...(host ? { host } : {}),
+          ...(host === undefined ? {} : { host }),
           grantOption: grant.grantOption,
         },
       },

@@ -35,6 +35,9 @@ export const BACKUP_KIND = "Backup";
 /** Host pattern a user may connect from when none is configured. */
 export const DEFAULT_GRANT_HOST = "%";
 
+/** Matches a host pattern holding nothing but whitespace, the empty string included. */
+const BLANK_HOST = /^\s*$/;
+
 /** Concurrent connection cap applied to every provisioned user. */
 export const DEFAULT_MAX_USER_CONNECTIONS = 100;
 
@@ -75,6 +78,41 @@ export function createMariadbRoleRegistry(clusterName: string): IRoleRegistry {
 }
 
 /**
+ * Resolve a configured host pattern to the value the account will actually have.
+ *
+ * There is exactly one effective host for any configuration, and everything that
+ * identifies the account has to agree on it: the registry key that refuses a
+ * duplicate `user`@`host`, the Pulumi logical names derived from that pair, and
+ * the `spec.host` written into the `User` and `Grant` CRs. A configured `""`
+ * used to survive `?? DEFAULT_GRANT_HOST` — the empty string is not nullish — so
+ * it was registered and named as the distinct identity `reader`@`""` while the
+ * CRs omitted the field and inherited the operator's own `%` default. Two
+ * databases could then claim what MariaDB sees as one account, each pointing it
+ * at a different generated password Secret, which is the exact collision the
+ * registry exists to prevent.
+ *
+ * Whitespace-only patterns resolve the same way, and a surrounding-whitespace
+ * pattern is trimmed, so `" 10.0.0.1 "` and `"10.0.0.1"` cannot be claimed as
+ * two accounts either.
+ *
+ * @param host - Host pattern as configured, if any
+ * @returns The host the account is effectively reachable from, never blank
+ *
+ * @example
+ * ```typescript
+ * resolveMariadbHost(undefined); // "%"
+ * resolveMariadbHost(""); // "%"
+ * resolveMariadbHost(" 10.0.0.1 "); // "10.0.0.1"
+ * ```
+ */
+export function resolveMariadbHost(host: string | undefined): string {
+  if (host === undefined || BLANK_HOST.test(host)) {
+    return DEFAULT_GRANT_HOST;
+  }
+  return host.trim();
+}
+
+/**
  * Claim a MariaDB account on an instance.
  *
  * The claim is keyed on the username **and** the host, because that pair is what
@@ -83,7 +121,7 @@ export function createMariadbRoleRegistry(clusterName: string): IRoleRegistry {
  *
  * @param registry - The instance's registry
  * @param roleName - Username as it will exist in MariaDB
- * @param host - Effective host pattern, after {@link DEFAULT_GRANT_HOST} is applied
+ * @param host - Effective host pattern, as returned by {@link resolveMariadbHost}
  * @param dbName - Database whose configuration is claiming it
  * @throws {AnyCloudError} code `UNSUPPORTED_ROLE_OPTION` when the pair is taken
  */

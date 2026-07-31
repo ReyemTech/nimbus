@@ -109,8 +109,6 @@ export interface IReplicationOptions {
   readonly provider: k8s.Provider;
   /** Resources each Secret must be created after. */
   readonly dependsOn: ReadonlyArray<pulumi.Resource>;
-  /** Optional per-resource aliases, keyed by namespace. */
-  readonly aliasesByNamespace?: Record<string, string>;
 }
 
 /**
@@ -126,7 +124,6 @@ export function replicateConnectionSecrets(
 
   for (const targetNs of options.namespaces) {
     const nsResource = ensureNamespace(targetNs, options.provider);
-    const alias = options.aliasesByNamespace?.[targetNs];
 
     new k8s.core.v1.Secret(
       `${options.resourcePrefix}-${targetNs}`,
@@ -138,11 +135,7 @@ export function replicateConnectionSecrets(
         },
         stringData: options.stringData,
       },
-      {
-        provider: options.provider,
-        dependsOn: [...options.dependsOn, nsResource],
-        ...(alias ? { aliases: [{ name: alias }] } : {}),
-      }
+      { provider: options.provider, dependsOn: [...options.dependsOn, nsResource] }
     );
 
     secrets[targetNs] = pulumi.output(options.secretName);

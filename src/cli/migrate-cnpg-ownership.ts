@@ -7,20 +7,35 @@
  * query from `docs/cnpg-declarative-databases.md` (reused verbatim, see
  * {@link DATABASE_OWNERSHIP_QUERY}).
  *
+ * The query is run through {@link toJsonRowsQuery} for the reason spelt out in
+ * {@link module:cli/migrate-psql}: `psql -tAc` escapes nothing, so a database or
+ * owner name containing a `|` split into three fields where two were expected
+ * and the row was silently dropped — from the check whose job is to notice that
+ * exact database. Rows that still cannot be read come back as warnings.
+ *
  * @module cli/migrate-cnpg-ownership
  */
 
-import { splitNonEmptyLines } from "./migrate-exec.js";
-
-/** Number of columns {@link DATABASE_OWNERSHIP_QUERY} returns. */
-const DATABASE_OWNERSHIP_COLUMN_COUNT = 2;
+import { parseJsonRows, readString, toJsonRowsQuery } from "./migrate-psql.js";
 
 /** Databases that are not created by `createDatabase()` and have no owner convention to check. */
 export const SYSTEM_DATABASE_NAMES: readonly string[] = ["postgres"];
 
 /** Database ownership query from `docs/cnpg-declarative-databases.md`. */
-export const DATABASE_OWNERSHIP_QUERY = `SELECT d.datname, pg_get_userbyid(d.datdba)
+export const DATABASE_OWNERSHIP_QUERY = `SELECT d.datname, pg_get_userbyid(d.datdba) AS owner
 FROM pg_database d WHERE NOT d.datistemplate ORDER BY 1`;
+
+/** {@link DATABASE_OWNERSHIP_QUERY} as the JSON document {@link parseDatabaseRows} reads. */
+export const DATABASE_OWNERSHIP_JSON_QUERY = toJsonRowsQuery(DATABASE_OWNERSHIP_QUERY);
+
+/** What this query reads, named in warnings. */
+const SUBJECT = "pg_database";
+
+/** Columns {@link DATABASE_OWNERSHIP_QUERY} returns, by the name `row_to_json` gives them. */
+const DATABASE_COLUMNS = {
+  NAME: "datname",
+  OWNER: "owner",
+} as const;
 
 /** One row of {@link DATABASE_OWNERSHIP_QUERY}, parsed and typed. */
 export interface IParsedDatabaseRow {
@@ -28,32 +43,45 @@ export interface IParsedDatabaseRow {
   readonly owner: string;
 }
 
-/**
- * Parse one pipe-delimited row from {@link DATABASE_OWNERSHIP_QUERY}.
- *
- * @param line - Raw line of `psql -tAc` output
- * @returns The parsed row, or null when the line is malformed
- */
-function parseDatabaseRow(line: string): IParsedDatabaseRow | null {
-  const fields = line.split("|");
-  if (fields.length !== DATABASE_OWNERSHIP_COLUMN_COUNT) {
-    return null;
-  }
-  const [name, owner] = fields;
-  if (!name || !owner) {
-    return null;
-  }
-  return { name, owner };
+/** Parsed databases, plus a warning for every row that could not be read. */
+export interface IDatabaseRowsResult {
+  /** Rows that parsed cleanly. */
+  readonly databases: ReadonlyArray<IParsedDatabaseRow>;
+  /** One line per unreadable row; never empty when a row was skipped. */
+  readonly warnings: ReadonlyArray<string>;
 }
 
 /**
- * Parse every row returned by {@link DATABASE_OWNERSHIP_QUERY}.
+ * Parse every row returned by {@link DATABASE_OWNERSHIP_JSON_QUERY}.
  *
- * @param stdout - Raw `psql -tAc` output, one row per line
- * @returns Successfully parsed database rows (malformed lines are dropped)
+ * @param stdout - Raw `psql -tAc` output of the JSON-wrapped query
+ * @returns The databases that parsed, and a warning for every row that did not
  */
-export function parseDatabaseRows(stdout: string): IParsedDatabaseRow[] {
-  return splitNonEmptyLines(stdout)
-    .map(parseDatabaseRow)
-    .filter((row): row is IParsedDatabaseRow => row !== null);
+export function parseDatabaseRows(stdout: string): IDatabaseRowsResult {
+  const parsed = parseJsonRows(stdout, SUBJECT);
+  const databases: IParsedDatabaseRow[] = [];
+  const warnings: string[] = [...parsed.warnings];
+
+  parsed.rows.forEach((row: Record<string, unknown>, index: number) => {
+    const name = readString(row, DATABASE_COLUMNS.NAME);
+    const owner = readString(row, DATABASE_COLUMNS.OWNER);
+    if (name === undefined || owner === undefined) {
+      const columns = [
+        [DATABASE_COLUMNS.NAME, name],
+        [DATABASE_COLUMNS.OWNER, owner],
+      ]
+        .filter(([, value]) => value === undefined)
+        .map(([column]) => column)
+        .join(", ");
+      const where = name === undefined ? `${SUBJECT} row ${index + 1}` : `database "${name}"`;
+      warnings.push(
+        `${where}: could not read ${columns} from the ${SUBJECT} query output, so this ` +
+          "database's ownership was NOT checked."
+      );
+      return;
+    }
+    databases.push({ name, owner });
+  });
+
+  return { databases, warnings };
 }

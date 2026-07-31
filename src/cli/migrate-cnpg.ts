@@ -12,13 +12,13 @@ import { CHECK_STATUS } from "./migrate-report.js";
 import type { ISectionResult } from "./migrate-report.js";
 import {
   BUILTIN_ROLE_NAMES,
-  ROLE_ATTRIBUTES_QUERY,
+  ROLE_ATTRIBUTES_JSON_QUERY,
   describeRoleDeviation,
   parseRoleRows,
   roleMatchesBaseline,
 } from "./migrate-cnpg-roles.js";
 import {
-  DATABASE_OWNERSHIP_QUERY,
+  DATABASE_OWNERSHIP_JSON_QUERY,
   SYSTEM_DATABASE_NAMES,
   parseDatabaseRows,
 } from "./migrate-cnpg-ownership.js";
@@ -216,22 +216,29 @@ export function checkClusterState(clusterReachable: boolean): IClusterSections {
   let ownershipMismatchCount = 0;
   let rolesChecked = 0;
   let databasesChecked = 0;
-  let roleQueryFailed = false;
-  let ownershipQueryFailed = false;
+  let roleCheckIncomplete = false;
+  let ownershipCheckIncomplete = false;
 
   for (const clusterName of clusterNames) {
     const pod = resolvePrimaryPod(clusterName);
 
-    const roleResult = runPsqlQuery(pod, ROLE_ATTRIBUTES_QUERY);
+    const roleResult = runPsqlQuery(pod, ROLE_ATTRIBUTES_JSON_QUERY);
     if (!roleResult.ok) {
-      roleQueryFailed = true;
+      roleCheckIncomplete = true;
       roleLines.push(
         `cluster "${clusterName}": could not query pg_roles on pod "${pod}": ${roleResult.message}`
       );
     } else {
-      const roles = parseRoleRows(roleResult.stdout).filter(
-        (role) => !BUILTIN_ROLE_NAMES.includes(role.name)
-      );
+      const parsed = parseRoleRows(roleResult.stdout);
+      // A row that could not be parsed is a role this check did NOT inspect, so
+      // it downgrades the section rather than shrinking the set it claims to
+      // have covered. Reporting "all roles match" while having skipped one is
+      // the failure mode this whole command exists to prevent.
+      for (const warning of parsed.warnings) {
+        roleCheckIncomplete = true;
+        roleLines.push(`cluster "${clusterName}": ${warning}`);
+      }
+      const roles = parsed.roles.filter((role) => !BUILTIN_ROLE_NAMES.includes(role.name));
       rolesChecked += roles.length;
       for (const role of roles) {
         if (!roleMatchesBaseline(role)) {
@@ -241,14 +248,19 @@ export function checkClusterState(clusterReachable: boolean): IClusterSections {
       }
     }
 
-    const ownershipResult = runPsqlQuery(pod, DATABASE_OWNERSHIP_QUERY);
+    const ownershipResult = runPsqlQuery(pod, DATABASE_OWNERSHIP_JSON_QUERY);
     if (!ownershipResult.ok) {
-      ownershipQueryFailed = true;
+      ownershipCheckIncomplete = true;
       ownershipLines.push(
         `cluster "${clusterName}": could not query pg_database on pod "${pod}": ${ownershipResult.message}`
       );
     } else {
-      const databases = parseDatabaseRows(ownershipResult.stdout).filter(
+      const parsed = parseDatabaseRows(ownershipResult.stdout);
+      for (const warning of parsed.warnings) {
+        ownershipCheckIncomplete = true;
+        ownershipLines.push(`cluster "${clusterName}": ${warning}`);
+      }
+      const databases = parsed.databases.filter(
         (database) => !SYSTEM_DATABASE_NAMES.includes(database.name)
       );
       databasesChecked += databases.length;
@@ -264,7 +276,7 @@ export function checkClusterState(clusterReachable: boolean): IClusterSections {
     }
   }
 
-  if (roleDeviationCount === 0 && !roleQueryFailed) {
+  if (roleDeviationCount === 0 && !roleCheckIncomplete) {
     roleLines.unshift(
       `Checked ${rolesChecked} role(s) across ${clusterNames.length} cluster(s); all match the nimbus baseline.`
     );
@@ -276,7 +288,7 @@ export function checkClusterState(clusterReachable: boolean): IClusterSections {
     );
   }
 
-  if (ownershipMismatchCount === 0 && !ownershipQueryFailed) {
+  if (ownershipMismatchCount === 0 && !ownershipCheckIncomplete) {
     ownershipLines.unshift(
       `Checked ${databasesChecked} database(s) across ${clusterNames.length} cluster(s); ` +
         "ownership matches the nimbus naming convention."
@@ -290,12 +302,14 @@ export function checkClusterState(clusterReachable: boolean): IClusterSections {
 
   return {
     roleSection: {
-      status: roleDeviationCount > 0 || roleQueryFailed ? CHECK_STATUS.WARN : CHECK_STATUS.PASS,
+      status: roleDeviationCount > 0 || roleCheckIncomplete ? CHECK_STATUS.WARN : CHECK_STATUS.PASS,
       lines: roleLines,
     },
     ownershipSection: {
       status:
-        ownershipMismatchCount > 0 || ownershipQueryFailed ? CHECK_STATUS.WARN : CHECK_STATUS.PASS,
+        ownershipMismatchCount > 0 || ownershipCheckIncomplete
+          ? CHECK_STATUS.WARN
+          : CHECK_STATUS.PASS,
       lines: ownershipLines,
     },
   };

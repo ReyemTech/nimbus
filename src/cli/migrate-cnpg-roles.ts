@@ -8,13 +8,24 @@
  * `pg_roles` query from `docs/cnpg-declarative-databases.md` (reused verbatim,
  * see {@link ROLE_ATTRIBUTES_QUERY}) and flags rows that deviate.
  *
+ * The query is run through {@link toJsonRowsQuery} rather than read as `psql`'s
+ * pipe-delimited output: a role name may contain a `|`, and psql escapes
+ * nothing, so such a row parsed as ten fields instead of nine and was discarded.
+ * The check then reported that every role matched the baseline while having
+ * skipped precisely the role whose attributes adoption would reset. Nothing is
+ * dropped now — a row that still cannot be read is returned as a warning.
+ *
  * @module cli/migrate-cnpg-roles
  */
 
-import { splitNonEmptyLines } from "./migrate-exec.js";
-
-/** Number of columns {@link ROLE_ATTRIBUTES_QUERY} returns. */
-const ROLE_ATTRIBUTES_COLUMN_COUNT = 9;
+import {
+  parseJsonRows,
+  readBoolean,
+  readNumber,
+  readString,
+  readStringArray,
+  toJsonRowsQuery,
+} from "./migrate-psql.js";
 
 /**
  * Operator-managed roles that intentionally do not follow the nimbus baseline
@@ -40,6 +51,25 @@ LEFT JOIN pg_roles m ON m.oid = am.roleid
 WHERE r.rolname NOT LIKE 'pg\\_%'
 GROUP BY 1,2,3,4,5,6,7,8 ORDER BY 1`;
 
+/** {@link ROLE_ATTRIBUTES_QUERY} as the JSON document {@link parseRoleRows} reads. */
+export const ROLE_ATTRIBUTES_JSON_QUERY = toJsonRowsQuery(ROLE_ATTRIBUTES_QUERY);
+
+/** What this query reads, named in warnings. */
+const SUBJECT = "pg_roles";
+
+/** Columns {@link ROLE_ATTRIBUTES_QUERY} returns, by the name `row_to_json` gives them. */
+const ROLE_COLUMNS = {
+  NAME: "rolname",
+  CAN_LOGIN: "rolcanlogin",
+  IS_SUPERUSER: "rolsuper",
+  CAN_CREATE_DB: "rolcreatedb",
+  CAN_CREATE_ROLE: "rolcreaterole",
+  INHERITS: "rolinherit",
+  CONNECTION_LIMIT: "rolconnlimit",
+  BYPASSES_RLS: "rolbypassrls",
+  MEMBER_OF: "memberof",
+} as const;
+
 /** One row of {@link ROLE_ATTRIBUTES_QUERY}, parsed and typed. */
 export interface IParsedRoleRow {
   readonly name: string;
@@ -50,17 +80,15 @@ export interface IParsedRoleRow {
   readonly inherits: boolean;
   readonly connectionLimit: number;
   readonly bypassesRls: boolean;
-  readonly memberOf: string;
+  readonly memberOf: ReadonlyArray<string>;
 }
 
-/**
- * Parse a `psql -tAc` boolean cell (`t`/`f`) into a JavaScript boolean.
- *
- * @param value - Raw cell value
- * @returns True only when the cell is exactly "t"
- */
-function parsePsqlBoolean(value: string): boolean {
-  return value === "t";
+/** Parsed roles, plus a warning for every row that could not be read. */
+export interface IRoleRowsResult {
+  /** Rows that parsed cleanly. */
+  readonly roles: ReadonlyArray<IParsedRoleRow>;
+  /** One line per unreadable row; never empty when a row was skipped. */
+  readonly warnings: ReadonlyArray<string>;
 }
 
 /**
@@ -74,57 +102,117 @@ function toPsqlBoolean(value: boolean): string {
 }
 
 /**
- * Parse one pipe-delimited row from {@link ROLE_ATTRIBUTES_QUERY}.
+ * Render role memberships the way psql prints a `text[]`, for report output.
  *
- * @param line - Raw line of `psql -tAc` output
- * @returns The parsed row, or null when the line is malformed
+ * @param memberOf - Roles this role is a member of
+ * @returns The memberships in `{a,b}` form
  */
-function parseRoleRow(line: string): IParsedRoleRow | null {
-  const fields = line.split("|");
-  if (fields.length !== ROLE_ATTRIBUTES_COLUMN_COUNT) {
-    return null;
+function toPsqlArray(memberOf: ReadonlyArray<string>): string {
+  return `{${memberOf.join(",")}}`;
+}
+
+/**
+ * Name a row in a warning, using its role name when that much was readable.
+ *
+ * @param index - Zero-based position in the result
+ * @param name - Role name, when it could be read
+ * @returns A phrase identifying the row to an operator
+ */
+function describeRow(index: number, name: string | undefined): string {
+  return name === undefined ? `${SUBJECT} row ${index + 1}` : `role "${name}"`;
+}
+
+/** A row that parsed, or the reason it did not. */
+type RoleRowOutcome = { readonly role: IParsedRoleRow } | { readonly warning: string };
+
+/**
+ * Parse one row of {@link ROLE_ATTRIBUTES_QUERY}.
+ *
+ * @param row - One object from the query's JSON output
+ * @param index - Zero-based position in the result, for the warning
+ * @returns The parsed row, or a warning naming the row and its bad columns
+ */
+function parseRoleRow(row: Record<string, unknown>, index: number): RoleRowOutcome {
+  const name = readString(row, ROLE_COLUMNS.NAME);
+  const canLogin = readBoolean(row, ROLE_COLUMNS.CAN_LOGIN);
+  const isSuperuser = readBoolean(row, ROLE_COLUMNS.IS_SUPERUSER);
+  const canCreateDb = readBoolean(row, ROLE_COLUMNS.CAN_CREATE_DB);
+  const canCreateRole = readBoolean(row, ROLE_COLUMNS.CAN_CREATE_ROLE);
+  const inherits = readBoolean(row, ROLE_COLUMNS.INHERITS);
+  const connectionLimit = readNumber(row, ROLE_COLUMNS.CONNECTION_LIMIT);
+  const bypassesRls = readBoolean(row, ROLE_COLUMNS.BYPASSES_RLS);
+  const memberOf = readStringArray(row, ROLE_COLUMNS.MEMBER_OF);
+
+  const unreadable: ReadonlyArray<readonly [string, unknown]> = [
+    [ROLE_COLUMNS.NAME, name],
+    [ROLE_COLUMNS.CAN_LOGIN, canLogin],
+    [ROLE_COLUMNS.IS_SUPERUSER, isSuperuser],
+    [ROLE_COLUMNS.CAN_CREATE_DB, canCreateDb],
+    [ROLE_COLUMNS.CAN_CREATE_ROLE, canCreateRole],
+    [ROLE_COLUMNS.INHERITS, inherits],
+    [ROLE_COLUMNS.CONNECTION_LIMIT, connectionLimit],
+    [ROLE_COLUMNS.BYPASSES_RLS, bypassesRls],
+    [ROLE_COLUMNS.MEMBER_OF, memberOf],
+  ];
+
+  if (
+    name === undefined ||
+    canLogin === undefined ||
+    isSuperuser === undefined ||
+    canCreateDb === undefined ||
+    canCreateRole === undefined ||
+    inherits === undefined ||
+    connectionLimit === undefined ||
+    bypassesRls === undefined ||
+    memberOf === undefined
+  ) {
+    const columns = unreadable
+      .filter(([, value]) => value === undefined)
+      .map(([column]) => column)
+      .join(", ");
+    return {
+      warning:
+        `${describeRow(index, name)}: could not read ${columns} from the ${SUBJECT} query ` +
+        "output, so this role was NOT checked against the adoption baseline.",
+    };
   }
-  const [
-    name,
-    canLogin,
-    isSuperuser,
-    canCreateDb,
-    canCreateRole,
-    inherits,
-    connlimit,
-    bypassrls,
-    memberOf,
-  ] = fields;
-  if (!name) {
-    return null;
-  }
-  const connectionLimit = Number(connlimit);
-  if (Number.isNaN(connectionLimit)) {
-    return null;
-  }
+
   return {
-    name,
-    canLogin: parsePsqlBoolean(canLogin ?? ""),
-    isSuperuser: parsePsqlBoolean(isSuperuser ?? ""),
-    canCreateDb: parsePsqlBoolean(canCreateDb ?? ""),
-    canCreateRole: parsePsqlBoolean(canCreateRole ?? ""),
-    inherits: parsePsqlBoolean(inherits ?? ""),
-    connectionLimit,
-    bypassesRls: parsePsqlBoolean(bypassrls ?? ""),
-    memberOf: memberOf ?? "",
+    role: {
+      name,
+      canLogin,
+      isSuperuser,
+      canCreateDb,
+      canCreateRole,
+      inherits,
+      connectionLimit,
+      bypassesRls,
+      memberOf,
+    },
   };
 }
 
 /**
- * Parse every row returned by {@link ROLE_ATTRIBUTES_QUERY}.
+ * Parse every row returned by {@link ROLE_ATTRIBUTES_JSON_QUERY}.
  *
- * @param stdout - Raw `psql -tAc` output, one row per line
- * @returns Successfully parsed role rows (malformed lines are dropped)
+ * @param stdout - Raw `psql -tAc` output of the JSON-wrapped query
+ * @returns The roles that parsed, and a warning for every row that did not
  */
-export function parseRoleRows(stdout: string): IParsedRoleRow[] {
-  return splitNonEmptyLines(stdout)
-    .map(parseRoleRow)
-    .filter((row): row is IParsedRoleRow => row !== null);
+export function parseRoleRows(stdout: string): IRoleRowsResult {
+  const parsed = parseJsonRows(stdout, SUBJECT);
+  const roles: IParsedRoleRow[] = [];
+  const warnings: string[] = [...parsed.warnings];
+
+  parsed.rows.forEach((row: Record<string, unknown>, index: number) => {
+    const outcome = parseRoleRow(row, index);
+    if ("role" in outcome) {
+      roles.push(outcome.role);
+      return;
+    }
+    warnings.push(outcome.warning);
+  });
+
+  return { roles, warnings };
 }
 
 /**
@@ -144,7 +232,7 @@ export function roleMatchesBaseline(role: IParsedRoleRow): boolean {
     role.inherits === true &&
     role.connectionLimit === -1 &&
     role.bypassesRls === false &&
-    role.memberOf === "{}"
+    role.memberOf.length === 0
   );
 }
 
@@ -159,7 +247,7 @@ export function describeRoleDeviation(role: IParsedRoleRow): string {
     `login=${toPsqlBoolean(role.canLogin)} super=${toPsqlBoolean(role.isSuperuser)} ` +
     `createdb=${toPsqlBoolean(role.canCreateDb)} createrole=${toPsqlBoolean(role.canCreateRole)} ` +
     `inherit=${toPsqlBoolean(role.inherits)} connlimit=${role.connectionLimit} ` +
-    `bypassrls=${toPsqlBoolean(role.bypassesRls)} memberof=${role.memberOf}`;
+    `bypassrls=${toPsqlBoolean(role.bypassesRls)} memberof=${toPsqlArray(role.memberOf)}`;
   return (
     `role "${role.name}": ${actual} ` +
     `(baseline: login=t super=f createdb=f createrole=f inherit=t connlimit=-1 bypassrls=f memberof={})`

@@ -90,7 +90,7 @@ Then confirm database ownership already matches what nimbus assigns, so the
 
 ```bash
 kubectl exec -n data <cluster>-1 -- psql -tAc "
-  SELECT d.datname, pg_get_userbyid(d.datdba)
+  SELECT d.datname, pg_get_userbyid(d.datdba) AS owner
   FROM pg_database d WHERE NOT d.datistemplate ORDER BY 1"
 ```
 

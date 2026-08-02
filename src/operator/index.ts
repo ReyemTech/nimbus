@@ -181,6 +181,59 @@ export function createOperator(
         { provider, dependsOn: [ns, ...operatorDeps] }
       );
 
+  // CNPG's admission webhooks ship with timeouts tuned for a control plane
+  // co-located with the cluster: 10s mutating, 15s validating, both with
+  // failurePolicy: Fail. On a hosted control plane — Rackspace Spot, for
+  // instance, where the API server runs outside the cluster and every
+  // admission call has to tunnel back in through konnectivity — that round
+  // trip costs seconds rather than milliseconds.
+  //
+  // Measured on iad-1, ten consecutive mcluster.cnpg.io probes: 2.0s, 2.2s,
+  // 3.0s, 3.1s, 3.4s, 4.7s, 6.5s, 7.2s, 7.8s, 10.2s. One in ten already
+  // exceeded the 10s ceiling while the operator sat idle at 8 millicores, so
+  // it is the network path that is slow, not the operator. Concurrent
+  // admission — a Pulumi preview dry-running several resources at once —
+  // pushes more of them over, and with failurePolicy: Fail that aborts the
+  // run partway through an update.
+  //
+  // The chart exposes only webhook.{mutating,validating}.{create,failurePolicy},
+  // not timeoutSeconds, so this cannot be expressed through Helm values. Patch
+  // the field instead: `webhooks` is a listType=map keyed by `name`, so each
+  // entry merges by key and no other field of the configuration is touched.
+  // In particular failurePolicy stays Fail — nothing bypasses admission.
+  if (type === "cloudnative-pg" && !skipOperatorInstall) {
+    const webhookTimeoutSeconds = 30;
+
+    new k8s.admissionregistration.v1.MutatingWebhookConfigurationPatch(
+      `${type}-mutating-webhook-timeout`,
+      {
+        metadata: { name: "cnpg-mutating-webhook-configuration" },
+        webhooks: [
+          "mbackup.cnpg.io",
+          "mcluster.cnpg.io",
+          "mdatabase.cnpg.io",
+          "mscheduledbackup.cnpg.io",
+        ].map((name) => ({ name, timeoutSeconds: webhookTimeoutSeconds })),
+      },
+      { provider, dependsOn: [helmRelease], retainOnDelete: true }
+    );
+
+    new k8s.admissionregistration.v1.ValidatingWebhookConfigurationPatch(
+      `${type}-validating-webhook-timeout`,
+      {
+        metadata: { name: "cnpg-validating-webhook-configuration" },
+        webhooks: [
+          "vbackup.cnpg.io",
+          "vcluster.cnpg.io",
+          "vdatabase.cnpg.io",
+          "vpooler.cnpg.io",
+          "vscheduledbackup.cnpg.io",
+        ].map((name) => ({ name, timeoutSeconds: webhookTimeoutSeconds })),
+      },
+      { provider, dependsOn: [helmRelease], retainOnDelete: true }
+    );
+  }
+
   // MinIO returns a different operator shape (createBucket instead of createCluster)
   if (type === "minio") {
     return createMinioOperator(config, helmRelease);

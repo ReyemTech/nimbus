@@ -1,3 +1,10 @@
+## [3.1.1](https://github.com/ReyemTech/nimbus/compare/v3.1.0...v3.1.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **edge:** create Route 53 aliases ([ed22697](https://github.com/ReyemTech/nimbus/commit/ed22697777646a9035a1fe5bb8afd6a8ae15e6c8))
+
 # [3.1.0](https://github.com/ReyemTech/nimbus/compare/v3.0.0...v3.1.0) (2026-08-14)
 
 

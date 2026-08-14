@@ -20,3 +20,4 @@ export { createCluster, type ICreateClusterConfig } from "./cluster";
 export { createDns, type ICreateDnsConfig } from "./dns";
 export { createSecrets, type ICreateSecretsConfig } from "./secrets";
 export { createStateBackend, type ICreateStateBackendConfig } from "./state";
+export { createCdn } from "./cdn";

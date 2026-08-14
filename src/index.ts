@@ -90,6 +90,20 @@ export {
 export type { DnsRecordType, IDnsRecord, IDnsConfig, IDns } from "./dns";
 export { DNS_RECORD_TYPES } from "./dns";
 
+// CDN
+export type { ICdn, ICdnConfig, IEdgeDistributionConfig } from "./cdn";
+
+// Edge trust
+export type {
+  EdgeHeaders,
+  EdgeProvider,
+  IEdgeHeaderNames,
+  IEdgeTrustConfig,
+  IEdgeTrustVerdict,
+  EdgeHeaderPreset,
+} from "./edge";
+export { EDGE_HEADER_PRESETS, parseEdgeClientIp, verifyEdgeHeaders } from "./edge";
+
 // Secrets
 export type { SecretBackend, ISecretRef, ISecretsConfig, ISecrets } from "./secrets";
 export { SECRET_BACKENDS } from "./secrets";
@@ -273,6 +287,7 @@ export {
   createDns,
   createSecrets,
   createStateBackend,
+  createCdn,
   type ICreateNetworkConfig,
   type ICreateClusterConfig,
   type ICreateDnsConfig,

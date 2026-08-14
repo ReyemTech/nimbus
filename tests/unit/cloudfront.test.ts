@@ -9,6 +9,7 @@ interface IConstructedResource {
 
 const originRequestPolicies: IConstructedResource[] = [];
 const distributions: IConstructedResource[] = [];
+const aliases: IConstructedResource[] = [];
 
 vi.mock("@pulumi/aws", () => ({
   cloudfront: {
@@ -27,6 +28,15 @@ vi.mock("@pulumi/aws", () => ({
       }
     },
   },
+  route53: {
+    Record: class {
+      readonly fqdn = "www.reyem.tech";
+
+      constructor(name: string, args: Record<string, unknown>) {
+        aliases.push({ name, args });
+      }
+    },
+  },
 }));
 
 import { createAwsCloudFront } from "../../src/aws/cloudfront";
@@ -35,11 +45,13 @@ import { createCdn } from "../../src/factories/cdn";
 beforeEach(() => {
   originRequestPolicies.length = 0;
   distributions.length = 0;
+  aliases.length = 0;
 });
 
 describe("createAwsCloudFront", () => {
   const config = {
     cloud: "aws" as const,
+    hostedZoneId: "Z0123456789EXAMPLE",
     originSecretHeader: "X-Reyem-Origin-Trial",
     originSecretValue: "origin-secret",
     distributions: [
@@ -88,6 +100,43 @@ describe("createAwsCloudFront", () => {
     });
   });
 
+  it("creates IPv4 and IPv6 Route 53 aliases for every distribution", () => {
+    createAwsCloudFront("prod", config);
+
+    expect(aliases).toEqual([
+      {
+        name: "prod-www-reyem-tech-a",
+        args: {
+          zoneId: "Z0123456789EXAMPLE",
+          name: "www.reyem.tech",
+          type: "A",
+          aliases: [
+            {
+              name: "distribution.cloudfront.net",
+              zoneId: "Z2FDTNDATAQYW2",
+              evaluateTargetHealth: false,
+            },
+          ],
+        },
+      },
+      {
+        name: "prod-www-reyem-tech-aaaa",
+        args: {
+          zoneId: "Z0123456789EXAMPLE",
+          name: "www.reyem.tech",
+          type: "AAAA",
+          aliases: [
+            {
+              name: "distribution.cloudfront.net",
+              zoneId: "Z2FDTNDATAQYW2",
+              evaluateTargetHealth: false,
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   it("rejects headers CloudFront or Traefik cannot safely carry", () => {
     expect(() =>
       createAwsCloudFront("prod", { ...config, clientHostHeader: "X-Forwarded-Host" })
@@ -118,6 +167,7 @@ describe("createCdn", () => {
   it("accepts AWS as the only supported CDN provider", () => {
     const cdn = createCdn("prod", {
       cloud: "aws",
+      hostedZoneId: "Z0123456789EXAMPLE",
       originSecretHeader: "X-Reyem-Origin-Trial",
       originSecretValue: "origin-secret",
       distributions: [
@@ -134,6 +184,7 @@ describe("createCdn", () => {
 
   it("rejects unsupported and multi-cloud CDN configurations", () => {
     const config = {
+      hostedZoneId: "Z0123456789EXAMPLE",
       originSecretHeader: "X-Reyem-Origin-Trial",
       originSecretValue: "origin-secret",
       distributions: [

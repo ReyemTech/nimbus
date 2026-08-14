@@ -91,7 +91,7 @@ export type { DnsRecordType, IDnsRecord, IDnsConfig, IDns } from "./dns";
 export { DNS_RECORD_TYPES } from "./dns";
 
 // CDN
-export type { ICdn, ICdnConfig, IEdgeDistributionConfig } from "./cdn";
+export type { ICdn, ICdnConfig, IEdgeAliasRecords, IEdgeDistributionConfig } from "./cdn";
 
 // Edge trust
 export type {

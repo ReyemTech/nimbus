@@ -5,6 +5,7 @@
  */
 
 import * as aws from "@pulumi/aws";
+import type * as pulumi from "@pulumi/pulumi";
 import type { ICdn, ICdnConfig } from "../cdn";
 import { ConfigError, resolveCloudTarget } from "../types";
 
@@ -84,12 +85,65 @@ export function createAwsCloudFront(name: string, config: ICdnConfig): ICdn {
     })
   );
 
+  const aliases = Object.fromEntries(
+    config.distributions.map((distribution) => {
+      const resourceName = `${name}-${toResourceName(distribution.hostname)}`;
+      const cloudFrontDistribution = distributions[distribution.hostname];
+      if (!cloudFrontDistribution) {
+        throw new ConfigError(
+          `CloudFront distribution for "${distribution.hostname}" was not created`,
+          "CONFIG_INVALID",
+          "distributions"
+        );
+      }
+
+      const a = createAliasRecord(
+        `${resourceName}-a`,
+        distribution.hostname,
+        "A",
+        config.hostedZoneId,
+        cloudFrontDistribution
+      );
+      const aaaa = createAliasRecord(
+        `${resourceName}-aaaa`,
+        distribution.hostname,
+        "AAAA",
+        config.hostedZoneId,
+        cloudFrontDistribution
+      );
+
+      return [distribution.hostname, { a: a.fqdn, aaaa: aaaa.fqdn }];
+    })
+  );
+
   return {
     name,
     cloud: target,
     distributions,
+    aliases,
     nativeResource: originRequestPolicy,
   };
+}
+
+function createAliasRecord(
+  resourceName: string,
+  hostname: string,
+  type: "A" | "AAAA",
+  zoneId: pulumi.Input<string>,
+  distributionDomainName: pulumi.Input<string>
+): aws.route53.Record {
+  return new aws.route53.Record(resourceName, {
+    zoneId,
+    name: hostname,
+    type,
+    aliases: [
+      {
+        name: distributionDomainName,
+        zoneId: "Z2FDTNDATAQYW2",
+        evaluateTargetHealth: false,
+      },
+    ],
+  });
 }
 
 function validateConfig(config: ICdnConfig, clientHostHeader: string): void {

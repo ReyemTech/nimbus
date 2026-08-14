@@ -21,6 +21,8 @@ export interface IEdgeDistributionConfig {
 export interface ICdnConfig {
   /** Cloud provider target. CloudFront is currently AWS-only. */
   readonly cloud: CloudArg;
+  /** Route 53 public hosted zone ID for the distribution aliases. */
+  readonly hostedZoneId: pulumi.Input<string>;
   /** Header name used by the origin application to authenticate the edge. */
   readonly originSecretHeader: string;
   /** Secret injected into every distribution origin request. */
@@ -33,6 +35,14 @@ export interface ICdnConfig {
   readonly tags?: Readonly<Record<string, string>>;
 }
 
+/** Route 53 alias records for one public CloudFront hostname. */
+export interface IEdgeAliasRecords {
+  /** IPv4 Route 53 alias record FQDN. */
+  readonly a: pulumi.Output<string>;
+  /** IPv6 Route 53 alias record FQDN. */
+  readonly aaaa: pulumi.Output<string>;
+}
+
 /** A provisioned trusted-edge CDN. */
 export interface ICdn {
   /** Logical resource name. */
@@ -41,6 +51,8 @@ export interface ICdn {
   readonly cloud: ResolvedCloudTarget;
   /** CloudFront distributions keyed by hostname. */
   readonly distributions: Readonly<Record<string, pulumi.Output<string>>>;
+  /** Route 53 public aliases keyed by hostname. */
+  readonly aliases: Readonly<Record<string, IEdgeAliasRecords>>;
   /** Escape hatch: the shared CloudFront origin request policy. */
   readonly nativeResource: pulumi.Resource;
 }

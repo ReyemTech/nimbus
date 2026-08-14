@@ -4,4 +4,4 @@
  * @module cdn
  */
 
-export type { ICdn, ICdnConfig, IEdgeDistributionConfig } from "./interfaces";
+export type { ICdn, ICdnConfig, IEdgeAliasRecords, IEdgeDistributionConfig } from "./interfaces";

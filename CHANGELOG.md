@@ -1,3 +1,10 @@
+# [3.1.0](https://github.com/ReyemTech/nimbus/compare/v3.0.0...v3.1.0) (2026-08-14)
+
+
+### Features
+
+* **edge:** add trusted CloudFront support ([c7a6bb5](https://github.com/ReyemTech/nimbus/commit/c7a6bb53c3bcac90713822c0bc82c535c17c772e))
+
 # [3.0.0](https://github.com/ReyemTech/nimbus/compare/v2.12.6...v3.0.0) (2026-07-31)
 
 

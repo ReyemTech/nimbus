@@ -1,3 +1,10 @@
+## [3.1.2](https://github.com/ReyemTech/nimbus/compare/v3.1.1...v3.1.2) (2026-08-15)
+
+
+### Bug Fixes
+
+* **edge:** allow dynamic request methods ([d702a88](https://github.com/ReyemTech/nimbus/commit/d702a88f2a409e70cdd04b68f107725e2200cf15))
+
 ## [3.1.1](https://github.com/ReyemTech/nimbus/compare/v3.1.0...v3.1.1) (2026-08-14)
 
 

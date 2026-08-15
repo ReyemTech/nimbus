@@ -87,6 +87,10 @@ describe("createAwsCloudFront", () => {
     expect(distributions).toHaveLength(1);
     expect(distributions[0]?.args).toMatchObject({
       aliases: ["www.reyem.tech"],
+      defaultCacheBehavior: {
+        allowedMethods: ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+        cachedMethods: ["GET", "HEAD"],
+      },
       origins: [
         {
           domainName: "origin.reyem.tech",

@@ -13,6 +13,8 @@ const DEFAULT_CLIENT_HOST_HEADER = "X-Reyem-Client-Host";
 const FORWARDED_HEADER_PREFIX = "x-forwarded-";
 const RESERVED_HEADER_PREFIX = "x-edge-";
 const MANAGED_CACHING_OPTIMIZED_POLICY_ID = "658327ea-f89d-4fab-a63d-7e88639e58f6";
+const DEFAULT_ALLOWED_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"];
+const DEFAULT_CACHED_METHODS = ["GET", "HEAD"];
 
 /**
  * Create one CloudFront distribution per public hostname for a trusted edge.
@@ -64,8 +66,8 @@ export function createAwsCloudFront(name: string, config: ICdnConfig): ICdn {
           },
         ],
         defaultCacheBehavior: {
-          allowedMethods: ["GET", "HEAD", "OPTIONS"],
-          cachedMethods: ["GET", "HEAD"],
+          allowedMethods: DEFAULT_ALLOWED_METHODS,
+          cachedMethods: DEFAULT_CACHED_METHODS,
           cachePolicyId: MANAGED_CACHING_OPTIMIZED_POLICY_ID,
           originRequestPolicyId: originRequestPolicy.id,
           targetOriginId: originId,

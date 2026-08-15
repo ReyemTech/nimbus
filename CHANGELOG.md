@@ -1,3 +1,10 @@
+## [3.1.3](https://github.com/ReyemTech/nimbus/compare/v3.1.2...v3.1.3) (2026-08-15)
+
+
+### Bug Fixes
+
+* **edge:** support CloudFront web ACLs ([22f22b3](https://github.com/ReyemTech/nimbus/commit/22f22b3530fd566a7170ba6395a91d8ff805c4ce))
+
 ## [3.1.2](https://github.com/ReyemTech/nimbus/compare/v3.1.1...v3.1.2) (2026-08-15)
 
 

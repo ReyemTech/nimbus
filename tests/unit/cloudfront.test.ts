@@ -52,6 +52,7 @@ describe("createAwsCloudFront", () => {
   const config = {
     cloud: "aws" as const,
     hostedZoneId: "Z0123456789EXAMPLE",
+    webAclArn: "arn:aws:wafv2:us-east-1:123456789012:global/webacl/shared/example",
     originSecretHeader: "X-Reyem-Origin-Trial",
     originSecretValue: "origin-secret",
     distributions: [
@@ -87,6 +88,7 @@ describe("createAwsCloudFront", () => {
     expect(distributions).toHaveLength(1);
     expect(distributions[0]?.args).toMatchObject({
       aliases: ["www.reyem.tech"],
+      webAclId: "arn:aws:wafv2:us-east-1:123456789012:global/webacl/shared/example",
       defaultCacheBehavior: {
         allowedMethods: ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
         cachedMethods: ["GET", "HEAD"],

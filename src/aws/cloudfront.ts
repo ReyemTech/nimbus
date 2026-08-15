@@ -75,6 +75,7 @@ export function createAwsCloudFront(name: string, config: ICdnConfig): ICdn {
         },
         priceClass: "PriceClass_100",
         restrictions: { geoRestriction: { restrictionType: "none" } },
+        webAclId: config.webAclArn,
         viewerCertificate: {
           acmCertificateArn: distribution.certificateArn,
           minimumProtocolVersion: "TLSv1.2_2021",

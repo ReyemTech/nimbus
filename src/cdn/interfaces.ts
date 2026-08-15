@@ -23,6 +23,8 @@ export interface ICdnConfig {
   readonly cloud: CloudArg;
   /** Route 53 public hosted zone ID for the distribution aliases. */
   readonly hostedZoneId: pulumi.Input<string>;
+  /** Optional global WAF web ACL ARN associated with every distribution. */
+  readonly webAclArn?: pulumi.Input<string>;
   /** Header name used by the origin application to authenticate the edge. */
   readonly originSecretHeader: string;
   /** Secret injected into every distribution origin request. */

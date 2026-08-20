@@ -60,6 +60,13 @@ describe("createAwsCloudFront", () => {
         hostname: "www.reyem.tech",
         originDomainName: "origin.reyem.tech",
         certificateArn: "arn:aws:acm:us-east-1:123456789012:certificate/example",
+        orderedCacheBehaviors: [
+          {
+            pathPattern: "/booking-confirmed*",
+            cachePolicyId: "4135ea2d-6df8-44a3-9df3-4b5e77f2f582",
+            originRequestPolicyId: "0887d865-4f00-4e99-a2c8-5c2e2b8ee5a7",
+          },
+        ],
       },
     ],
   };
@@ -93,6 +100,17 @@ describe("createAwsCloudFront", () => {
         allowedMethods: ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
         cachedMethods: ["GET", "HEAD"],
       },
+      orderedCacheBehaviors: [
+        {
+          allowedMethods: ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+          cachedMethods: ["GET", "HEAD"],
+          cachePolicyId: "4135ea2d-6df8-44a3-9df3-4b5e77f2f582",
+          originRequestPolicyId: "0887d865-4f00-4e99-a2c8-5c2e2b8ee5a7",
+          pathPattern: "/booking-confirmed*",
+          targetOriginId: "prod-www-reyem-tech-origin",
+          viewerProtocolPolicy: "redirect-to-https",
+        },
+      ],
       origins: [
         {
           domainName: "origin.reyem.tech",

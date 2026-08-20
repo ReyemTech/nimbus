@@ -7,6 +7,16 @@
 import type * as pulumi from "@pulumi/pulumi";
 import type { CloudArg, ResolvedCloudTarget } from "../types";
 
+/** An ordered CloudFront behavior for a path with distinct cache semantics. */
+export interface IEdgeOrderedCacheBehavior {
+  /** CloudFront path pattern, for example `/booking-confirmed*`. */
+  readonly pathPattern: string;
+  /** Cache policy ID, including an AWS managed policy or an IaC-created custom policy. */
+  readonly cachePolicyId: pulumi.Input<string>;
+  /** Optional origin request policy ID. Defaults to Nimbus's trusted-edge policy. */
+  readonly originRequestPolicyId?: pulumi.Input<string>;
+}
+
 /** A hostname-specific CloudFront distribution configuration. */
 export interface IEdgeDistributionConfig {
   /** Public hostname served by this distribution. */
@@ -15,6 +25,8 @@ export interface IEdgeDistributionConfig {
   readonly originDomainName: string;
   /** ACM certificate ARN for the public hostname. */
   readonly certificateArn: pulumi.Input<string>;
+  /** Path-specific CloudFront behaviors evaluated before the default behavior. */
+  readonly orderedCacheBehaviors?: ReadonlyArray<IEdgeOrderedCacheBehavior>;
 }
 
 /** Configuration for the trusted-edge CloudFront distributions. */

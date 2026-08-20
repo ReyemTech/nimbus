@@ -1,3 +1,10 @@
+## [3.2.1](https://github.com/ReyemTech/nimbus/compare/v3.2.0...v3.2.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **operator:** avoid credential reads during preview ([f5f57f9](https://github.com/ReyemTech/nimbus/commit/f5f57f91a50c951990f88f811531c6e2d7cc6ba3))
+
 # [3.2.0](https://github.com/ReyemTech/nimbus/compare/v3.1.3...v3.2.0) (2026-08-20)
 
 

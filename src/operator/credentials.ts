@@ -80,17 +80,27 @@ export function createRoleCredentials(options: IRoleCredentialOptions): IRoleCre
     }
   );
 
-  const storedSecret = k8s.core.v1.Secret.get(
-    `${options.resourceName}-read`,
-    pulumi.interpolate`${options.namespace}/${options.secretName}`,
-    { provider: options.provider, dependsOn: [userSecret] }
-  );
-
-  const stablePassword = storedSecret.data.apply((d) =>
-    Buffer.from(d?.["password"] ?? "", "base64").toString()
-  );
+  // A Kubernetes `get` is a live read even during preview. On first preview the
+  // managed Secret has not been created yet, so derive an unknown-but-correct
+  // password from its output instead. Actual updates retain the read-back's
+  // established logical name and state for existing stacks.
+  const stablePassword = pulumi.runtime.isDryRun()
+    ? decodePassword(userSecret.data)
+    : decodePassword(
+        k8s.core.v1.Secret.get(
+          `${options.resourceName}-read`,
+          pulumi.interpolate`${options.namespace}/${options.secretName}`,
+          { provider: options.provider, dependsOn: [userSecret] }
+        ).data
+      );
 
   return { userSecret, stablePassword, secretName: options.secretName };
+}
+
+function decodePassword(
+  data: pulumi.Output<Record<string, string> | undefined>
+): pulumi.Output<string> {
+  return data.apply((values) => Buffer.from(values?.["password"] ?? "", "base64").toString());
 }
 
 /** Options for {@link replicateConnectionSecrets}. */

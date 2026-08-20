@@ -1,3 +1,10 @@
+# [3.2.0](https://github.com/ReyemTech/nimbus/compare/v3.1.3...v3.2.0) (2026-08-20)
+
+
+### Features
+
+* **edge:** support ordered cache behaviors ([56037c0](https://github.com/ReyemTech/nimbus/commit/56037c059daa6c6d58b49da61f686226eaae66ab))
+
 ## [3.1.3](https://github.com/ReyemTech/nimbus/compare/v3.1.2...v3.1.3) (2026-08-15)
 
 

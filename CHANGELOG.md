@@ -1,3 +1,10 @@
+# [3.6.0](https://github.com/ReyemTech/nimbus/compare/v3.5.1...v3.6.0) (2026-09-02)
+
+
+### Features
+
+* **platform:** classify ReplicaSet vulnerability reports ([fda36e4](https://github.com/ReyemTech/nimbus/commit/fda36e4bb79c02eddda65455622f8f32db9763c3))
+
 ## [3.5.1](https://github.com/ReyemTech/nimbus/compare/v3.5.0...v3.5.1) (2026-09-02)
 
 

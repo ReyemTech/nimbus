@@ -16,4 +16,5 @@ export { deployExternalSecrets } from "./external-secrets";
 export { deployOAuth2Proxy } from "./oauth2-proxy";
 export { deployDescheduler } from "./descheduler";
 export { deployTrivyOperator } from "./trivy-operator";
+export { createTrivyExposureClassifier } from "./trivy-exposure-classifier";
 export { createImagePruner } from "./image-pruner";

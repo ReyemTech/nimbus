@@ -169,10 +169,22 @@ export interface IPlatformStackConfig {
   /** Continuous workload image, SBOM, secret, and Kubernetes configuration scanning. */
   readonly trivyOperator?: IPlatformComponentConfig;
 
+  /** Prometheus exporter that labels Trivy findings by Service/Ingress exposure. */
+  readonly trivyExposureClassifier?: ITrivyExposureClassifierConfig;
+
   /** Per-node image cache pruner. Default: { enabled: true, intervalSeconds: 21600 }. */
   readonly imagePruner?: IImagePrunerConfig;
 
   readonly tags?: Readonly<Record<string, string>>;
+}
+
+/** Configuration for the in-cluster Trivy VulnerabilityReport exposure classifier. */
+export interface ITrivyExposureClassifierConfig {
+  readonly enabled?: boolean;
+  readonly namespace?: string;
+  readonly image?: string;
+  readonly intervalSeconds?: number;
+  readonly serviceMonitorLabels?: Readonly<Record<string, string>>;
 }
 
 /**

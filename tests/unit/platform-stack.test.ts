@@ -32,6 +32,14 @@ let createdIamPolicies: Array<{ name: string; args: any }>;
 let createdIamAccessKeys: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdDaemonSets: Array<{ name: string; args: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdDeployments: Array<{ name: string; args: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdConfigMaps: Array<{ name: string; args: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdClusterRoles: Array<{ name: string; args: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdCustomResourcesForAssertions: Array<{ name: string; args: any }>;
 
 // Mock @pulumi/aws
 vi.mock("@pulumi/aws", () => {
@@ -89,6 +97,7 @@ vi.mock("@pulumi/kubernetes", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(name: string, args: any, _opts?: any) {
       createdCustomResources.push({ name, args });
+      createdCustomResourcesForAssertions.push({ name, args });
     }
   };
 
@@ -117,7 +126,20 @@ vi.mock("@pulumi/kubernetes", () => {
   };
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
-  const mockConfigMap = class {};
+  const mockDeployment = class {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, args: any, _opts?: any) {
+      createdDeployments.push({ name, args });
+    }
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockConfigMap = class {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, args: any, _opts?: any) {
+      createdConfigMaps.push({ name, args });
+    }
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockNamespace = class {};
@@ -129,6 +151,14 @@ vi.mock("@pulumi/kubernetes", () => {
   const mockClusterRoleBinding = class {};
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockClusterRole = class {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, args: any, _opts?: any) {
+      createdClusterRoles.push({ name, args });
+    }
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockRole = class {};
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
@@ -137,11 +167,15 @@ vi.mock("@pulumi/kubernetes", () => {
   return {
     helm: { v3: { Release: mockRelease } },
     apiextensions: { CustomResource: mockCustomResource },
-    apps: { v1: { DaemonSet: mockDaemonSet } },
+    apps: { v1: { DaemonSet: mockDaemonSet, Deployment: mockDeployment } },
     core: {
       v1: {
         Secret: mockSecret,
         ConfigMap: mockConfigMap,
+        // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+        ServiceAccount: class {},
+        // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+        Service: class {},
         Namespace: mockNamespace,
         LimitRange: mockLimitRange,
       },
@@ -150,6 +184,7 @@ vi.mock("@pulumi/kubernetes", () => {
     rbac: {
       v1: {
         ClusterRoleBinding: mockClusterRoleBinding,
+        ClusterRole: mockClusterRole,
         Role: mockRole,
         RoleBinding: mockRoleBinding,
       },
@@ -194,6 +229,10 @@ beforeEach(() => {
   createdIamPolicies = [];
   createdIamAccessKeys = [];
   createdDaemonSets = [];
+  createdDeployments = [];
+  createdConfigMaps = [];
+  createdClusterRoles = [];
+  createdCustomResourcesForAssertions = [];
 });
 
 describe("platform stack — descheduler", () => {
@@ -297,6 +336,51 @@ describe("platform stack — Trivy Operator", () => {
     });
 
     expect(createdReleases.find((r) => r.name.includes("trivy-operator"))).toBeUndefined();
+  });
+});
+
+describe("platform stack — Trivy exposure classifier", () => {
+  it("deploys a non-root read-only metrics exporter with read-only RBAC", () => {
+    const cluster = makeCluster("test");
+    createPlatformStack("test", {
+      cluster,
+      domain: "example.com",
+      traefik: { enabled: false },
+      certManager: { enabled: false },
+      trivyExposureClassifier: { enabled: true },
+    });
+
+    const deployment = createdDeployments.find((resource) =>
+      resource.name.includes("trivy-exposure-classifier")
+    );
+    expect(deployment).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const pod = deployment!.args.spec.template.spec;
+    expect(pod.securityContext.runAsNonRoot).toBe(true);
+    expect(pod.containers[0].securityContext).toMatchObject({
+      allowPrivilegeEscalation: false,
+      readOnlyRootFilesystem: true,
+      capabilities: { drop: ["ALL"] },
+    });
+
+    expect(createdClusterRoles).toHaveLength(1);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(createdClusterRoles[0]!.args.rules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ resources: ["vulnerabilityreports"], verbs: ["get", "list"] }),
+        expect.objectContaining({ resources: ["services"], verbs: ["get", "list"] }),
+        expect.objectContaining({ resources: ["ingresses"], verbs: ["get", "list"] }),
+      ])
+    );
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(createdConfigMaps[0]!.args.data["classifier.js"]).toContain(
+      "nimbus_trivy_vulnerability_findings"
+    );
+    expect(
+      createdCustomResourcesForAssertions.find(
+        (resource) => resource.args.kind === "ServiceMonitor"
+      )
+    ).toBeDefined();
   });
 });
 

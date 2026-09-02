@@ -1,3 +1,10 @@
+# [3.4.0](https://github.com/ReyemTech/nimbus/compare/v3.3.0...v3.4.0) (2026-09-02)
+
+
+### Features
+
+* **observability:** add Trivy security dashboard ([33015ed](https://github.com/ReyemTech/nimbus/commit/33015edaae7b935fc0aabf41a23219bb4d5b5244))
+
 # [3.3.0](https://github.com/ReyemTech/nimbus/compare/v3.2.1...v3.3.0) (2026-09-02)
 
 

@@ -1,3 +1,10 @@
+## [3.5.1](https://github.com/ReyemTech/nimbus/compare/v3.5.0...v3.5.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **platform:** tolerate missing workload kinds ([8b48b7c](https://github.com/ReyemTech/nimbus/commit/8b48b7c66a04462227ce3bfb33b78fc1b42d8a21))
+
 # [3.5.0](https://github.com/ReyemTech/nimbus/compare/v3.4.0...v3.5.0) (2026-09-02)
 
 

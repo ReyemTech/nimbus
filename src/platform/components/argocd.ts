@@ -21,9 +21,7 @@ function mergeValues(
   const merged = { ...base };
   for (const [key, value] of Object.entries(overrides)) {
     const existing = merged[key];
-    merged[key] = isRecord(existing) && isRecord(value)
-      ? mergeValues(existing, value)
-      : value;
+    merged[key] = isRecord(existing) && isRecord(value) ? mergeValues(existing, value) : value;
   }
   return merged;
 }
@@ -45,40 +43,43 @@ export function deployArgocd(
       version: config.version ?? defaultVersion,
       namespace: "argocd",
       createNamespace: false,
-      values: mergeValues({
-        configs: {
-          params: { "server.insecure": true },
-        },
-        server: {
-          ingress: {
-            enabled: true,
-            ingressClassName: "traefik",
-            hostname: `argocd.${domain}`,
-            tls: true,
-            extraTls: [
-              {
-                secretName: `${domain.replace(/\./g, "-")}-wildcard-tls`,
-                hosts: [`argocd.${domain}`],
-              },
-            ],
-            annotations: {
-              "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
-            },
+      values: mergeValues(
+        {
+          configs: {
+            params: { "server.insecure": true },
           },
-          metrics: { enabled: true, serviceMonitor: { enabled: true } },
+          server: {
+            ingress: {
+              enabled: true,
+              ingressClassName: "traefik",
+              hostname: `argocd.${domain}`,
+              tls: true,
+              extraTls: [
+                {
+                  secretName: `${domain.replace(/\./g, "-")}-wildcard-tls`,
+                  hosts: [`argocd.${domain}`],
+                },
+              ],
+              annotations: {
+                "traefik.ingress.kubernetes.io/router.entrypoints": "websecure",
+              },
+            },
+            metrics: { enabled: true, serviceMonitor: { enabled: true } },
+          },
+          controller: {
+            metrics: { enabled: true, serviceMonitor: { enabled: true } },
+          },
+          repoServer: {
+            metrics: { enabled: true, serviceMonitor: { enabled: true } },
+          },
+          notifications: {
+            enabled: true,
+            cm: { create: false },
+            secret: { create: false },
+          },
         },
-        controller: {
-          metrics: { enabled: true, serviceMonitor: { enabled: true } },
-        },
-        repoServer: {
-          metrics: { enabled: true, serviceMonitor: { enabled: true } },
-        },
-        notifications: {
-          enabled: true,
-          cm: { create: false },
-          secret: { create: false },
-        },
-      }, config.values),
+        config.values
+      ),
     },
     { provider }
   );

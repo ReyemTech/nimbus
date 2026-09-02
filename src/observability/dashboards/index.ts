@@ -20,6 +20,7 @@ import { neo4jDashboard } from "./neo4j";
 import { minioDashboard } from "./minio";
 import { argocdDashboard } from "./argocd";
 import { alertsDashboard } from "./alerts";
+import { trivyDashboard } from "./trivy";
 export { lokiLogsDashboard } from "./loki";
 export { createCnpgClusterDashboard } from "./cnpg-cluster";
 export { createMariadbClusterDashboard } from "./mariadb-cluster";
@@ -53,6 +54,22 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
         namespaceSelector: { matchNames: ["cert-manager"] },
         selector: { matchLabels: { "app.kubernetes.io/name": "cert-manager" } },
         endpoints: [{ port: "tcp-prometheus-servicemonitor", interval: "30s" }],
+      },
+    },
+    { provider, dependsOn }
+  );
+
+  // Trivy Operator (cluster security reports exposed on the metrics service).
+  new k8s.apiextensions.CustomResource(
+    `${name}-sm-trivy-operator`,
+    {
+      apiVersion: "monitoring.coreos.com/v1",
+      kind: "ServiceMonitor",
+      metadata: { name: "trivy-operator", namespace, labels: { release: name } },
+      spec: {
+        namespaceSelector: { matchNames: ["trivy-system"] },
+        selector: { matchLabels: { "app.kubernetes.io/name": "trivy-operator" } },
+        endpoints: [{ port: "metrics", interval: "60s" }],
       },
     },
     { provider, dependsOn }
@@ -171,4 +188,12 @@ export function createDashboards(name: string, config: DashboardsConfig): void {
   createDashboardConfigMap(name, "neo4j", neo4jDashboard(), namespace, provider, dependsOn);
   createDashboardConfigMap(name, "minio", minioDashboard(), namespace, provider, dependsOn);
   createDashboardConfigMap(name, "alerts", alertsDashboard(), namespace, provider, dependsOn);
+  createDashboardConfigMap(
+    name,
+    "trivy-security",
+    trivyDashboard(),
+    namespace,
+    provider,
+    dependsOn
+  );
 }

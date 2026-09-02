@@ -1,3 +1,10 @@
+## [3.6.1](https://github.com/ReyemTech/nimbus/compare/v3.6.0...v3.6.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **platform:** merge Argo CD Helm values ([bfc5c66](https://github.com/ReyemTech/nimbus/commit/bfc5c66d78682f9143cdeab9630298f5ee209089))
+
 # [3.6.0](https://github.com/ReyemTech/nimbus/compare/v3.5.1...v3.6.0) (2026-09-02)
 
 

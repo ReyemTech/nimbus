@@ -1,3 +1,11 @@
+# [3.5.0](https://github.com/ReyemTech/nimbus/compare/v3.4.0...v3.5.0) (2026-09-02)
+
+
+### Features
+
+* **observability:** show Trivy exposure ([767fe45](https://github.com/ReyemTech/nimbus/commit/767fe4525c3edc47b64602d1a869bfad0f8b5efc))
+* **platform:** classify Trivy finding exposure ([ca7ad66](https://github.com/ReyemTech/nimbus/commit/ca7ad66f3c6a49fb6a1b81bc179b997c06f28f46))
+
 # [3.4.0](https://github.com/ReyemTech/nimbus/compare/v3.3.0...v3.4.0) (2026-09-02)
 
 

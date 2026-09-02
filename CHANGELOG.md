@@ -1,3 +1,10 @@
+# [3.3.0](https://github.com/ReyemTech/nimbus/compare/v3.2.1...v3.3.0) (2026-09-02)
+
+
+### Features
+
+* **platform:** add Trivy Operator scanning ([b6f99af](https://github.com/ReyemTech/nimbus/commit/b6f99af4bb9ed1c6f6cc6beec6db05188c0719e5))
+
 ## [3.2.1](https://github.com/ReyemTech/nimbus/compare/v3.2.0...v3.2.1) (2026-08-20)
 
 

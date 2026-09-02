@@ -166,6 +166,9 @@ export interface IPlatformStackConfig {
   /** Descheduler for pod rebalancing on spot instances. */
   readonly descheduler?: IDeschedulerConfig;
 
+  /** Continuous workload image, SBOM, secret, and Kubernetes configuration scanning. */
+  readonly trivyOperator?: IPlatformComponentConfig;
+
   /** Per-node image cache pruner. Default: { enabled: true, intervalSeconds: 21600 }. */
   readonly imagePruner?: IImagePrunerConfig;
 

@@ -25,6 +25,7 @@ import {
   deployExternalSecrets,
   deployOAuth2Proxy,
   deployDescheduler,
+  deployTrivyOperator,
   createImagePruner,
 } from "./components";
 
@@ -41,6 +42,7 @@ const DEFAULT_VERSIONS: Record<string, string | undefined> = {
   externalSecrets: undefined,
   oauth2Proxy: undefined,
   descheduler: undefined,
+  trivyOperator: undefined,
 };
 
 /**
@@ -529,12 +531,22 @@ function deployToCluster(
     );
   }
 
+  // 14. Trivy Operator — continuous image CVE, SBOM, secret, and config reports
+  if (config.trivyOperator?.enabled) {
+    components["trivy-operator"] = deployTrivyOperator(
+      name,
+      config.trivyOperator,
+      provider,
+      DEFAULT_VERSIONS.trivyOperator
+    );
+  }
+
   // Image pruner (per-node container cache cleanup) — enabled by default
   if (config.imagePruner?.enabled !== false) {
     createImagePruner(name, config.imagePruner ?? {}, provider);
   }
 
-  // 14. ClusterSecretStore — connects ESO to Vault
+  // 15. ClusterSecretStore — connects ESO to Vault
   if (components["vault"] && components["external-secrets"]) {
     new k8s.apiextensions.CustomResource(
       `${name}-cluster-secret-store`,

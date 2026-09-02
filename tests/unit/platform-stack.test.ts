@@ -264,6 +264,42 @@ describe("platform stack — descheduler", () => {
   });
 });
 
+describe("platform stack — Trivy Operator", () => {
+  it("deploys continuous workload scanning when enabled", () => {
+    const cluster = makeCluster("test");
+    createPlatformStack("test", {
+      cluster,
+      domain: "example.com",
+      traefik: { enabled: false },
+      certManager: { enabled: false },
+      trivyOperator: { enabled: true },
+    });
+
+    const trivyRelease = createdReleases.find((r) => r.name.includes("trivy-operator"));
+    expect(trivyRelease).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(trivyRelease!.args.chart).toBe("trivy-operator");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(trivyRelease!.args.namespace).toBe("trivy-system");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect((trivyRelease!.args.values as Record<string, unknown>).trivy).toEqual({
+      ignoreUnfixed: false,
+    });
+  });
+
+  it("does not deploy Trivy Operator unless enabled", () => {
+    const cluster = makeCluster("test");
+    createPlatformStack("test", {
+      cluster,
+      domain: "example.com",
+      traefik: { enabled: false },
+      certManager: { enabled: false },
+    });
+
+    expect(createdReleases.find((r) => r.name.includes("trivy-operator"))).toBeUndefined();
+  });
+});
+
 describe("platform stack — oauth2 proxy", () => {
   it("deploys oauth2 proxy when configured", () => {
     const cluster = makeCluster("test");

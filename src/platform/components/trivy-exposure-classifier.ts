@@ -77,12 +77,12 @@ function escape(value) {
 
 async function refresh() {
   try {
-    const [reports, deployments, statefulsets, daemonsets, jobs, cronjobs, services, ingresses] = await Promise.all([
+    const [reports, deployments, replicasets, statefulsets, daemonsets, jobs, cronjobs, services, ingresses] = await Promise.all([
       get("/apis/aquasecurity.github.io/v1alpha1/vulnerabilityreports"),
-      get("/apis/apps/v1/deployments"), get("/apis/apps/v1/statefulsets"), get("/apis/apps/v1/daemonsets"),
+      get("/apis/apps/v1/deployments"), get("/apis/apps/v1/replicasets"), get("/apis/apps/v1/statefulsets"), get("/apis/apps/v1/daemonsets"),
       get("/apis/batch/v1/jobs"), get("/apis/batch/v1/cronjobs"), get("/api/v1/services"), get("/apis/networking.k8s.io/v1/ingresses"),
     ]);
-    const workloads = [].concat(deployments.items || [], statefulsets.items || [], daemonsets.items || [], jobs.items || [], cronjobs.items || []);
+    const workloads = [].concat(deployments.items || [], replicasets.items || [], statefulsets.items || [], daemonsets.items || [], jobs.items || [], cronjobs.items || []);
     const ingressByNamespace = new Map();
     for (const ingress of ingresses.items || []) {
       const namespace = ingress.metadata.namespace;
@@ -162,7 +162,7 @@ export function createTrivyExposureClassifier(
         },
         {
           apiGroups: ["apps"],
-          resources: ["deployments", "statefulsets", "daemonsets"],
+          resources: ["deployments", "replicasets", "statefulsets", "daemonsets"],
           verbs: ["get", "list"],
         },
         { apiGroups: ["batch"], resources: ["jobs", "cronjobs"], verbs: ["get", "list"] },

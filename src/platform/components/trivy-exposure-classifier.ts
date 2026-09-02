@@ -61,7 +61,7 @@ function workloadFor(report, workloads) {
   const name = labels["trivy-operator.resource.name"] || ((report.metadata.ownerReferences || [])[0] || {}).name;
   const kind = labels["trivy-operator.resource.kind"] || ((report.metadata.ownerReferences || [])[0] || {}).kind;
   const normalizedKind = String(kind || "").toLowerCase();
-  const resource = workloads.find(item => item.metadata.namespace === namespace && item.metadata.name === name && item.kind.toLowerCase() === normalizedKind);
+  const resource = workloads.find(item => item.metadata.namespace === namespace && item.metadata.name === name && String(item.kind || "").toLowerCase() === normalizedKind);
   return resource || null;
 }
 

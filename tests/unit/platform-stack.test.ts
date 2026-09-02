@@ -235,6 +235,37 @@ beforeEach(() => {
   createdCustomResourcesForAssertions = [];
 });
 
+describe("platform stack — ArgoCD values", () => {
+  it("merges caller config maps with Nimbus defaults", () => {
+    const cluster = makeCluster("test");
+    createPlatformStack("test", {
+      cluster,
+      domain: "example.com",
+      traefik: { enabled: false },
+      certManager: { enabled: false },
+      argocd: {
+        enabled: true,
+        values: {
+          configs: {
+            cm: { "resource.exclusions": "- apiGroups: [aquasecurity.github.io]" },
+          },
+        },
+      },
+    });
+
+    const release = createdReleases.find((item) => item.name === "test-argocd");
+    expect(release).toBeDefined();
+    if (!release) throw new Error("ArgoCD release was not created");
+    const values = release.args.values as {
+      configs: { params: Record<string, unknown>; cm: Record<string, string> };
+      server: { ingress: { hostname: string } };
+    };
+    expect(values.configs.params["server.insecure"]).toBe(true);
+    expect(values.configs.cm["resource.exclusions"]).toContain("aquasecurity.github.io");
+    expect(values.server.ingress.hostname).toBe("argocd.example.com");
+  });
+});
+
 describe("platform stack — descheduler", () => {
   it("deploys descheduler when enabled", () => {
     const cluster = makeCluster("test");

@@ -14,6 +14,7 @@ export type {
   IAzureKeyVaultUnsealConfig,
   IGcpCkmsUnsealConfig,
   IPlatformStackConfig,
+  ITrivyExposureClassifierConfig,
   IPlatformStack,
 } from "./interfaces";
 export { DNS_PROVIDERS } from "./interfaces";

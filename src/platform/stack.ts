@@ -26,6 +26,7 @@ import {
   deployOAuth2Proxy,
   deployDescheduler,
   deployTrivyOperator,
+  createTrivyExposureClassifier,
   createImagePruner,
 } from "./components";
 
@@ -538,6 +539,15 @@ function deployToCluster(
       config.trivyOperator,
       provider,
       DEFAULT_VERSIONS.trivyOperator
+    );
+  }
+
+  if (config.trivyExposureClassifier?.enabled) {
+    createTrivyExposureClassifier(
+      name,
+      config.trivyExposureClassifier,
+      provider,
+      components["trivy-operator"]
     );
   }
 

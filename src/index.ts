@@ -193,6 +193,7 @@ export {
   type IAzureKeyVaultUnsealConfig,
   type IGcpCkmsUnsealConfig,
   type IPlatformStackConfig,
+  type ITrivyExposureClassifierConfig,
   type IPlatformStack,
   createPlatformStack,
   DNS_PROVIDERS,

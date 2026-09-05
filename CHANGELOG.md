@@ -1,3 +1,10 @@
+## [3.6.2](https://github.com/ReyemTech/nimbus/compare/v3.6.1...v3.6.2) (2026-09-05)
+
+
+### Bug Fixes
+
+* **operator:** let a new MinIO bucket be previewed ([4cd0804](https://github.com/ReyemTech/nimbus/commit/4cd0804e86d5f978c5921c2ea60f0a13fbff6956))
+
 ## [3.6.1](https://github.com/ReyemTech/nimbus/compare/v3.6.0...v3.6.1) (2026-09-02)
 
 

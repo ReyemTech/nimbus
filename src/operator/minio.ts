@@ -300,16 +300,28 @@ export function createMinioOperator(
         { provider, dependsOn: [tenant, rootSecret, credentialSecret] }
       );
 
-      // Read credentials back from stored secret for stability
-      const storedCreds = k8s.core.v1.Secret.get(
-        `minio-${bucketName}-creds-read`,
-        pulumi.interpolate`${DATA_NAMESPACE}/${credentialSecretName}`,
-        { provider, dependsOn: [credentialSecret] }
-      );
-      const stableAccessKey = storedCreds.data.apply((d) =>
+      // Read credentials back from the stored secret for stability: the keys
+      // above are regenerated on every evaluation and the Secret carries
+      // ignoreChanges, so what the cluster holds is the only truth.
+      //
+      // A Kubernetes `get` is a live read even during preview, and on the
+      // first preview of a new bucket the Secret does not exist yet — the
+      // read fails and takes the whole preview with it, so a bucket could
+      // never be added to a stack. Under preview, derive an
+      // unknown-but-correct value from the Secret being created instead.
+      // This is the guard createRoleCredentials() already applies to database
+      // credentials for the same reason; buckets simply never got it.
+      const storedCredsData = pulumi.runtime.isDryRun()
+        ? credentialSecret.data
+        : k8s.core.v1.Secret.get(
+            `minio-${bucketName}-creds-read`,
+            pulumi.interpolate`${DATA_NAMESPACE}/${credentialSecretName}`,
+            { provider, dependsOn: [credentialSecret] }
+          ).data;
+      const stableAccessKey = storedCredsData.apply((d) =>
         Buffer.from(d?.["accessKey"] ?? "", "base64").toString()
       );
-      const stableSecretKey = storedCreds.data.apply((d) =>
+      const stableSecretKey = storedCredsData.apply((d) =>
         Buffer.from(d?.["secretKey"] ?? "", "base64").toString()
       );
 

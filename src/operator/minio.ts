@@ -247,7 +247,25 @@ export function createMinioOperator(
                 containers: [
                   {
                     name: "mc",
-                    image: "minio/mc:latest",
+                    // quay.io, not Docker Hub, and a pinned release rather
+                    // than :latest.
+                    //
+                    // `minio/mc:latest` is an ANONYMOUS pull from Docker Hub.
+                    // On 2026-09-18 the first new bucket in months failed on
+                    // it -- `insufficient_scope: authorization failed`, 65
+                    // ImagePullBackOffs -- which is Docker Hub's rate-limit
+                    // response, not a missing image. The job has no
+                    // imagePullSecrets, so every bucket creation is subject to
+                    // whatever anonymous quota the cluster egress IP has left.
+                    // Existing Docker Hub images on the cluster kept running
+                    // because they were already cached on the nodes; only a
+                    // NEW pull surfaces it.
+                    //
+                    // MinIO publishes the same client to quay.io, which has no
+                    // anonymous pull limit. Pinning the release also stops
+                    // every reconcile re-resolving a moving tag, which is what
+                    // made this the first pull to fail.
+                    image: "quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z",
                     command: [
                       "sh",
                       "-c",

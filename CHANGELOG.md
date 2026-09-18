@@ -1,3 +1,10 @@
+## [3.6.3](https://github.com/ReyemTech/nimbus/compare/v3.6.2...v3.6.3) (2026-09-18)
+
+
+### Bug Fixes
+
+* **minio:** pull mc from quay.io on a pinned release ([20db3e7](https://github.com/ReyemTech/nimbus/commit/20db3e7c2ecd182f3761a5b68ed7905e7c4a855f))
+
 ## [3.6.2](https://github.com/ReyemTech/nimbus/compare/v3.6.1...v3.6.2) (2026-09-05)
 
 

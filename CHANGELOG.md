@@ -1,3 +1,15 @@
+# [3.7.0](https://github.com/ReyemTech/nimbus/compare/v3.6.3...v3.7.0) (2026-11-20)
+
+
+### Bug Fixes
+
+* **rackspace:** honor kubeconfig context ([b1337a6](https://github.com/ReyemTech/nimbus/commit/b1337a6082e2517f140d509953079f94d5ad667d))
+
+
+### Features
+
+* **rackspace:** support existing cluster connections ([5b476ba](https://github.com/ReyemTech/nimbus/commit/5b476bad3848e0193274aaa32e2e3a3706f851f5))
+
 ## [3.6.3](https://github.com/ReyemTech/nimbus/compare/v3.6.2...v3.6.3) (2026-09-18)
 
 

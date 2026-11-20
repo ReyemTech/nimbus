@@ -52,8 +52,14 @@ export interface IAzureProviderOptions {
 
 /** Rackspace Spot-specific options passed through factory functions. */
 export interface IRackspaceProviderOptions {
+  /** Cluster connection mode. Defaults to `managed` for backward compatibility. */
+  readonly mode?: "managed" | "existing-cluster";
+  /** Connect Kubernetes resources with a supplied kubeconfig instead of Rackspace's kubeconfig. */
+  readonly kubeconfig?: pulumi.Input<string>;
+  /** Use pod ServiceAccount credentials instead of either kubeconfig. */
+  readonly useInClusterConfig?: boolean;
   /** Cloudspace name in the Rackspace Spot platform. Required. */
-  readonly cloudspaceName: string;
+  readonly cloudspaceName?: string;
   /** CNI plugin. Default: "calico". */
   readonly cni?: "calico" | "cilium" | "byocni";
   /** HA control plane. Default: true. */

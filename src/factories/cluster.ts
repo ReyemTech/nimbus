@@ -68,6 +68,12 @@ export function createCluster(
           "rackspace"
         );
       }
+      if (rackOpts.mode !== "existing-cluster" && !rackOpts.cloudspaceName) {
+        throw new UnsupportedFeatureError(
+          'Rackspace managed mode requires providerOptions.rackspace.cloudspaceName; use mode: "existing-cluster" to connect without Rackspace resources.',
+          "rackspace"
+        );
+      }
       return createRackspaceSpotCluster(
         name,
         { ...config, cloud: { provider: target.provider, region: target.region } },

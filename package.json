@@ -114,6 +114,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@pulumi/random": "^4.19.2"
+    "@pulumi/random": "^4.19.2",
+    "yaml": "^2.8.2"
   }
 }

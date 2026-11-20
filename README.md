@@ -95,7 +95,13 @@ resources, use `mode: "existing-cluster"`:
 const attached = createCluster("prod", {
   cloud: "rackspace",
   nodePools: [],
-  providerOptions: { rackspace: { mode: "existing-cluster", kubeconfig: process.env.KUBECONFIG_CONTENT } },
+  providerOptions: {
+    rackspace: {
+      mode: "existing-cluster",
+      kubeconfig: process.env.KUBECONFIG_CONTENT,
+      kubeconfigContext: "production",
+    },
+  },
 });
 ```
 
@@ -120,6 +126,10 @@ const connected = createCluster("prod", {
 
 For an in-cluster Pulumi run, set `useInClusterConfig: true` instead of
 `kubeconfig`. Do not set both.
+
+When a supplied kubeconfig contains multiple contexts, set
+`kubeconfigContext` to the desired context name. It defaults to the kubeconfig's
+`current-context`, and Nimbus derives `cluster.endpoint` from that same context.
 
 For AWS-only Pulumi targets, use Nimbus's provider-specific AWS entry points and
 omit `createCluster()`. This avoids registering Rackspace or Kubernetes

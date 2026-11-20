@@ -11,6 +11,7 @@
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import * as spot from "@reyemtech/pulumi-rackspace-spot";
+import { parse as parseYaml } from "yaml";
 import type { ICluster, IClusterConfig } from "../cluster";
 import type { IRackspaceProviderOptions } from "../factories/types";
 import { resolveCloudTarget } from "../types";
@@ -42,18 +43,24 @@ export function createRackspaceSpotCluster(
   if (options.kubeconfig !== undefined && options.useInClusterConfig) {
     throw new Error('Set either "kubeconfig" or "useInClusterConfig", not both.');
   }
+  if (options.kubeconfigContext !== undefined && options.kubeconfig === undefined) {
+    throw new Error('"kubeconfigContext" requires a supplied "kubeconfig".');
+  }
 
   // Existing-cluster mode owns only its Kubernetes provider. It deliberately
   // returns before any Rackspace Spot data source or resource is registered.
   if (options.mode === "existing-cluster") {
     const provider = new k8s.Provider(
       `${name}-k8s`,
-      options.kubeconfig === undefined ? {} : { kubeconfig: options.kubeconfig },
+      {
+        ...(options.kubeconfig === undefined ? {} : { kubeconfig: options.kubeconfig }),
+        ...(options.kubeconfigContext === undefined ? {} : { context: options.kubeconfigContext }),
+      },
       options.k8sProviderAliases?.length
         ? { aliases: options.k8sProviderAliases as pulumi.Alias[] }
         : undefined
     );
-    const endpoint = endpointFromKubeconfig(options.kubeconfig);
+    const endpoint = endpointFromKubeconfig(options.kubeconfig, options.kubeconfigContext);
     return {
       name,
       cloud: target,
@@ -111,12 +118,20 @@ export function createRackspaceSpotCluster(
     ? spot.getKubeconfigOutput({ cloudspaceName: options.cloudspaceName })
     : undefined;
   const kubeconfig = options.kubeconfig ?? kubeconfigResult?.raw ?? "";
-  const endpoint = kubeconfigResult?.host ?? endpointFromKubeconfig(options.kubeconfig);
+  const endpoint =
+    kubeconfigResult?.host ?? endpointFromKubeconfig(options.kubeconfig, options.kubeconfigContext);
 
   // K8s provider
   const provider = new k8s.Provider(
     `${name}-k8s`,
-    options.useInClusterConfig ? {} : { kubeconfig },
+    options.useInClusterConfig
+      ? {}
+      : {
+          kubeconfig,
+          ...(options.kubeconfigContext === undefined
+            ? {}
+            : { context: options.kubeconfigContext }),
+        },
     options.k8sProviderAliases?.length
       ? { aliases: options.k8sProviderAliases as pulumi.Alias[] }
       : undefined
@@ -135,12 +150,24 @@ export function createRackspaceSpotCluster(
   };
 }
 
-function endpointFromKubeconfig(kubeconfig: pulumi.Input<string> | undefined): pulumi.Output<string> {
+function endpointFromKubeconfig(
+  kubeconfig: pulumi.Input<string> | undefined,
+  contextOverride?: pulumi.Input<string>
+): pulumi.Output<string> {
   if (kubeconfig === undefined) return pulumi.output("");
-  return pulumi.output(kubeconfig).apply((raw) => {
+  return pulumi.all([kubeconfig, contextOverride ?? ""]).apply(([raw, override]) => {
     try {
-      const parsed = JSON.parse(raw) as { clusters?: Array<{ cluster?: { server?: string } }> };
-      return parsed.clusters?.[0]?.cluster?.server ?? "";
+      const parsed = parseYaml(raw) as {
+        "current-context"?: string;
+        contexts?: Array<{ name?: string; context?: { cluster?: string } }>;
+        clusters?: Array<{ name?: string; cluster?: { server?: string } }>;
+      } | null;
+      const contextName = override || parsed?.["current-context"];
+      const clusterName = parsed?.contexts?.find((item) => item.name === contextName)?.context
+        ?.cluster;
+      const selectedCluster = parsed?.clusters?.find((item) => item.name === clusterName);
+      if (selectedCluster?.cluster?.server) return selectedCluster.cluster.server;
+      return parsed?.clusters?.length === 1 ? (parsed.clusters[0]?.cluster?.server ?? "") : "";
     } catch {
       return "";
     }

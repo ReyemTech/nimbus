@@ -56,6 +56,8 @@ export interface IRackspaceProviderOptions {
   readonly mode?: "managed" | "existing-cluster";
   /** Connect Kubernetes resources with a supplied kubeconfig instead of Rackspace's kubeconfig. */
   readonly kubeconfig?: pulumi.Input<string>;
+  /** Select a named context from the supplied kubeconfig. Defaults to its current-context. */
+  readonly kubeconfigContext?: pulumi.Input<string>;
   /** Use pod ServiceAccount credentials instead of either kubeconfig. */
   readonly useInClusterConfig?: boolean;
   /** Cloudspace name in the Rackspace Spot platform. Required. */

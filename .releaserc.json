@@ -13,7 +13,7 @@
     [
       "@semantic-release/github",
       {
-        "assets": ["CHANGELOG.md"]
+        "assets": ["CHANGELOG.md", "nimbus.spdx.json"]
       }
     ],
     [

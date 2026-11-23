@@ -34,6 +34,11 @@ npx @reyemtech/nimbus install azure        # @pulumi/azure-native
 npx @reyemtech/nimbus install aws azure    # both
 ```
 
+Each published release includes an SPDX SBOM named `nimbus.spdx.json` in both
+the npm package and GitHub Release assets. It is generated from the release
+lockfile with development dependencies omitted. npm provenance is also enabled
+for published packages.
+
 ## Quick Start
 
 Scaffold a new project (handles `pulumi new`, `npm install`, and provider setup):

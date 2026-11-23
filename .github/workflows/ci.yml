@@ -47,3 +47,15 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+
+      - name: Verify SBOM generation and package inclusion
+        run: |
+          npm run sbom
+          node -e '
+            const { execFileSync } = require("node:child_process");
+            const pack = JSON.parse(execFileSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], { encoding: "utf8" }))[0];
+            if (!pack.files.some((file) => file.path === "nimbus.spdx.json")) {
+              console.error("nimbus.spdx.json is missing from the npm package");
+              process.exitCode = 1;
+            }
+          '

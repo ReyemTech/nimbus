@@ -44,12 +44,15 @@
     "dist",
     "README.md",
     "LICENSE",
-    "bin"
+    "bin",
+    "nimbus.spdx.json"
   ],
   "scripts": {
     "build": "npm run build:esm && npm run build:cjs",
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:cjs": "tsc -p tsconfig.cjs.json",
+    "sbom": "npm sbom --omit=dev --sbom-format=spdx > nimbus.spdx.json",
+    "postversion": "npm run sbom",
     "lint": "eslint src/ tests/",
     "lint:fix": "eslint src/ tests/ --fix",
     "format": "prettier --write 'src/**/*.ts' 'tests/**/*.ts'",

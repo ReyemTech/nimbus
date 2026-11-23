@@ -1,3 +1,10 @@
+# [3.8.0](https://github.com/ReyemTech/nimbus/compare/v3.7.0...v3.8.0) (2026-11-23)
+
+
+### Features
+
+* **release:** publish SPDX SBOM ([4707fbc](https://github.com/ReyemTech/nimbus/commit/4707fbc5e6b094c0b3bf9118ab79da9c8519b2a9))
+
 # [3.7.0](https://github.com/ReyemTech/nimbus/compare/v3.6.3...v3.7.0) (2026-11-20)
 
 

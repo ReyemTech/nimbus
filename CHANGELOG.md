@@ -1,3 +1,16 @@
+# [3.10.0](https://github.com/ReyemTech/nimbus/compare/v3.9.0...v3.10.0) (2026-11-24)
+
+
+### Bug Fixes
+
+* **cdn:** address CloudFront origin review findings ([63c156c](https://github.com/ReyemTech/nimbus/commit/63c156c365533f5529c21174ee3841c22a81af08))
+
+
+### Features
+
+* **cdn:** add CloudFront VPC Origins ([d929909](https://github.com/ReyemTech/nimbus/commit/d929909ea317124318040dc18bca93412102f89a))
+* **cdn:** support NLB VPC Origins ([d1ebf80](https://github.com/ReyemTech/nimbus/commit/d1ebf806f84260cdf6a44ca8dd226c2bebc4b5ad))
+
 # [3.9.0](https://github.com/ReyemTech/nimbus/compare/v3.8.1...v3.9.0) (2026-11-24)
 
 

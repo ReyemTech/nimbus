@@ -1,3 +1,10 @@
+## [3.8.1](https://github.com/ReyemTech/nimbus/compare/v3.8.0...v3.8.1) (2026-11-24)
+
+
+### Bug Fixes
+
+* **operator/cnpg:** raise admission webhook timeouts for hosted control planes ([52bf898](https://github.com/ReyemTech/nimbus/commit/52bf898389705abaa1c2c850fac3085111530b4a))
+
 # [3.8.0](https://github.com/ReyemTech/nimbus/compare/v3.7.0...v3.8.0) (2026-11-23)
 
 

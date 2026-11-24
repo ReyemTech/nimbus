@@ -1,3 +1,10 @@
+# [3.9.0](https://github.com/ReyemTech/nimbus/compare/v3.8.1...v3.9.0) (2026-11-24)
+
+
+### Features
+
+* **aws:** add EKS access and storage options ([785a5ba](https://github.com/ReyemTech/nimbus/commit/785a5ba3fbacc28dd1b2013fad6de8ca415dd0f8))
+
 ## [3.8.1](https://github.com/ReyemTech/nimbus/compare/v3.8.0...v3.8.1) (2026-11-24)
 
 

@@ -6,6 +6,10 @@
 
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
+import {
+  DescribeListenersCommand,
+  ElasticLoadBalancingV2Client,
+} from "@aws-sdk/client-elastic-load-balancing-v2";
 import type { ICdn, ICdnConfig } from "../cdn";
 import { ConfigError, resolveCloudTarget } from "../types";
 
@@ -62,16 +66,39 @@ const UNAVAILABLE_AZ_IDS: Readonly<Record<string, string>> = {
 
 interface IVpcOriginResources {
   readonly resource: aws.cloudfront.VpcOrigin;
-  readonly albDnsName: pulumi.Output<string>;
+  readonly originDnsName: pulumi.Output<string>;
   readonly securityGroupRules: ReadonlyArray<aws.ec2.SecurityGroupRule>;
 }
 
+/** Discover all listeners on an NLB, following ELBv2 pagination. */
+export async function getNlbListeners(
+  region: string,
+  loadBalancerArn: string
+): Promise<ReadonlyArray<{ protocol: string; port: number }>> {
+  const client = new ElasticLoadBalancingV2Client({ region });
+  const listeners: Array<{ protocol: string; port: number }> = [];
+  let marker: string | undefined;
+
+  do {
+    const response = await client.send(
+      new DescribeListenersCommand({ LoadBalancerArn: loadBalancerArn, Marker: marker })
+    );
+    for (const listener of response.Listeners ?? []) {
+      if (listener.Protocol !== undefined && listener.Port !== undefined) {
+        listeners.push({ protocol: listener.Protocol, port: listener.Port });
+      }
+    }
+    marker = response.NextMarker;
+  } while (marker);
+
+  return listeners;
+}
+
 /**
- * Create one CloudFront distribution per public hostname for a trusted edge.
+ * Create one CloudFront distribution per primary hostname for a trusted edge.
  *
- * The origin request policy deliberately excludes `Host`: Traefik rewrites that header, while
- * CloudFront's viewer headers remain available to the application. The two custom headers are
- * static per distribution, which is why a distribution cannot serve multiple hostnames.
+ * Public origins exclude the viewer `Host` header. Private VPC origins preserve it so a shared
+ * Traefik ingress can route multiple aliases. The two custom headers are static per distribution.
  *
  * @throws {ConfigError} When configuration contains unsafe header names or duplicate hostnames.
  */
@@ -105,7 +132,7 @@ export function createAwsCloudFront(name: string, config: ICdnConfig): ICdn {
     const defaultAllowedMethods = distribution.allowedMethods ?? DEFAULT_ALLOWED_METHODS;
     const defaultCachedMethods = distribution.cachedMethods ?? DEFAULT_CACHED_METHODS;
     const defaultViewerProtocolPolicy = distribution.viewerProtocolPolicy ?? "redirect-to-https";
-    const domainName = vpcOrigin?.albDnsName ?? distribution.originDomainName;
+    const domainName = vpcOrigin?.originDnsName ?? distribution.originDomainName;
     if (!domainName) {
       throw new ConfigError(
         `Distribution "${distribution.hostname}" requires originDomainName unless a shared vpcOrigin is configured`,
@@ -224,46 +251,97 @@ function createVpcOrigin(
   name: string,
   config: NonNullable<ICdnConfig["vpcOrigin"]>
 ): IVpcOriginResources {
-  const alb = aws.lb.getLoadBalancerOutput({ arn: config.albArn });
-  const subnets = alb.apply((loadBalancer) =>
+  const isNlb = config.type === "nlb-vpc";
+  const loadBalancerArn = isNlb ? config.nlbArn : config.albArn;
+  const resourceLabel = isNlb ? "NLB" : "ALB";
+  const arnConfigKey = isNlb ? "vpcOrigin.nlbArn" : "vpcOrigin.albArn";
+  const securityGroupConfigKey = isNlb
+    ? "vpcOrigin.nlbSecurityGroupIds"
+    : "vpcOrigin.albSecurityGroupIds";
+  const configuredSecurityGroupInput = isNlb
+    ? config.nlbSecurityGroupIds
+    : config.albSecurityGroupIds;
+  const loadBalancer = aws.lb.getLoadBalancerOutput({ arn: loadBalancerArn });
+  const subnets = loadBalancer.apply((metadata) =>
     pulumi.all(
-      loadBalancer.subnets.map((id) => aws.ec2.getSubnetOutput({ id, region: loadBalancer.region }))
+      metadata.subnets.map((id) => aws.ec2.getSubnetOutput({ id, region: metadata.region }))
     )
   );
   const routeTables = pulumi
-    .all([alb, subnets])
-    .apply(([loadBalancer, subnetResults]) =>
+    .all([loadBalancer, subnets])
+    .apply(([metadata, subnetResults]) =>
       pulumi.all(
         subnetResults.map((subnet) =>
-          aws.ec2.getRouteTableOutput({ subnetId: subnet.id, region: loadBalancer.region })
+          aws.ec2.getRouteTableOutput({ subnetId: subnet.id, region: metadata.region })
         )
       )
     );
-  const internetGateway = alb.apply((loadBalancer) =>
+  const internetGateway = loadBalancer.apply((metadata) =>
     aws.ec2.getInternetGatewayOutput({
-      filters: [{ name: "attachment.vpc-id", values: [loadBalancer.vpcId] }],
-      region: loadBalancer.region,
+      filters: [{ name: "attachment.vpc-id", values: [metadata.vpcId] }],
+      region: metadata.region,
     })
   );
   const configuredSecurityGroupIds = pulumi.all<pulumi.Input<string>>([
-    ...(config.albSecurityGroupIds ?? []),
+    ...(configuredSecurityGroupInput ?? []),
   ]);
-  const validation = pulumi
-    .all([alb, subnets, routeTables, internetGateway, configuredSecurityGroupIds])
-    .apply(([loadBalancer, subnetResults, routeTableResults, gateway, groupIds]) => {
+  const baseValidation = pulumi
+    .all([loadBalancer, subnets, routeTables, internetGateway, configuredSecurityGroupIds])
+    .apply(([metadata, subnetResults, routeTableResults, gateway, groupIds]) => {
       validateVpcOriginLoadBalancer(
-        loadBalancer,
+        metadata,
         subnetResults,
         routeTableResults,
         gateway,
-        groupIds
+        groupIds,
+        isNlb ? "network" : "application",
+        resourceLabel,
+        arnConfigKey,
+        securityGroupConfigKey
       );
-      return { arn: loadBalancer.arn };
+      if (isNlb && metadata.ipAddressType !== "ipv4") {
+        throw new ConfigError(
+          `CloudFront VPC Origin NLB "${metadata.arn}" must use IPv4; dual-stack NLBs are not eligible`,
+          "CONFIG_INVALID",
+          arnConfigKey
+        );
+      }
+      return { arn: metadata.arn };
     });
 
-  const originProtocolPolicy = config.originProtocolPolicy ?? "https-only";
+  const validation = isNlb
+    ? pulumi
+        .all([
+          baseValidation,
+          loadBalancer.apply((metadata) => getNlbListeners(metadata.region, metadata.arn)),
+        ])
+        .apply(([validated, listeners]) => {
+          const tlsListener = listeners.find(({ protocol }) => protocol.toUpperCase() === "TLS");
+          if (tlsListener) {
+            throw new ConfigError(
+              `CloudFront VPC Origin NLB "${validated.arn}" cannot have a TLS listener (port ${tlsListener.port})`,
+              "CONFIG_INVALID",
+              arnConfigKey
+            );
+          }
+          const httpPort = config.httpPort ?? 80;
+          const tcpListener = listeners.find(
+            ({ protocol, port }) => protocol.toUpperCase() === "TCP" && port === httpPort
+          );
+          if (!tcpListener) {
+            throw new ConfigError(
+              `CloudFront VPC Origin NLB "${validated.arn}" must have a TCP listener on HTTP port ${httpPort}`,
+              "CONFIG_INVALID",
+              arnConfigKey
+            );
+          }
+          return validated;
+        })
+    : baseValidation;
+
+  const originProtocolPolicy = config.originProtocolPolicy ?? (isNlb ? "http-only" : "https-only");
   const httpPort = config.httpPort ?? 80;
-  const httpsPort = config.httpsPort ?? 443;
+  const httpsPort = config.type === "alb-vpc" ? (config.httpsPort ?? 443) : 443;
   const resource = new aws.cloudfront.VpcOrigin(`${name}-vpc-origin`, {
     vpcOriginEndpointConfig: {
       name: `${name}-vpc-origin`.slice(0, 64),
@@ -280,9 +358,9 @@ function createVpcOrigin(
       {
         filters: [
           { name: "group-name", values: [VPC_ORIGIN_MANAGED_SECURITY_GROUP] },
-          { name: "vpc-id", values: [alb.apply((loadBalancer) => loadBalancer.vpcId)] },
+          { name: "vpc-id", values: [loadBalancer.apply((metadata) => metadata.vpcId)] },
         ],
-        region: alb.apply((loadBalancer) => loadBalancer.region),
+        region: loadBalancer.apply((metadata) => metadata.region),
       },
       { dependsOn: [resource] }
     )
@@ -290,9 +368,9 @@ function createVpcOrigin(
     .apply((ids) => {
       if (ids.length !== 1) {
         throw new ConfigError(
-          `Expected one AWS-managed ${VPC_ORIGIN_MANAGED_SECURITY_GROUP} security group for ALB VPC origin, found ${ids.length}`,
+          `Expected one AWS-managed ${VPC_ORIGIN_MANAGED_SECURITY_GROUP} security group for ${resourceLabel} VPC origin, found ${ids.length}`,
           "CONFIG_INVALID",
-          "vpcOrigin.albArn"
+          arnConfigKey
         );
       }
       const id = ids[0];
@@ -300,34 +378,37 @@ function createVpcOrigin(
         throw new ConfigError(
           `AWS-managed ${VPC_ORIGIN_MANAGED_SECURITY_GROUP} lookup returned no security group ID`,
           "CONFIG_INVALID",
-          "vpcOrigin.albArn"
+          arnConfigKey
         );
       }
       return id;
     });
 
-  const ports = config.securityGroupPort
-    ? [config.securityGroupPort]
-    : originProtocolPolicy === "match-viewer"
-      ? [...new Set([httpPort, httpsPort])]
-      : [originProtocolPolicy === "http-only" ? httpPort : httpsPort];
-  const securityGroupIds: ReadonlyArray<pulumi.Input<string>> = config.albSecurityGroupIds?.length
-    ? config.albSecurityGroupIds
+  const securityGroupPort = config.securityGroupPort;
+  const ports = securityGroupPort
+    ? [securityGroupPort]
+    : isNlb
+      ? [httpPort]
+      : originProtocolPolicy === "match-viewer"
+        ? [...new Set([httpPort, httpsPort])]
+        : [originProtocolPolicy === "http-only" ? httpPort : httpsPort];
+  const securityGroupIds: ReadonlyArray<pulumi.Input<string>> = configuredSecurityGroupInput?.length
+    ? configuredSecurityGroupInput
     : [
-        alb.apply((loadBalancer) => {
-          if (loadBalancer.securityGroups.length !== 1) {
+        loadBalancer.apply((metadata) => {
+          if (metadata.securityGroups.length !== 1) {
             throw new ConfigError(
-              "ALB has multiple security groups; provide albSecurityGroupIds to select which group receives CloudFront ingress",
+              `${resourceLabel} has multiple security groups; provide ${isNlb ? "nlbSecurityGroupIds" : "albSecurityGroupIds"} to select which group receives CloudFront ingress`,
               "CONFIG_INVALID",
-              "vpcOrigin.albSecurityGroupIds"
+              securityGroupConfigKey
             );
           }
-          const securityGroupId = loadBalancer.securityGroups[0];
+          const securityGroupId = metadata.securityGroups[0];
           if (!securityGroupId) {
             throw new ConfigError(
-              "ALB has no security group to allow CloudFront VPC Origin traffic",
+              `${resourceLabel} has no security group to allow CloudFront VPC Origin traffic`,
               "CONFIG_INVALID",
-              "vpcOrigin.albSecurityGroupIds"
+              securityGroupConfigKey
             );
           }
           return securityGroupId;
@@ -345,7 +426,7 @@ function createVpcOrigin(
             toPort: port,
             securityGroupId,
             sourceSecurityGroupId: managedSecurityGroupIds,
-            description: "Allow CloudFront VPC Origin traffic to the private ALB",
+            description: `Allow CloudFront VPC Origin traffic to the private ${resourceLabel}`,
           },
           { dependsOn: [resource] }
         )
@@ -354,7 +435,7 @@ function createVpcOrigin(
 
   return {
     resource,
-    albDnsName: alb.apply((loadBalancer) => loadBalancer.dnsName),
+    originDnsName: loadBalancer.apply((metadata) => metadata.dnsName),
     securityGroupRules,
   };
 }
@@ -364,34 +445,40 @@ function validateVpcOriginLoadBalancer(
   subnets: aws.ec2.GetSubnetResult[],
   routeTables: aws.ec2.GetRouteTableResult[],
   internetGateway: aws.ec2.GetInternetGatewayResult,
-  configuredSecurityGroupIds: string[]
+  configuredSecurityGroupIds: string[],
+  expectedLoadBalancerType: "application" | "network",
+  resourceLabel: "ALB" | "NLB",
+  arnConfigKey: string,
+  securityGroupConfigKey: string
 ): void {
-  if (loadBalancer.loadBalancerType !== "application") {
+  const loadBalancerKind =
+    resourceLabel === "ALB" ? "Application Load Balancer" : "Network Load Balancer";
+  if (loadBalancer.loadBalancerType !== expectedLoadBalancerType) {
     throw new ConfigError(
-      `CloudFront VPC Origin ALB ARN "${loadBalancer.arn}" must identify an Application Load Balancer`,
+      `CloudFront VPC Origin ${resourceLabel} ARN "${loadBalancer.arn}" must identify a ${loadBalancerKind}`,
       "CONFIG_INVALID",
-      "vpcOrigin.albArn"
+      arnConfigKey
     );
   }
   if (!loadBalancer.internal) {
     throw new ConfigError(
-      `CloudFront VPC Origin ALB "${loadBalancer.arn}" must be internal; internet-facing ALBs are not eligible`,
+      `CloudFront VPC Origin ${resourceLabel} "${loadBalancer.arn}" must be internal; internet-facing load balancers are not eligible`,
       "CONFIG_INVALID",
-      "vpcOrigin.albArn"
+      arnConfigKey
     );
   }
   if (loadBalancer.securityGroups.length === 0) {
     throw new ConfigError(
-      `CloudFront VPC Origin ALB "${loadBalancer.arn}" must have at least one security group`,
+      `CloudFront VPC Origin ${resourceLabel} "${loadBalancer.arn}" must have at least one security group`,
       "CONFIG_INVALID",
-      "vpcOrigin.albArn"
+      arnConfigKey
     );
   }
   if (configuredSecurityGroupIds.length === 0 && loadBalancer.securityGroups.length > 1) {
     throw new ConfigError(
-      "ALB has multiple security groups; provide albSecurityGroupIds to select which group receives CloudFront ingress",
+      `${resourceLabel} has multiple security groups; provide ${resourceLabel === "NLB" ? "nlbSecurityGroupIds" : "albSecurityGroupIds"} to select which group receives CloudFront ingress`,
       "CONFIG_INVALID",
-      "vpcOrigin.albSecurityGroupIds"
+      securityGroupConfigKey
     );
   }
   const unattachedSecurityGroup = configuredSecurityGroupIds.find(
@@ -399,46 +486,46 @@ function validateVpcOriginLoadBalancer(
   );
   if (unattachedSecurityGroup) {
     throw new ConfigError(
-      `Configured ALB security group "${unattachedSecurityGroup}" is not attached to the ALB`,
+      `Configured ${resourceLabel} security group "${unattachedSecurityGroup}" is not attached to the ${resourceLabel}`,
       "CONFIG_INVALID",
-      "vpcOrigin.albSecurityGroupIds"
+      securityGroupConfigKey
     );
   }
   if (!VPC_ORIGIN_SUPPORTED_REGIONS.has(loadBalancer.region)) {
     throw new ConfigError(
-      `CloudFront VPC Origins are not supported in ALB region "${loadBalancer.region}"`,
+      `CloudFront VPC Origins are not supported in ${resourceLabel} region "${loadBalancer.region}"`,
       "CONFIG_INVALID",
-      "vpcOrigin.albArn"
+      arnConfigKey
     );
   }
   if (subnets.length === 0 || subnets.length !== routeTables.length) {
     throw new ConfigError(
-      `CloudFront VPC Origin ALB "${loadBalancer.arn}" must use private subnets with route tables`,
+      `CloudFront VPC Origin ${resourceLabel} "${loadBalancer.arn}" must use private subnets with route tables`,
       "CONFIG_INVALID",
-      "vpcOrigin.albArn"
+      arnConfigKey
     );
   }
   for (const [index, subnet] of subnets.entries()) {
     if (subnet.vpcId !== loadBalancer.vpcId) {
       throw new ConfigError(
-        `ALB subnet "${subnet.id}" is not in the load balancer VPC "${loadBalancer.vpcId}"`,
+        `${resourceLabel} subnet "${subnet.id}" is not in the load balancer VPC "${loadBalancer.vpcId}"`,
         "CONFIG_INVALID",
-        "vpcOrigin.albArn"
+        arnConfigKey
       );
     }
     if (subnet.availableIpAddressCount < 1) {
       throw new ConfigError(
-        `ALB subnet "${subnet.id}" needs at least one available IPv4 address for a CloudFront VPC Origin`,
+        `${resourceLabel} subnet "${subnet.id}" needs at least one available IPv4 address for a CloudFront VPC Origin`,
         "CONFIG_INVALID",
-        "vpcOrigin.albArn"
+        arnConfigKey
       );
     }
     const unavailableAz = UNAVAILABLE_AZ_IDS[loadBalancer.region];
     if (subnet.availabilityZoneId === unavailableAz) {
       throw new ConfigError(
-        `ALB subnet "${subnet.id}" is in unavailable CloudFront VPC Origin AZ "${subnet.availabilityZoneId}" for region "${loadBalancer.region}"`,
+        `${resourceLabel} subnet "${subnet.id}" is in unavailable CloudFront VPC Origin AZ "${subnet.availabilityZoneId}" for region "${loadBalancer.region}"`,
         "CONFIG_INVALID",
-        "vpcOrigin.albArn"
+        arnConfigKey
       );
     }
     const hasInternetGatewayRoute = routeTables[index]?.routes.some(
@@ -448,9 +535,9 @@ function validateVpcOriginLoadBalancer(
     );
     if (hasInternetGatewayRoute) {
       throw new ConfigError(
-        `ALB subnet "${subnet.id}" must be private for a CloudFront VPC Origin`,
+        `${resourceLabel} subnet "${subnet.id}" must be private for a CloudFront VPC Origin`,
         "CONFIG_INVALID",
-        "vpcOrigin.albArn"
+        arnConfigKey
       );
     }
   }
@@ -458,7 +545,7 @@ function validateVpcOriginLoadBalancer(
     throw new ConfigError(
       `VPC "${loadBalancer.vpcId}" must have an attached internet gateway for a CloudFront VPC Origin`,
       "CONFIG_INVALID",
-      "vpcOrigin.albArn"
+      arnConfigKey
     );
   }
 }
@@ -492,19 +579,38 @@ function validateConfig(config: ICdnConfig, clientHostHeader: string): void {
   validateCustomHeader(config.originSecretHeader, "originSecretHeader");
   validateCustomHeader(clientHostHeader, "clientHostHeader");
   if (config.vpcOrigin) {
-    const protocol = config.vpcOrigin.originProtocolPolicy ?? "https-only";
-    if (!["http-only", "https-only", "match-viewer"].includes(protocol)) {
+    const portOptions: ReadonlyArray<readonly [string, number | undefined]> =
+      config.vpcOrigin.type === "alb-vpc"
+        ? [
+            ["httpPort", config.vpcOrigin.httpPort ?? 80],
+            ["httpsPort", config.vpcOrigin.httpsPort ?? 443],
+            ["securityGroupPort", config.vpcOrigin.securityGroupPort],
+          ]
+        : [
+            ["httpPort", config.vpcOrigin.httpPort ?? 80],
+            ["securityGroupPort", config.vpcOrigin.securityGroupPort],
+          ];
+    const protocol =
+      config.vpcOrigin.originProtocolPolicy ??
+      (config.vpcOrigin.type === "alb-vpc" ? "https-only" : "http-only");
+    if (config.vpcOrigin.type === "nlb-vpc" && protocol !== "http-only") {
+      throw new ConfigError(
+        `CloudFront VPC Origin NLB must use http-only; got "${protocol}"`,
+        "CONFIG_INVALID",
+        "vpcOrigin.originProtocolPolicy"
+      );
+    }
+    if (
+      config.vpcOrigin.type === "alb-vpc" &&
+      !["http-only", "https-only", "match-viewer"].includes(protocol)
+    ) {
       throw new ConfigError(
         `Unsupported CloudFront VPC Origin protocol policy "${protocol}"`,
         "CONFIG_INVALID",
         "vpcOrigin.originProtocolPolicy"
       );
     }
-    for (const [key, port] of [
-      ["httpPort", config.vpcOrigin.httpPort ?? 80],
-      ["httpsPort", config.vpcOrigin.httpsPort ?? 443],
-      ["securityGroupPort", config.vpcOrigin.securityGroupPort],
-    ] as const) {
+    for (const [key, port] of portOptions) {
       if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
         throw new ConfigError(
           `CloudFront VPC Origin ${key} must be an integer from 1 to 65535`,

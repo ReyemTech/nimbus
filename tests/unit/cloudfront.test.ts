@@ -23,11 +23,23 @@ const mockPulumi = vi.hoisted(() => {
   const output = (value: unknown) => ({
     __mockOutput: true,
     value,
-    apply: (fn: (value: unknown) => unknown) => output(unwrap(fn(unwrap(value)))),
+    apply: (fn: (value: unknown) => unknown) => {
+      const unwrapped = unwrap(value);
+      const applied =
+        unwrapped instanceof Promise
+          ? unwrapped.then((resolved) => fn(unwrap(resolved)))
+          : fn(unwrapped);
+      return output(applied instanceof Promise ? applied : unwrap(applied));
+    },
   });
   return {
     output,
-    all: (values: ReadonlyArray<unknown>) => output(values.map(unwrap)),
+    all: (values: ReadonlyArray<unknown>) => {
+      const unwrapped = values.map(unwrap);
+      return output(
+        unwrapped.some((value) => value instanceof Promise) ? Promise.all(unwrapped) : unwrapped
+      );
+    },
   };
 });
 
@@ -36,6 +48,7 @@ const mockAwsState = vi.hoisted(() => ({
     arn: "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/private/abc",
     dnsName: "internal-traefik-123.us-east-1.elb.amazonaws.com",
     loadBalancerType: "application",
+    ipAddressType: "ipv4",
     internal: true,
     region: "us-east-1",
     subnets: ["subnet-a", "subnet-b"],
@@ -53,6 +66,45 @@ const mockAwsState = vi.hoisted(() => ({
   },
   internetGateway: { attachments: [{ vpcId: "vpc-123", state: "available" }] },
   managedSecurityGroups: { ids: ["sg-cloudfront-vpc-origin"] },
+}));
+
+const mockElbv2State = vi.hoisted(() => ({
+  requests: [] as Array<{ region: string; marker?: string; loadBalancerArn: string }>,
+  pages: [
+    {
+      Listeners: [
+        { ListenerArn: "listener-http", Port: 80, Protocol: "TCP" },
+        { ListenerArn: "listener-https-tcp", Port: 443, Protocol: "TCP" },
+      ],
+      NextMarker: "next-page",
+    },
+    { Listeners: [{ ListenerArn: "listener-http-alt", Port: 8080, Protocol: "TCP" }] },
+  ] as Array<{
+    Listeners?: Array<{ ListenerArn: string; Port: number; Protocol: string }>;
+    NextMarker?: string;
+  }>,
+}));
+
+vi.mock("@aws-sdk/client-elastic-load-balancing-v2", () => ({
+  ElasticLoadBalancingV2Client: class {
+    private readonly region: string;
+
+    constructor(config: { region: string }) {
+      this.region = config.region;
+    }
+
+    async send(command: { input: { LoadBalancerArn: string; Marker?: string } }) {
+      mockElbv2State.requests.push({
+        region: this.region,
+        marker: command.input.Marker,
+        loadBalancerArn: command.input.LoadBalancerArn,
+      });
+      return command.input.Marker ? mockElbv2State.pages[1] : mockElbv2State.pages[0];
+    }
+  },
+  DescribeListenersCommand: class {
+    constructor(readonly input: { LoadBalancerArn: string; Marker?: string }) {}
+  },
 }));
 
 vi.mock("@pulumi/pulumi", () => mockPulumi);
@@ -108,9 +160,17 @@ vi.mock("@pulumi/aws", () => ({
   },
 }));
 
-import { createAwsCloudFront } from "../../src/aws/cloudfront";
+import { createAwsCloudFront, getNlbListeners } from "../../src/aws/cloudfront";
 import { createCdn } from "../../src/factories/cdn";
-import type { ICdnConfig } from "../../src/cdn";
+import type { ICdnConfig, IEdgeVpcNlbOriginConfig } from "../../src/cdn";
+
+const typedNlbOrigin: NonNullable<ICdnConfig["vpcOrigin"]> = {
+  type: "nlb-vpc",
+  nlbArn: "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/private/abc",
+  originProtocolPolicy: "http-only",
+  httpPort: 80,
+};
+void typedNlbOrigin;
 
 beforeEach(() => {
   originRequestPolicies.length = 0;
@@ -119,6 +179,7 @@ beforeEach(() => {
   vpcOrigins.length = 0;
   securityGroupRules.length = 0;
   mockAwsState.alb.loadBalancerType = "application";
+  mockAwsState.alb.ipAddressType = "ipv4";
   mockAwsState.alb.internal = true;
   mockAwsState.alb.region = "us-east-1";
   mockAwsState.alb.subnets = ["subnet-a", "subnet-b"];
@@ -131,9 +192,36 @@ beforeEach(() => {
   ];
   mockAwsState.internetGateway.attachments = [{ vpcId: "vpc-123", state: "available" }];
   mockAwsState.managedSecurityGroups.ids = ["sg-cloudfront-vpc-origin"];
+  mockElbv2State.requests.length = 0;
+  mockElbv2State.pages = [
+    {
+      Listeners: [
+        { ListenerArn: "listener-http", Port: 80, Protocol: "TCP" },
+        { ListenerArn: "listener-https-tcp", Port: 443, Protocol: "TCP" },
+      ],
+      NextMarker: "next-page",
+    },
+    { Listeners: [{ ListenerArn: "listener-http-alt", Port: 8080, Protocol: "TCP" }] },
+  ];
 });
 
 describe("createAwsCloudFront", () => {
+  const nlbArn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/private/def";
+  const makeNlbConfig = (vpcOrigin: Partial<IEdgeVpcNlbOriginConfig> = {}): ICdnConfig => ({
+    cloud: "aws",
+    hostedZoneId: "Z0123456789EXAMPLE",
+    originSecretHeader: "X-Reyem-Origin-Trial",
+    originSecretValue: "origin-secret",
+    vpcOrigin: { type: "nlb-vpc", nlbArn, ...vpcOrigin },
+    distributions: [
+      {
+        hostname: "app1.example.com",
+        aliases: ["app2.example.com"],
+        certificateArn: "arn:aws:acm:us-east-1:123456789012:certificate/example",
+      },
+    ],
+  });
+
   const publicDistribution = {
     hostname: "www.reyem.tech",
     originDomainName: "origin.reyem.tech",
@@ -226,6 +314,157 @@ describe("createAwsCloudFront", () => {
       securityGroupId: "sg-alb-a",
       sourceSecurityGroupId: expect.objectContaining({ value: "sg-cloudfront-vpc-origin" }),
     });
+  });
+
+  it("creates one private HTTP NLB VPC Origin and routes aliases through Traefik", async () => {
+    mockAwsState.alb.arn = nlbArn;
+    mockAwsState.alb.loadBalancerType = "network";
+    mockAwsState.alb.internal = true;
+    mockAwsState.alb.ipAddressType = "ipv4";
+    mockAwsState.alb.securityGroups = ["sg-nlb"];
+
+    createAwsCloudFront("prod", makeNlbConfig({ originProtocolPolicy: "http-only", httpPort: 80 }));
+
+    expect(vpcOrigins).toHaveLength(1);
+    expect(vpcOrigins[0]?.args.vpcOriginEndpointConfig).toMatchObject({
+      httpPort: 80,
+      originProtocolPolicy: "http-only",
+    });
+    const endpoint = vpcOrigins[0]?.args.vpcOriginEndpointConfig as {
+      arn: { value: unknown };
+    };
+    await expect(Promise.resolve(endpoint.arn.value)).resolves.toBe(nlbArn);
+    expect(securityGroupRules).toHaveLength(1);
+    expect(securityGroupRules[0]?.args).toMatchObject({
+      type: "ingress",
+      protocol: "tcp",
+      fromPort: 80,
+      toPort: 80,
+      securityGroupId: expect.objectContaining({ value: "sg-nlb" }),
+      sourceSecurityGroupId: expect.objectContaining({ value: "sg-cloudfront-vpc-origin" }),
+    });
+    expect(originRequestPolicies[0]?.args.headersConfig).toEqual({ headerBehavior: "allViewer" });
+    expect(distributions[0]?.args.aliases).toEqual(["app1.example.com", "app2.example.com"]);
+    const origins = distributions[0]?.args.origins as Array<Record<string, unknown>>;
+    expect(origins[0]).toMatchObject({
+      domainName: expect.objectContaining({ value: mockAwsState.alb.dnsName }),
+      vpcOriginConfig: { vpcOriginId: expect.objectContaining({ value: "vo-123" }) },
+    });
+  });
+
+  it("uses the configured NLB HTTP port for the CloudFront ingress rule", () => {
+    mockAwsState.alb.arn = nlbArn;
+    mockAwsState.alb.loadBalancerType = "network";
+    mockAwsState.alb.securityGroups = ["sg-nlb"];
+
+    createAwsCloudFront("prod", makeNlbConfig({ httpPort: 8080 }));
+
+    expect(vpcOrigins[0]?.args.vpcOriginEndpointConfig).toMatchObject({
+      httpPort: 8080,
+      originProtocolPolicy: "http-only",
+    });
+    expect(securityGroupRules[0]?.args).toMatchObject({ fromPort: 8080, toPort: 8080 });
+  });
+
+  it.each([
+    ["internet-facing", () => (mockAwsState.alb.internal = false), /must be internal/],
+    ["non-NLB", () => (mockAwsState.alb.loadBalancerType = "application"), /Network Load Balancer/],
+    ["dual-stack", () => (mockAwsState.alb.ipAddressType = "dualstack"), /IPv4/],
+    [
+      "no security group",
+      () => (mockAwsState.alb.securityGroups = []),
+      /at least one security group/,
+    ],
+    ["unsupported region", () => (mockAwsState.alb.region = "moon-1"), /not supported/],
+    [
+      "unavailable AZ",
+      () => (mockAwsState.subnet.availabilityZoneId = "use1-az3"),
+      /unavailable CloudFront VPC Origin AZ/,
+    ],
+    ["no free IPv4", () => (mockAwsState.subnet.availableIpAddressCount = 0), /available IPv4/],
+    [
+      "missing VPC internet gateway",
+      () => (mockAwsState.internetGateway.attachments = []),
+      /internet gateway/,
+    ],
+    [
+      "public subnet",
+      () =>
+        (mockAwsState.routeTable.routes = [
+          { cidrBlock: "0.0.0.0/0", ipv6CidrBlock: "", gatewayId: "igw-123" },
+        ]),
+      /must be private/,
+    ],
+  ])("rejects an ineligible NLB origin (%s)", (_caseName, configure, message) => {
+    mockAwsState.alb.arn = nlbArn;
+    mockAwsState.alb.loadBalancerType = "network";
+    mockAwsState.alb.internal = true;
+    mockAwsState.alb.ipAddressType = "ipv4";
+    mockAwsState.alb.securityGroups = ["sg-nlb"];
+    (configure as () => void)();
+
+    expect(() => createAwsCloudFront("prod", makeNlbConfig())).toThrow(message as RegExp);
+  });
+
+  it("requires a selected attached NLB security group when several are attached", () => {
+    mockAwsState.alb.arn = nlbArn;
+    mockAwsState.alb.loadBalancerType = "network";
+    mockAwsState.alb.securityGroups = ["sg-nlb-a", "sg-nlb-b"];
+
+    expect(() => createAwsCloudFront("prod", makeNlbConfig())).toThrow(
+      /provide nlbSecurityGroupIds/
+    );
+    expect(() =>
+      createAwsCloudFront("prod", makeNlbConfig({ nlbSecurityGroupIds: ["sg-unattached"] }))
+    ).toThrow(/not attached to the NLB/);
+
+    createAwsCloudFront("prod", makeNlbConfig({ nlbSecurityGroupIds: ["sg-nlb-b"] }));
+    expect(securityGroupRules.at(-1)?.args.securityGroupId).toBe("sg-nlb-b");
+  });
+
+  it("rejects NLB configurations that request origin HTTPS", () => {
+    expect(() =>
+      createAwsCloudFront(
+        "prod",
+        makeNlbConfig({ originProtocolPolicy: "https-only" as "http-only" })
+      )
+    ).toThrow(/must use http-only/);
+  });
+
+  it("rejects an NLB with a TLS listener on any port", async () => {
+    mockAwsState.alb.arn = nlbArn;
+    mockAwsState.alb.loadBalancerType = "network";
+    mockAwsState.alb.securityGroups = ["sg-nlb"];
+    mockElbv2State.pages[1] = {
+      Listeners: [{ ListenerArn: "listener-tls", Port: 8443, Protocol: "TLS" }],
+    };
+
+    createAwsCloudFront("prod", makeNlbConfig());
+
+    const endpoint = vpcOrigins[0]?.args.vpcOriginEndpointConfig as {
+      arn: { value: Promise<unknown> };
+    };
+    await expect(endpoint.arn.value).rejects.toThrow(/TLS listener.*8443/);
+  });
+
+  it("requires an NLB TCP listener on the configured HTTP port", async () => {
+    mockAwsState.alb.arn = nlbArn;
+    mockAwsState.alb.loadBalancerType = "network";
+    mockAwsState.alb.securityGroups = ["sg-nlb"];
+    mockElbv2State.pages = [
+      {
+        Listeners: [{ ListenerArn: "listener-tcp-443", Port: 443, Protocol: "TCP" }],
+        NextMarker: "next-page",
+      },
+      { Listeners: [{ ListenerArn: "listener-tcp-8080", Port: 8080, Protocol: "TCP" }] },
+    ];
+
+    createAwsCloudFront("prod", makeNlbConfig({ httpPort: 80 }));
+
+    const endpoint = vpcOrigins[0]?.args.vpcOriginEndpointConfig as {
+      arn: { value: Promise<unknown> };
+    };
+    await expect(endpoint.arn.value).rejects.toThrow(/TCP listener on HTTP port 80/);
   });
 
   it("uses the shared private origin for aliases and disables caching by default", () => {
@@ -639,5 +878,37 @@ describe("createCdn", () => {
 
     expect(() => createCdn("prod", { ...config, cloud: "azure" })).toThrow(/cdn/);
     expect(() => createCdn("prod", { ...config, cloud: ["aws", "azure"] })).toThrow(/multi-cloud/);
+  });
+});
+
+describe("getNlbListeners", () => {
+  it("returns listeners from every page using the NLB region", async () => {
+    mockElbv2State.pages[1] = {
+      Listeners: [{ ListenerArn: "listener-tls", Port: 8443, Protocol: "TLS" }],
+    };
+    const listeners = await getNlbListeners(
+      "ca-central-1",
+      "arn:aws:elasticloadbalancing:ca-central-1:123456789012:loadbalancer/net/private/abc"
+    );
+
+    expect(listeners).toEqual([
+      { protocol: "TCP", port: 80 },
+      { protocol: "TCP", port: 443 },
+      { protocol: "TLS", port: 8443 },
+    ]);
+    expect(mockElbv2State.requests).toEqual([
+      {
+        region: "ca-central-1",
+        marker: undefined,
+        loadBalancerArn:
+          "arn:aws:elasticloadbalancing:ca-central-1:123456789012:loadbalancer/net/private/abc",
+      },
+      {
+        region: "ca-central-1",
+        marker: "next-page",
+        loadBalancerArn:
+          "arn:aws:elasticloadbalancing:ca-central-1:123456789012:loadbalancer/net/private/abc",
+      },
+    ]);
   });
 });

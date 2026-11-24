@@ -35,6 +35,23 @@ export interface IEdgeVpcAlbOriginConfig {
   readonly albSecurityGroupIds?: ReadonlyArray<pulumi.Input<string>>;
 }
 
+/** Shared private Network Load Balancer origin managed by CloudFront VPC Origins. */
+export interface IEdgeVpcNlbOriginConfig {
+  readonly type: "nlb-vpc";
+  /** ARN of an existing internal Network Load Balancer. */
+  readonly nlbArn: pulumi.Input<string>;
+  /** NLB origins must use HTTP because CloudFront VPC Origins reject TLS listeners. */
+  readonly originProtocolPolicy?: "http-only";
+  /** Port used for CloudFront-to-NLB HTTP. Defaults to 80. */
+  readonly httpPort?: number;
+  /** Optional explicit NLB security-group ingress port. Defaults to httpPort. */
+  readonly securityGroupPort?: number;
+  /** NLB security groups to update. Required if multiple are attached. */
+  readonly nlbSecurityGroupIds?: ReadonlyArray<pulumi.Input<string>>;
+}
+
+export type IEdgeVpcOriginConfig = IEdgeVpcAlbOriginConfig | IEdgeVpcNlbOriginConfig;
+
 /** An ordered CloudFront behavior for a path with distinct cache semantics. */
 export interface IEdgeOrderedCacheBehavior {
   /** CloudFront path pattern, for example `/booking-confirmed*`. */
@@ -87,8 +104,8 @@ export interface ICdnConfig {
   readonly originSecretHeader: string;
   /** Secret injected into every distribution origin request. */
   readonly originSecretValue: pulumi.Input<string>;
-  /** Optional shared private ALB VPC Origin used by every distribution. */
-  readonly vpcOrigin?: IEdgeVpcAlbOriginConfig;
+  /** Optional shared private ALB or NLB VPC Origin used by every distribution. */
+  readonly vpcOrigin?: IEdgeVpcOriginConfig;
   /** Header populated with the distribution's public hostname. */
   readonly clientHostHeader?: string;
   /** One distribution is created for every listed hostname. */

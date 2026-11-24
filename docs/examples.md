@@ -151,6 +151,92 @@ groups, and permission to manage the Route 53 aliases. AWS may require permissio
 its `AWSServiceRoleForCloudFrontVPCOrigin` service-linked role on first use. Nimbus leaves
 other ALB security-group rules intact.
 
+### Shared private Traefik NLB with HTTP VPC Origin
+
+The AWS Load Balancer Controller can provision one internal IPv4 NLB from Traefik's
+`LoadBalancer` Service. Apply the Service once for the shared Traefik ingress, then export the
+active NLB ARN and attached security-group ID from the platform stack for Nimbus. The explicit
+frontend security group lets Nimbus restrict NLB ingress to CloudFront's service-managed VPC
+Origin security group; the controller manages the backend target rules.
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik
+  namespace: traefik
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-name: traefik-shared
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-security-groups: sg-traefik-nlb
+    service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules: "true"
+spec:
+  loadBalancerClass: service.k8s.aws/nlb
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: traefik
+  ports:
+    - name: web
+      port: 80
+      targetPort: web
+      protocol: TCP
+```
+
+Create or select `sg-traefik-nlb` in the NLB VPC before applying the Service, with no broader
+ingress rules than you intend to allow. Nimbus adds the CloudFront rule and leaves existing
+ingress intact. With the `aws-load-balancer-security-groups` annotation, the controller does
+not manage the NLB's frontend ingress rules. The controller still manages target security-group
+rules because the example enables `aws-load-balancer-manage-backend-security-group-rules`. See
+the [AWS Load Balancer Controller
+NLB annotations](https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/service/annotations/).
+
+After the controller reports the NLB active, export its ARN and security-group ID from the
+platform stack. In the Nimbus stack, reference those outputs:
+
+```typescript
+import * as pulumi from "@pulumi/pulumi";
+import { createCdn } from "@reyemtech/nimbus";
+
+const config = new pulumi.Config();
+const platform = new pulumi.StackReference(config.require("platformStack"));
+const disabledCachePolicy = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad";
+
+createCdn("prod-apps", {
+  cloud: "aws",
+  hostedZoneId: config.require("hostedZoneId"),
+  originSecretHeader: "X-Reyem-Origin-Secret",
+  originSecretValue: config.requireSecret("originSecret"),
+  vpcOrigin: {
+    type: "nlb-vpc",
+    nlbArn: platform.requireOutput("traefikNlbArn"),
+    nlbSecurityGroupIds: [platform.requireOutput("traefikNlbSecurityGroupId")],
+    originProtocolPolicy: "http-only",
+    httpPort: 80,
+  },
+  distributions: [
+    {
+      hostname: "app1.example.com",
+      aliases: ["app2.example.com"],
+      certificateArn: config.require("cloudFrontCertificateArn"),
+      cachePolicyId: disabledCachePolicy,
+      allowedMethods: ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+      cachedMethods: ["GET", "HEAD"],
+      viewerProtocolPolicy: "redirect-to-https",
+    },
+  ],
+});
+```
+
+Viewers use HTTPS to CloudFront; CloudFront sends HTTP on port 80 through the TCP NLB listener
+to Traefik's HTTP Service. Nimbus forwards viewer `Host`, so Traefik routes both app aliases
+through this single NLB. Keep dynamic and authenticated routes uncached unless the cache key
+and origin request policy include every request value that changes the response. The NLB and
+Traefik Service stay owned by the platform stack; Nimbus owns the CloudFront VPC Origin and its
+ingress rule. NLB VPC Origins require an internal IPv4 NLB with an attached security group, no
+TLS listener, and supported private subnets/region/AZs. See the [AWS VPC Origins
+prerequisites](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html#private-content-vpc-origins-prerequisites).
+
 ## Single Cloud (Azure)
 
 ```typescript

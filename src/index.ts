@@ -95,6 +95,8 @@ export type {
   ICdn,
   ICdnConfig,
   IEdgeVpcAlbOriginConfig,
+  IEdgeVpcNlbOriginConfig,
+  IEdgeVpcOriginConfig,
   IEdgeAliasRecords,
   IEdgeDistributionConfig,
   IEdgeOrderedCacheBehavior,

@@ -117,6 +117,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
+    "@aws-sdk/client-elastic-load-balancing-v2": "^3.989.0",
     "@pulumi/random": "^4.19.2",
     "yaml": "^2.8.2"
   }

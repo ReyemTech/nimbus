@@ -94,9 +94,13 @@ export { DNS_RECORD_TYPES } from "./dns";
 export type {
   ICdn,
   ICdnConfig,
+  IEdgeVpcAlbOriginConfig,
   IEdgeAliasRecords,
   IEdgeDistributionConfig,
   IEdgeOrderedCacheBehavior,
+  CloudFrontAllowedMethod,
+  CloudFrontCachedMethod,
+  CloudFrontViewerProtocolPolicy,
 } from "./cdn";
 
 // Edge trust

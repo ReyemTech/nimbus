@@ -22,6 +22,17 @@ export interface IAwsProviderOptions {
   readonly addons?: ReadonlyArray<string>;
   /** Endpoint access: "public", "private", or "both". Default: "both". */
   readonly endpointAccess?: "public" | "private" | "both";
+  /** CIDRs allowed to reach the public Kubernetes API endpoint. */
+  readonly publicAccessCidrs?: ReadonlyArray<string>;
+  /** IAM role ARN to grant cluster-admin through an EKS access entry. */
+  readonly clusterAdminRoleArn?: pulumi.Input<string>;
+  /** Encrypted gp3 root volume configuration for EKS managed node groups. */
+  readonly nodeGroupRootDisk?: {
+    readonly sizeGiB?: number;
+    readonly deleteOnTermination?: boolean;
+  };
+  /** Install EBS CSI plus Pod Identity permissions. */
+  readonly ebsCsiDriver?: boolean;
   /** KMS key ARN for state backend encryption. Uses AES256 if not provided. */
   readonly stateKmsKeyArn?: string;
   /** Allow Pulumi to destroy the state bucket (for dev/test). Default: false. */

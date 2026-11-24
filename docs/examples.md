@@ -43,6 +43,45 @@ createPlatformStack("prod", {
 
 Full example: [`examples/single-cloud-aws/`](../examples/single-cloud-aws/)
 
+### EKS with restricted access, encrypted node disks, and EBS CSI
+
+Use these options with standard EKS managed node groups. When omitted, Nimbus
+keeps the existing endpoint CIDRs, node group disk behavior, and add-on list.
+
+```typescript
+import * as pulumi from "@pulumi/pulumi";
+import { createCluster } from "@reyemtech/nimbus";
+
+const config = new pulumi.Config();
+const cluster = createCluster(
+  "prod",
+  {
+    cloud: "aws",
+    nodePools: [{ name: "workers", instanceType: "m7i.large", minNodes: 2, maxNodes: 5 }],
+    providerOptions: {
+      aws: {
+        endpointAccess: "both",
+        publicAccessCidrs: config.requireObject<string[]>("eksPublicAccessCidrs"),
+        clusterAdminRoleArn: config.require("eksAdminRoleArn"),
+        nodeGroupRootDisk: { sizeGiB: 80, deleteOnTermination: true },
+        ebsCsiDriver: true,
+      },
+    },
+  },
+  network
+);
+```
+
+`ebsCsiDriver` installs the `aws-ebs-csi-driver` EKS add-on, the Pod Identity
+agent, and a dedicated role with `AmazonEBSCSIDriverPolicyV2`. The add-on
+creates the IAM association for `ebs-csi-controller-sa`. Create a Kubernetes
+StorageClass with `provisioner: ebs.csi.aws.com` and `parameters.type: gp3` for
+gp3 PVCs; Nimbus does not change your cluster's default StorageClass.
+
+EKS Auto Mode already provides block storage and does not use the standard EBS
+CSI add-on. Nimbus rejects `ebsCsiDriver` and `nodeGroupRootDisk` when Auto Mode
+is enabled.
+
 ## Single Cloud (Azure)
 
 ```typescript

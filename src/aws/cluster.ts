@@ -19,6 +19,19 @@ export interface IEksOptions {
   readonly addons?: ReadonlyArray<string>;
   /** Endpoint access: "public", "private", or "both". Default: "both". */
   readonly endpointAccess?: "public" | "private" | "both";
+  /** CIDRs allowed to reach the public Kubernetes API endpoint. */
+  readonly publicAccessCidrs?: ReadonlyArray<string>;
+  /** IAM role ARN to grant cluster-admin through an EKS access entry. */
+  readonly clusterAdminRoleArn?: pulumi.Input<string>;
+  /** Root EBS settings for managed node groups. Omitted preserves EKS defaults. */
+  readonly nodeGroupRootDisk?: {
+    /** Root volume size in GiB. Defaults to 20 when this option is set. */
+    readonly sizeGiB?: number;
+    /** Delete the root volume when the node terminates. Defaults to true. */
+    readonly deleteOnTermination?: boolean;
+  };
+  /** Install the EBS CSI add-on and its Pod Identity permissions. */
+  readonly ebsCsiDriver?: boolean;
 }
 
 const DEFAULT_ADDONS = ["vpc-cni", "coredns", "kube-proxy"];
@@ -50,6 +63,22 @@ export function createEksCluster(
   const autoMode = options?.autoMode ?? config.autoMode ?? false;
   const addons = options?.addons ?? DEFAULT_ADDONS;
   const endpointAccess = options?.endpointAccess ?? "both";
+  const ebsCsiDriver = options?.ebsCsiDriver === true || addons.includes("aws-ebs-csi-driver");
+
+  if (autoMode && options?.nodeGroupRootDisk) {
+    throw new Error("nodeGroupRootDisk applies only to EKS managed node groups, not Auto Mode.");
+  }
+  if (autoMode && ebsCsiDriver) {
+    throw new Error(
+      "EKS Auto Mode provides block storage; do not enable the standard EBS CSI add-on."
+    );
+  }
+  if (
+    options?.nodeGroupRootDisk?.sizeGiB !== undefined &&
+    (!Number.isInteger(options.nodeGroupRootDisk.sizeGiB) || options.nodeGroupRootDisk.sizeGiB <= 0)
+  ) {
+    throw new Error("nodeGroupRootDisk.sizeGiB must be a positive integer.");
+  }
 
   // EKS cluster IAM role
   const clusterRole = new aws.iam.Role(`${name}-cluster-role`, {
@@ -83,6 +112,7 @@ export function createEksCluster(
         .apply(([pub, priv]) => [...pub, ...priv]),
       endpointPrivateAccess: endpointAccess === "private" || endpointAccess === "both",
       endpointPublicAccess: endpointAccess === "public" || endpointAccess === "both",
+      publicAccessCidrs: options?.publicAccessCidrs ? [...options.publicAccessCidrs] : undefined,
     },
     computeConfig: autoMode ? { enabled: true } : undefined,
     accessConfig: { authenticationMode: "API_AND_CONFIG_MAP" },
@@ -95,6 +125,24 @@ export function createEksCluster(
   if (!autoMode) {
     for (const np of config.nodePools) {
       const nodeRole = createNodeRole(`${name}-${np.name}`, tags);
+      const launchTemplate = options?.nodeGroupRootDisk
+        ? new aws.ec2.LaunchTemplate(`${name}-lt-${np.name}`, {
+            blockDeviceMappings: [
+              {
+                deviceName: "/dev/xvda",
+                ebs: {
+                  volumeSize: options.nodeGroupRootDisk.sizeGiB ?? 20,
+                  volumeType: "gp3",
+                  encrypted: "true",
+                  deleteOnTermination: String(
+                    options.nodeGroupRootDisk.deleteOnTermination ?? true
+                  ),
+                },
+              },
+            ],
+            tags: { ...tags, Name: `${name}-${np.name}-launch-template` },
+          })
+        : undefined;
       nodeGroups.push(
         new aws.eks.NodeGroup(`${name}-ng-${np.name}`, {
           clusterName: cluster.name,
@@ -109,6 +157,12 @@ export function createEksCluster(
           },
           subnetIds: network.privateSubnetIds as pulumi.Output<string[]>,
           labels: np.labels,
+          launchTemplate: launchTemplate
+            ? {
+                id: launchTemplate.id,
+                version: launchTemplate.latestVersion.apply((version) => String(version)),
+              }
+            : undefined,
           tags: { ...tags, Name: `${name}-${np.name}` },
         })
       );
@@ -117,18 +171,81 @@ export function createEksCluster(
 
   const firstNodeGroup = nodeGroups[0];
 
+  // Grant the EBS CSI controller its AWS permissions through EKS Pod Identity.
+  let ebsCsiRole: aws.iam.Role | undefined;
+  if (ebsCsiDriver) {
+    ebsCsiRole = new aws.iam.Role(`${name}-ebs-csi-role`, {
+      namePrefix: `${name}-ebs-csi-`,
+      assumeRolePolicy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Principal: { Service: "pods.eks.amazonaws.com" },
+            Action: ["sts:AssumeRole", "sts:TagSession"],
+          },
+        ],
+      }),
+      tags,
+    });
+    new aws.iam.RolePolicyAttachment(`${name}-ebs-csi-policy`, {
+      policyArn: "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicyV2",
+      role: ebsCsiRole.name,
+    });
+  }
+
+  // Add-on names are deduplicated so the explicit add-on list can include the
+  // EBS driver without creating a second copy of it or its Pod Identity agent.
+  const addonNames = new Set(addons);
+  if (ebsCsiDriver) {
+    addonNames.add("eks-pod-identity-agent");
+    // Ensure callers that explicitly listed the CSI add-on still get its
+    // required Pod Identity agent created first.
+    addonNames.delete("aws-ebs-csi-driver");
+    addonNames.add("aws-ebs-csi-driver");
+  }
+
   // EKS Add-ons
-  for (const addon of addons) {
-    new aws.eks.Addon(
+  let podIdentityAgent: aws.eks.Addon | undefined;
+  for (const addon of addonNames) {
+    const dependsOn: pulumi.Resource[] = firstNodeGroup ? [firstNodeGroup] : [];
+    if (addon === "aws-ebs-csi-driver" && podIdentityAgent) {
+      dependsOn.push(podIdentityAgent);
+    }
+    const addonResource = new aws.eks.Addon(
       `${name}-addon-${addon}`,
       {
         clusterName: cluster.name,
         addonName: addon,
         resolveConflictsOnCreate: "OVERWRITE",
         resolveConflictsOnUpdate: "OVERWRITE",
+        podIdentityAssociations:
+          addon === "aws-ebs-csi-driver" && ebsCsiRole
+            ? [{ roleArn: ebsCsiRole.arn, serviceAccount: "ebs-csi-controller-sa" }]
+            : undefined,
         tags,
       },
-      firstNodeGroup ? { dependsOn: [firstNodeGroup] } : undefined
+      dependsOn.length ? { dependsOn } : undefined
+    );
+    if (addon === "eks-pod-identity-agent") podIdentityAgent = addonResource;
+  }
+
+  if (options?.clusterAdminRoleArn) {
+    const accessEntry = new aws.eks.AccessEntry(`${name}-cluster-admin-entry`, {
+      clusterName: cluster.name,
+      principalArn: options.clusterAdminRoleArn,
+      type: "STANDARD",
+      tags,
+    });
+    new aws.eks.AccessPolicyAssociation(
+      `${name}-cluster-admin-policy`,
+      {
+        clusterName: cluster.name,
+        principalArn: options.clusterAdminRoleArn,
+        policyArn: "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy",
+        accessScope: { type: "cluster" },
+      },
+      { dependsOn: [accessEntry] }
     );
   }
 

@@ -434,6 +434,44 @@ await createNetwork("prod", { cloud: ["aws", "azure"], ... });
 
 ## Direct Cloud Functions (Escape Hatch)
 
+### AWS EKS options
+
+`createEksCluster(..., options?)` accepts these AWS-specific options directly.
+The same options are available under `createCluster(..., { providerOptions: {
+aws: ... }})`.
+
+| Option | Description |
+| --- | --- |
+| `publicAccessCidrs` | CIDRs allowed to reach the public API endpoint. Applies when public endpoint access is enabled. |
+| `clusterAdminRoleArn` | IAM role ARN granted `AmazonEKSClusterAdminPolicy` through an EKS access entry. |
+| `nodeGroupRootDisk` | Enables an encrypted gp3 root disk launch template for managed node groups. `sizeGiB` defaults to 20 and `deleteOnTermination` defaults to `true`. Omit the option to preserve EKS defaults. |
+| `ebsCsiDriver` | Installs the EBS CSI add-on and Pod Identity agent, with a dedicated role attached to `AmazonEBSCSIDriverPolicyV2`. Defaults to `false`. |
+
+The EBS CSI option is not supported with EKS Auto Mode, which has built-in block
+storage. Nimbus does not create or change a StorageClass; create one with
+`provisioner: ebs.csi.aws.com` and `parameters.type: gp3` to provision gp3 PVCs.
+
+```typescript
+createCluster(
+  "prod",
+  {
+    cloud: "aws",
+    nodePools: [{ name: "workers", instanceType: "m7i.large", minNodes: 2, maxNodes: 5 }],
+    providerOptions: {
+      aws: {
+        publicAccessCidrs: ["203.0.113.0/24"],
+        clusterAdminRoleArn: adminRole.arn,
+        nodeGroupRootDisk: { sizeGiB: 80, deleteOnTermination: true },
+        ebsCsiDriver: true,
+      },
+    },
+  },
+  network
+);
+```
+
+For a complete Pulumi config example, see [EKS with restricted access, encrypted node disks, and EBS CSI](./examples.md#eks-with-restricted-access-encrypted-node-disks-and-ebs-csi).
+
 For maximum control, use cloud-specific functions directly via subpath imports:
 
 ```typescript

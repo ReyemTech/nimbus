@@ -472,6 +472,52 @@ createCluster(
 
 For a complete Pulumi config example, see [EKS with restricted access, encrypted node disks, and EBS CSI](./examples.md#eks-with-restricted-access-encrypted-node-disks-and-ebs-csi).
 
+### CloudFront VPC Origins
+
+`createCdn` can create one shared CloudFront VPC Origin from an existing private ALB or NLB ARN.
+Nimbus validates the load balancer and VPC Origin prerequisites, then adds ingress from AWS's
+service-managed CloudFront VPC Origins security group.
+
+| Option | Description |
+| --- | --- |
+| `vpcOrigin` | Optional shared private origin. `type: "alb-vpc"` accepts `albArn`, `originProtocolPolicy`, `httpPort`, `httpsPort`, `securityGroupPort`, and `albSecurityGroupIds`. `type: "nlb-vpc"` accepts `nlbArn`, HTTP-only `originProtocolPolicy`, `httpPort` (default 80), `securityGroupPort`, and `nlbSecurityGroupIds`; NLBs must be IPv4 and have no TLS listeners. With one attached security group, Nimbus infers it; otherwise select attached groups explicitly. Private origins also derive the trusted client-host header from viewer `Host` with a CloudFront Function. |
+| `aliases` | Additional hostnames on a distribution; all are routed through the shared ALB or NLB and need coverage in the viewer ACM certificate. Keep aliases in the configured Route 53 hosted zone. |
+| `cachePolicyId` / `originRequestPolicyId` | Default behavior policy IDs, overridable per ordered path behavior. Private origins default to CachingDisabled and a Host-forwarding policy. |
+| `allowedMethods` / `cachedMethods` / `viewerProtocolPolicy` | Distribution behavior settings, overridable per ordered path behavior. Cached methods must be included in allowed methods. |
+
+```typescript
+createCdn("prod-apps", {
+  cloud: "aws",
+  hostedZoneId,
+  originSecretHeader: "X-Reyem-Origin-Secret",
+  originSecretValue,
+  vpcOrigin: {
+    type: "alb-vpc",
+    albArn: traefikAlb.arn,
+    albSecurityGroupIds: [traefikAlbSecurityGroup.id],
+    originProtocolPolicy: "http-only",
+    httpPort: 80,
+  },
+  distributions: [
+    {
+      hostname: "app1.example.com",
+      aliases: ["app2.example.com"],
+      certificateArn,
+      cachePolicyId: "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+      orderedCacheBehaviors: [
+        { pathPattern: "/api/*", cachePolicyId: "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" },
+      ],
+    },
+  ],
+});
+```
+
+Dynamic, authenticated, and personalized routes should remain uncached unless their cache key
+and origin request policy include every response-varying request value. Public custom origins
+keep their previous defaults. If CloudFront uses HTTPS to reach the ALB, its certificate must
+cover the forwarded viewer `Host` alias. NLB VPC Origins require HTTP-only because CloudFront
+rejects NLB TLS listeners. See [Shared private Traefik ALB for multiple app hostnames](./examples.md#shared-private-traefik-alb-for-multiple-app-hostnames) and [Shared private Traefik NLB with HTTP VPC Origin](./examples.md#shared-private-traefik-nlb-with-http-vpc-origin) for full examples and ownership/prerequisite details.
+
 For maximum control, use cloud-specific functions directly via subpath imports:
 
 ```typescript

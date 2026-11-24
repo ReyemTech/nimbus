@@ -274,7 +274,16 @@ describe("createCluster factory", () => {
       {
         cloud: "aws",
         nodePools,
-        providerOptions: { aws: { autoMode: true, endpointAccess: "private" } },
+        providerOptions: {
+          aws: {
+            autoMode: true,
+            endpointAccess: "private",
+            publicAccessCidrs: ["203.0.113.0/24"],
+            clusterAdminRoleArn: "arn:aws:iam::123456789012:role/platform-admin",
+            nodeGroupRootDisk: { sizeGiB: 80, deleteOnTermination: false },
+            ebsCsiDriver: true,
+          },
+        },
       },
       awsNetwork
     );
@@ -283,6 +292,10 @@ describe("createCluster factory", () => {
     expect(eksOpts).toEqual({
       autoMode: true,
       endpointAccess: "private",
+      publicAccessCidrs: ["203.0.113.0/24"],
+      clusterAdminRoleArn: "arn:aws:iam::123456789012:role/platform-admin",
+      nodeGroupRootDisk: { sizeGiB: 80, deleteOnTermination: false },
+      ebsCsiDriver: true,
     });
   });
 

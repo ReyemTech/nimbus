@@ -10,6 +10,7 @@ interface IConstructedResource {
 }
 
 const originRequestPolicies: IConstructedResource[] = [];
+const cloudFrontFunctions: IConstructedResource[] = [];
 const distributions: IConstructedResource[] = [];
 const aliases: IConstructedResource[] = [];
 const vpcOrigins: IConstructedResource[] = [];
@@ -64,6 +65,16 @@ const mockAwsState = vi.hoisted(() => ({
   routeTable: {
     routes: [{ cidrBlock: "10.0.0.0/16", ipv6CidrBlock: "", gatewayId: "local" }],
   },
+  routeTables: {
+    explicitIds: ["rtb-explicit"],
+    queries: [] as Array<{ filters?: Array<{ name: string; values: string[] }>; vpcId?: string }>,
+    lookups: [] as Array<{
+      filters?: Array<{ name: string; values: string[] }>;
+      region?: string;
+      routeTableId?: string;
+      vpcId?: string;
+    }>,
+  },
   internetGateway: { attachments: [{ vpcId: "vpc-123", state: "available" }] },
   managedSecurityGroups: { ids: ["sg-cloudfront-vpc-origin"] },
 }));
@@ -117,7 +128,23 @@ vi.mock("@pulumi/aws", () => ({
     getSubnetOutput: vi.fn(({ id }: { id: string }) =>
       mockPulumi.output({ ...mockAwsState.subnet, id })
     ),
-    getRouteTableOutput: vi.fn(() => mockPulumi.output(mockAwsState.routeTable)),
+    getRouteTablesOutput: vi.fn(
+      (args: { filters?: Array<{ name: string; values: string[] }>; vpcId?: string }) => {
+        mockAwsState.routeTables.queries.push(args);
+        return mockPulumi.output({ ids: mockAwsState.routeTables.explicitIds });
+      }
+    ),
+    getRouteTableOutput: vi.fn(
+      (args: {
+        filters?: Array<{ name: string; values: string[] }>;
+        region?: string;
+        routeTableId?: string;
+        vpcId?: string;
+      }) => {
+        mockAwsState.routeTables.lookups.push(args);
+        return mockPulumi.output(mockAwsState.routeTable);
+      }
+    ),
     getInternetGatewayOutput: vi.fn(() => mockPulumi.output(mockAwsState.internetGateway)),
     getSecurityGroupsOutput: vi.fn(() => mockPulumi.output(mockAwsState.managedSecurityGroups)),
     SecurityGroupRule: class {
@@ -127,6 +154,13 @@ vi.mock("@pulumi/aws", () => ({
     },
   },
   cloudfront: {
+    Function: class {
+      readonly arn = "arn:aws:cloudfront::123456789012:function/prod-client-host";
+
+      constructor(name: string, args: Record<string, unknown>) {
+        cloudFrontFunctions.push({ name, args });
+      }
+    },
     OriginRequestPolicy: class {
       readonly id = "origin-request-policy-id";
 
@@ -174,6 +208,7 @@ void typedNlbOrigin;
 
 beforeEach(() => {
   originRequestPolicies.length = 0;
+  cloudFrontFunctions.length = 0;
   distributions.length = 0;
   aliases.length = 0;
   vpcOrigins.length = 0;
@@ -190,6 +225,9 @@ beforeEach(() => {
   mockAwsState.routeTable.routes = [
     { cidrBlock: "10.0.0.0/16", ipv6CidrBlock: "", gatewayId: "local" },
   ];
+  mockAwsState.routeTables.explicitIds = ["rtb-explicit"];
+  mockAwsState.routeTables.queries.length = 0;
+  mockAwsState.routeTables.lookups.length = 0;
   mockAwsState.internetGateway.attachments = [{ vpcId: "vpc-123", state: "available" }];
   mockAwsState.managedSecurityGroups.ids = ["sg-cloudfront-vpc-origin"];
   mockElbv2State.requests.length = 0;
@@ -352,6 +390,44 @@ describe("createAwsCloudFront", () => {
     });
   });
 
+  it("derives the private client-host header from viewer Host for every cache behavior", () => {
+    mockAwsState.alb.loadBalancerType = "network";
+    const config = makeNlbConfig({ nlbSecurityGroupIds: ["sg-alb-a"] });
+    const firstDistribution = config.distributions[0];
+    if (!firstDistribution) {
+      throw new Error("Expected NLB fixture distribution");
+    }
+    createAwsCloudFront("prod", {
+      ...config,
+      distributions: [
+        {
+          ...firstDistribution,
+          orderedCacheBehaviors: [{ pathPattern: "/api/*" }],
+        },
+      ],
+    });
+
+    expect(cloudFrontFunctions).toHaveLength(1);
+    expect(cloudFrontFunctions[0]?.args).toMatchObject({
+      code: expect.stringContaining(
+        'request.headers["x-reyem-client-host"] = { value: request.headers.host.value }'
+      ),
+      runtime: "cloudfront-js-2.0",
+      publish: true,
+    });
+    const distribution = distributions[0]?.args as {
+      defaultCacheBehavior: { functionAssociations: Array<{ eventType: string }> };
+      orderedCacheBehaviors: Array<{ functionAssociations: Array<{ eventType: string }> }>;
+    };
+    expect(distribution.defaultCacheBehavior.functionAssociations).toEqual([
+      {
+        eventType: "viewer-request",
+        functionArn: "arn:aws:cloudfront::123456789012:function/prod-client-host",
+      },
+    ]);
+    expect(distribution.orderedCacheBehaviors[0]?.functionAssociations).toHaveLength(1);
+  });
+
   it("uses the configured NLB HTTP port for the CloudFront ingress rule", () => {
     mockAwsState.alb.arn = nlbArn;
     mockAwsState.alb.loadBalancerType = "network";
@@ -507,6 +583,25 @@ describe("createAwsCloudFront", () => {
       "app2.example.com",
     ]);
     expect(Object.keys(cdn.distributions).sort()).toEqual(["app1.example.com", "app2.example.com"]);
+  });
+
+  it("uses the VPC main route table for subnets without explicit route-table associations", () => {
+    mockAwsState.alb.loadBalancerType = "network";
+    mockAwsState.routeTables.explicitIds = [];
+
+    expect(() =>
+      createAwsCloudFront("prod", makeNlbConfig({ nlbSecurityGroupIds: ["sg-alb-a"] }))
+    ).not.toThrow();
+    expect(mockAwsState.routeTables.queries).toContainEqual({
+      filters: [{ name: "association.subnet-id", values: ["subnet-a"] }],
+      vpcId: "vpc-123",
+      region: "us-east-1",
+    });
+    expect(mockAwsState.routeTables.lookups).toContainEqual({
+      filters: [{ name: "association.main", values: ["true"] }],
+      vpcId: "vpc-123",
+      region: "us-east-1",
+    });
   });
 
   it("allows policy and method overrides on default and path behaviors", () => {
@@ -749,6 +844,7 @@ describe("createAwsCloudFront", () => {
     createAwsCloudFront("prod", config);
 
     expect(distributions).toHaveLength(1);
+    expect(cloudFrontFunctions).toHaveLength(0);
     expect(distributions[0]?.args).toMatchObject({
       aliases: ["www.reyem.tech"],
       webAclId: "arn:aws:wafv2:us-east-1:123456789012:global/webacl/shared/example",

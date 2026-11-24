@@ -230,8 +230,10 @@ createCdn("prod-apps", {
 
 Viewers use HTTPS to CloudFront; CloudFront sends HTTP on port 80 through the TCP NLB listener
 to Traefik's HTTP Service. Nimbus forwards viewer `Host`, so Traefik routes both app aliases
-through this single NLB. Keep dynamic and authenticated routes uncached unless the cache key
-and origin request policy include every request value that changes the response. The NLB and
+through this single NLB. A CloudFront Function derives the trusted `X-Reyem-Client-Host` header
+from viewer `Host`, so client-supplied values cannot override it. Keep dynamic and authenticated
+routes uncached unless the cache key and origin request policy include every request value that
+changes the response. The NLB and
 Traefik Service stay owned by the platform stack; Nimbus owns the CloudFront VPC Origin and its
 ingress rule. NLB VPC Origins require an internal IPv4 NLB with an attached security group, no
 TLS listener, and supported private subnets/region/AZs. See the [AWS VPC Origins

@@ -110,6 +110,18 @@ export function createAwsCloudFront(name: string, config: ICdnConfig): ICdn {
   validateConfig(config, clientHostHeader);
 
   const vpcOrigin = config.vpcOrigin ? createVpcOrigin(name, config.vpcOrigin) : undefined;
+  const privateClientHostFunction = vpcOrigin
+    ? new aws.cloudfront.Function(`${name}-client-host`, {
+        name: `${name}-client-host`,
+        runtime: "cloudfront-js-2.0",
+        publish: true,
+        comment: "Bind the trusted client-host header to the viewer Host",
+        code: `function handler(event) {\n  var request = event.request;\n  request.headers[${JSON.stringify(clientHostHeader.toLowerCase())}] = { value: request.headers.host.value };\n  return request;\n}`,
+      })
+    : undefined;
+  const privateClientHostFunctionAssociations = privateClientHostFunction
+    ? [{ eventType: "viewer-request", functionArn: privateClientHostFunction.arn }]
+    : undefined;
 
   const originRequestPolicy = new aws.cloudfront.OriginRequestPolicy(`${name}-origin-request`, {
     cookiesConfig: { cookieBehavior: "all" },
@@ -175,6 +187,7 @@ export function createAwsCloudFront(name: string, config: ICdnConfig): ICdn {
           originRequestPolicyId: defaultOriginRequestPolicyId,
           targetOriginId: originId,
           viewerProtocolPolicy: defaultViewerProtocolPolicy,
+          functionAssociations: privateClientHostFunctionAssociations,
         },
         orderedCacheBehaviors: distribution.orderedCacheBehaviors?.map((behavior) => ({
           allowedMethods: [...(behavior.allowedMethods ?? defaultAllowedMethods)],
@@ -184,6 +197,7 @@ export function createAwsCloudFront(name: string, config: ICdnConfig): ICdn {
           pathPattern: behavior.pathPattern,
           targetOriginId: originId,
           viewerProtocolPolicy: behavior.viewerProtocolPolicy ?? defaultViewerProtocolPolicy,
+          functionAssociations: privateClientHostFunctionAssociations,
         })),
         priceClass: "PriceClass_100",
         restrictions: { geoRestriction: { restrictionType: "none" } },
@@ -267,15 +281,38 @@ function createVpcOrigin(
       metadata.subnets.map((id) => aws.ec2.getSubnetOutput({ id, region: metadata.region }))
     )
   );
-  const routeTables = pulumi
-    .all([loadBalancer, subnets])
-    .apply(([metadata, subnetResults]) =>
-      pulumi.all(
-        subnetResults.map((subnet) =>
-          aws.ec2.getRouteTableOutput({ subnetId: subnet.id, region: metadata.region })
-        )
+  const routeTables = pulumi.all([loadBalancer, subnets]).apply(([metadata, subnetResults]) =>
+    pulumi.all(
+      subnetResults.map((subnet) =>
+        aws.ec2
+          .getRouteTablesOutput({
+            filters: [{ name: "association.subnet-id", values: [subnet.id] }],
+            vpcId: metadata.vpcId,
+            region: metadata.region,
+          })
+          .apply(({ ids }) => {
+            if (ids.length > 1) {
+              throw new ConfigError(
+                `Subnet "${subnet.id}" has multiple explicit route-table associations`,
+                "CONFIG_INVALID",
+                arnConfigKey
+              );
+            }
+            const explicitRouteTableId = ids[0];
+            return explicitRouteTableId
+              ? aws.ec2.getRouteTableOutput({
+                  routeTableId: explicitRouteTableId,
+                  region: metadata.region,
+                })
+              : aws.ec2.getRouteTableOutput({
+                  filters: [{ name: "association.main", values: ["true"] }],
+                  vpcId: metadata.vpcId,
+                  region: metadata.region,
+                });
+          })
       )
-    );
+    )
+  );
   const internetGateway = loadBalancer.apply((metadata) =>
     aws.ec2.getInternetGatewayOutput({
       filters: [{ name: "attachment.vpc-id", values: [metadata.vpcId] }],

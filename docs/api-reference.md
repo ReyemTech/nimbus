@@ -480,7 +480,7 @@ service-managed CloudFront VPC Origins security group.
 
 | Option | Description |
 | --- | --- |
-| `vpcOrigin` | Optional shared private origin. `type: "alb-vpc"` accepts `albArn`, `originProtocolPolicy`, `httpPort`, `httpsPort`, `securityGroupPort`, and `albSecurityGroupIds`. `type: "nlb-vpc"` accepts `nlbArn`, HTTP-only `originProtocolPolicy`, `httpPort` (default 80), `securityGroupPort`, and `nlbSecurityGroupIds`; NLBs must be IPv4 and have no TLS listeners. With one attached security group, Nimbus infers it; otherwise select attached groups explicitly. |
+| `vpcOrigin` | Optional shared private origin. `type: "alb-vpc"` accepts `albArn`, `originProtocolPolicy`, `httpPort`, `httpsPort`, `securityGroupPort`, and `albSecurityGroupIds`. `type: "nlb-vpc"` accepts `nlbArn`, HTTP-only `originProtocolPolicy`, `httpPort` (default 80), `securityGroupPort`, and `nlbSecurityGroupIds`; NLBs must be IPv4 and have no TLS listeners. With one attached security group, Nimbus infers it; otherwise select attached groups explicitly. Private origins also derive the trusted client-host header from viewer `Host` with a CloudFront Function. |
 | `aliases` | Additional hostnames on a distribution; all are routed through the shared ALB or NLB and need coverage in the viewer ACM certificate. Keep aliases in the configured Route 53 hosted zone. |
 | `cachePolicyId` / `originRequestPolicyId` | Default behavior policy IDs, overridable per ordered path behavior. Private origins default to CachingDisabled and a Host-forwarding policy. |
 | `allowedMethods` / `cachedMethods` / `viewerProtocolPolicy` | Distribution behavior settings, overridable per ordered path behavior. Cached methods must be included in allowed methods. |

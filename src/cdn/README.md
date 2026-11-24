@@ -4,6 +4,8 @@
 edge-trust middleware. Each distribution has one primary `hostname` and may have additional
 CloudFront `aliases`. Public custom origins keep the existing static client-host header. Private
 VPC origins forward the viewer `Host`, allowing one Traefik ALB or NLB to route aliases by hostname.
+Nimbus also associates a viewer-request CloudFront Function that overwrites the trusted client-host
+header from the viewer `Host`, preserving the edge-trust boundary for private origins.
 
 Public custom origins use an origin request policy that excludes `Host`, forward CloudFront
 viewer-address and geo headers, and add the configured static client-host header. Private VPC
@@ -27,7 +29,8 @@ continues to be added to requests; Traefik can use it to reject requests that by
 Private origins default to the AWS managed CachingDisabled cache policy. Dynamic, session,
 authorization-dependent, or personalized routes should stay uncached unless the cache key and
 origin request policy account for every request value that changes the response. If you set a
-custom `originRequestPolicyId` for a private origin, it must forward `Host` for Traefik routing.
+custom `originRequestPolicyId` for a private origin, it must forward viewer `Host` for Traefik
+routing and the derived `clientHostHeader` for edge-trust verification.
 For HTTPS-only or match-viewer origins, the ALB's trusted TLS certificate must cover each
 forwarded host alias.
 You can override cache policy, origin request policy, allowed methods, cached methods, and
@@ -44,12 +47,13 @@ The Pulumi stack managing Nimbus owns the VPC Origin, ALB ingress rule(s), Cloud
 distributions, and Route 53 aliases. The stack that created the EKS ALB continues to own the
 ALB and its listeners/security groups; Nimbus does not delete or replace them.
 
-The deploying identity needs permission to manage CloudFront VPC Origins and distributions,
-read the ALB and VPC subnet/route table/internet gateway/security-group metadata, add and remove
-ALB security-group ingress rules, and manage Route 53 aliases. On first use in an account, AWS
-may also need permission to create the `AWSServiceRoleForCloudFrontVPCOrigin` service-linked
-role. Nimbus adds ingress rules and does not remove other existing ALB security-group rules;
-keep any non-CloudFront access you intend to retain explicit in the platform stack.
+The deploying identity needs permission to manage CloudFront VPC Origins, CloudFront Functions,
+and distributions; read the load balancer and VPC subnet, route table, internet gateway, and
+security-group metadata; add and remove security-group ingress rules; and manage Route 53 aliases.
+On first use in an account, AWS may also need permission to create the
+`AWSServiceRoleForCloudFrontVPCOrigin` service-linked role. Nimbus adds ingress rules and does
+not remove existing ALB security-group rules; keep any non-CloudFront access you intend to retain
+explicit in the platform stack.
 
 ## Private EKS NLB through CloudFront VPC Origins
 

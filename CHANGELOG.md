@@ -1,3 +1,15 @@
+# [3.14.0](https://github.com/ReyemTech/nimbus/compare/v3.13.0...v3.14.0) (2026-11-25)
+
+
+### Bug Fixes
+
+* **aws:** honor provider region and instance tags ([601c1cf](https://github.com/ReyemTech/nimbus/commit/601c1cf11d7437c8d7bac71be39831c9780689f5))
+
+
+### Features
+
+* **aws:** tag cluster resources for cost allocation ([60f4b0e](https://github.com/ReyemTech/nimbus/commit/60f4b0e68475be8fcb631ddf270bc231cd668f35))
+
 # [3.13.0](https://github.com/ReyemTech/nimbus/compare/v3.12.0...v3.13.0) (2026-11-25)
 
 

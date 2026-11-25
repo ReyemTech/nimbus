@@ -12,13 +12,13 @@ All factory functions are **async** and use dynamic imports internally — the p
 
 Creates a VPC (AWS) or VNet (Azure) with subnets and NAT.
 
-| Parameter                | Type               | Description                                               |
-| ------------------------ | ------------------ | --------------------------------------------------------- |
-| `name`                   | `string`           | Resource name prefix                                      |
-| `config.cloud`           | `CloudArg`         | `"aws"`, `"azure"`, or `["aws", "azure"]` for multi-cloud |
-| `config.cidr`            | `string`           | CIDR block (auto-offset for multi-cloud)                  |
+| Parameter                | Type               | Description                                                                                                        |
+| ------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `name`                   | `string`           | Resource name prefix                                                                                               |
+| `config.cloud`           | `CloudArg`         | `"aws"`, `"azure"`, or `["aws", "azure"]` for multi-cloud                                                          |
+| `config.cidr`            | `string`           | CIDR block (auto-offset for multi-cloud)                                                                           |
 | `config.natStrategy`     | `NatStrategy`      | `"managed"`, `"fck-nat"`, or `"none"`. On AWS, private subnet outputs wait for the default route to report active. |
-| `config.providerOptions` | `IProviderOptions` | Provider-specific options (see below)                     |
+| `config.providerOptions` | `IProviderOptions` | Provider-specific options (see below)                                                                              |
 
 Returns: `Promise<INetwork>` (single cloud) or `Promise<INetwork[]>` (multi-cloud)
 
@@ -130,11 +130,11 @@ creates an additional login role/user on the database, generates its password,
 and replicates a connection Secret into the given namespaces. The API is uniform
 across engines; the mechanism and the guarantees behind it are not:
 
-| Engine | Mechanism |
-| --- | --- |
-| CloudNativePG | `DatabaseRole` CR for the role itself. Grants have no CRD, so they are applied by a `psql` Job that authenticates as the **database owner**, never superuser — one transaction that revokes every privilege the role currently holds and re-grants the requested set, so removing a grant from config actually revokes it. |
-| MariaDB | `User` CR for the account, one `Grant` CR per requested grant. Fully declarative — no SQL, no Job. |
-| Neo4j (Community) | a one-shot `cypher-shell` Job running `CREATE OR REPLACE USER`. There is no RBAC to reconcile — any `grants` value throws, `[]` included. |
+| Engine            | Mechanism                                                                                                                                                                                                                                                                                                                  |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CloudNativePG     | `DatabaseRole` CR for the role itself. Grants have no CRD, so they are applied by a `psql` Job that authenticates as the **database owner**, never superuser — one transaction that revokes every privilege the role currently holds and re-grants the requested set, so removing a grant from config actually revokes it. |
+| MariaDB           | `User` CR for the account, one `Grant` CR per requested grant. Fully declarative — no SQL, no Job.                                                                                                                                                                                                                         |
+| Neo4j (Community) | a one-shot `cypher-shell` Job running `CREATE OR REPLACE USER`. There is no RBAC to reconcile — any `grants` value throws, `[]` included.                                                                                                                                                                                  |
 
 ```typescript
 interface IDatabaseRoleConfig {
@@ -236,7 +236,7 @@ The registry covers every role on the cluster, so a database's **owner** counts
 too: `analytics.addRole("billing")` fails because `billing`'s owner already holds
 that name. Give the roles distinct names (`billing-reader`, `analytics-reader`) —
 nimbus deliberately does not rename them for you, because the role you would get
-back would not be the one you asked for. If you genuinely want *one* role reading
+back would not be the one you asked for. If you genuinely want _one_ role reading
 from both databases, call `addRole()` once and grant it on the second database
 through that database's `sql` escape hatch — nimbus models a role's privileges
 only in the database it was added to.
@@ -258,7 +258,7 @@ has. Neither Job reports a failure.
 
 The check is scoped to one `createCluster()` call in one Pulumi program, which is
 the whole picture whenever a physical cluster is owned by a single stack. If two
-separate stacks provision roles on the *same* live cluster, nothing at build time
+separate stacks provision roles on the _same_ live cluster, nothing at build time
 can see across them — that is a deployment topology to avoid, not a case this
 guard covers.
 
@@ -267,6 +267,7 @@ It throws code `INVALID_GRANT` when a grant lists zero privileges, and code
 cannot emit. On CloudNativePG the allowed set is `SELECT`, `INSERT`, `UPDATE`,
 `DELETE`, `TRUNCATE`, `REFERENCES`, `TRIGGER`, `ALL PRIVILEGES` — every one of
 them is valid in the `GRANT ... ON ALL TABLES IN SCHEMA ...` / `GRANT ... ON
+
 <table>` statements the compiler emits. `USAGE` and `CREATE` are **not** accepted:
 they are schema privileges, not relation privileges, so they would render as
 `GRANT USAGE ON ALL TABLES IN SCHEMA ...` and fail at runtime. Nothing is lost —
@@ -283,7 +284,7 @@ be scoped to a database. `GRANT OPTION` is not a privilege here either: the
 
 **Omitting `grants` is not the same as `grants: []`.** Omitting it means nimbus
 does not manage the role's privileges: nothing is granted and, on CloudNativePG,
-nothing is revoked. `grants: []` means the role should hold *no* privileges — a
+nothing is revoked. `grants: []` means the role should hold _no_ privileges — a
 real desired state, so the reconciling Job still runs and revokes everything.
 That is what makes removing the last grant from a config take access away
 instead of freezing it. On MariaDB the two coincide (privileges live in `Grant`
@@ -450,18 +451,21 @@ await createNetwork("prod", { cloud: ["aws", "azure"], ... });
 The same options are available under `createCluster(..., { providerOptions: {
 aws: ... }})`.
 
-| Option | Description |
-| --- | --- |
-| `publicAccessCidrs` | CIDRs allowed to reach the public API endpoint. Applies when public endpoint access is enabled. |
-| `clusterAdminRoleArn` | IAM principal ARN (role or user) granted `AmazonEKSClusterAdminPolicy` through an EKS access entry. |
-| `kubernetesProviderRoleArn` | Optional IAM role assumed by the Kubernetes provider's `aws eks get-token` command. Use it when the provider must authenticate as a role different from the deployment credentials; that role must have EKS access. |
-| `nodeGroupRootDisk` | Enables an encrypted gp3 root disk launch template for managed node groups. `sizeGiB` defaults to 20 and `deleteOnTermination` defaults to `true`. Omit the option to preserve EKS defaults. |
-| `nodeGroupAmiType` | AMI family for managed node groups, such as `AL2023_ARM_64_STANDARD`. |
-| `nodeGroupInstanceTags` | EC2 instance tags propagated through managed node-group launch-template `tagSpecifications`. |
-| `ebsCsiDriver` | Installs the EBS CSI add-on and Pod Identity agent, with a dedicated role attached to `AmazonEBSCSIDriverPolicyV2`. Defaults to `false`. |
-| `metricsServer` | Opt-in EKS community add-on providing the Kubernetes Resource Metrics API. Set `true` to use the EKS-compatible default, or pass `{ enabled?, addonVersion?, configurationValues? }`. EKS validates version compatibility. This is separate from Prometheus and is EKS-only. |
-| `authenticationMode` / `bootstrapClusterCreatorAdminPermissions` | EKS access configuration. Defaults preserve Nimbus's existing `API_AND_CONFIG_MAP` mode and AWS's creator-admin behavior. When creator admin is disabled, use API authentication and provide `clusterAdminRoleArn` so Nimbus can grant access before Kubernetes resources run. |
-| `upgradePolicy` | Sets `supportType` to `STANDARD` or `EXTENDED`. Omitted preserves AWS's current `EXTENDED` default. `STANDARD` avoids extended-support charges but AWS automatically upgrades the control plane at end of standard support; `EXTENDED` keeps the version longer at additional cost. See [AWS upgrade policy](https://docs.aws.amazon.com/eks/latest/userguide/view-upgrade-policy.html). |
+| Option                                                           | Description                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `publicAccessCidrs`                                              | CIDRs allowed to reach the public API endpoint. Applies when public endpoint access is enabled.                                                                                                                                                                                                                                                                                          |
+| `clusterAdminRoleArn`                                            | IAM principal ARN (role or user) granted `AmazonEKSClusterAdminPolicy` through an EKS access entry.                                                                                                                                                                                                                                                                                      |
+| `kubernetesProviderRoleArn`                                      | Optional IAM role assumed by the Kubernetes provider's `aws eks get-token` command. Use it when the provider must authenticate as a role different from the deployment credentials; that role must have EKS access.                                                                                                                                                                      |
+| `nodeGroupRootDisk`                                              | Enables an encrypted gp3 root disk launch template for managed node groups. `sizeGiB` defaults to 20 and `deleteOnTermination` defaults to `true`. Omit the option to preserve EKS defaults.                                                                                                                                                                                             |
+| `nodeGroupAmiType`                                               | AMI family for managed node groups, such as `AL2023_ARM_64_STANDARD`.                                                                                                                                                                                                                                                                                                                    |
+| `nodeGroupInstanceTags`                                          | EC2 instance tags propagated through managed node-group launch-template `tagSpecifications`.                                                                                                                                                                                                                                                                                             |
+| `ebsCsiDriver`                                                   | Installs the EBS CSI add-on and Pod Identity agent, with a dedicated role attached to `AmazonEBSCSIDriverPolicyV2`. Defaults to `false`.                                                                                                                                                                                                                                                 |
+| `metricsServer`                                                  | Opt-in EKS community add-on providing the Kubernetes Resource Metrics API. Set `true` to use the EKS-compatible default, or pass `{ enabled?, addonVersion?, configurationValues? }`. EKS validates version compatibility. This is separate from Prometheus and is EKS-only.                                                                                                             |
+| `clusterAutoscaler`                                              | Install one Cluster Autoscaler controller when at least one managed pool uses `scaling: { mode: "cluster-autoscaler" }`. Optional `version` selects the Helm chart version; Nimbus chooses a pinned chart compatible with the cluster version when omitted.                                                                                                                              |
+| `karpenter`                                                      | Install one Karpenter controller when a pool uses `scaling: { mode: "karpenter", ... }`. Optional `version`, `namespace`, and `interruptionHandling` configure the shared controller. Spot interruption handling defaults on for Spot pools.                                                                                                                                             |
+| `autoscalerControllerNodePoolName`                               | Required when either scaler is selected. Names a managed pool with `minNodes >= 1`; Nimbus pins controller pods to this steady pool.                                                                                                                                                                                                                                                     |
+| `authenticationMode` / `bootstrapClusterCreatorAdminPermissions` | EKS access configuration. Defaults preserve Nimbus's existing `API_AND_CONFIG_MAP` mode and AWS's creator-admin behavior. When creator admin is disabled, use API authentication and provide `clusterAdminRoleArn` so Nimbus can grant access before Kubernetes resources run.                                                                                                           |
+| `upgradePolicy`                                                  | Sets `supportType` to `STANDARD` or `EXTENDED`. Omitted preserves AWS's current `EXTENDED` default. `STANDARD` avoids extended-support charges but AWS automatically upgrades the control plane at end of standard support; `EXTENDED` keeps the version longer at additional cost. See [AWS upgrade policy](https://docs.aws.amazon.com/eks/latest/userguide/view-upgrade-policy.html). |
 
 On AWS networks, `privateSubnetIds` resolves after route-table associations and the NAT default route report `active`. The fck-nat Auto Scaling Group waits up to 15 minutes for one healthy in-service instance before creating the private default route. If the route remains `blackhole`, the network output fails and dependent node groups are not created. Use `natStrategy: "managed"` for AWS-managed NAT gateways.
 
@@ -525,6 +529,22 @@ The APIService should report `Available=True`. Metrics Server serves short-lived
 resource metrics for commands such as `kubectl top` and resource-based autoscaling;
 Prometheus remains the separate system for historical monitoring and alerting.
 
+EKS node pools also support explicit capacity ownership. Existing pool objects
+without `scaling` keep their current EKS managed-node-group behavior. Use
+`{ mode: "fixed" }` to pin a managed pool to `desiredNodes ?? minNodes`,
+`{ mode: "cluster-autoscaler" }` for a managed group Cluster Autoscaler may
+adjust, or `mode: "karpenter"` for a Karpenter NodePool with instance types,
+capacity types, optional AZs, and CPU/memory limits. See the mixed example in
+[EKS mixed autoscaling](./examples.md#eks-mixed-cluster-autoscaler-and-karpenter-pools).
+
+Nimbus creates one controller and Pod Identity role per selected scaler. It
+attaches the Pod Identity Agent add-on when needed. Cluster Autoscaler gets
+discovery tags and scale permissions only for selected managed groups;
+Karpenter receives a separate worker role and provisions only its own NodePools
+in Nimbus private subnets using the EKS cluster security group. A stable managed
+pool is required for controller placement. Keep the stable pool's minimum at
+one or more nodes so the controllers can start before burst capacity exists.
+
 For a complete Pulumi config example, see [EKS with restricted access, encrypted node disks, and EBS CSI](./examples.md#eks-with-restricted-access-encrypted-node-disks-and-ebs-csi).
 
 ### CloudFront VPC Origins
@@ -533,12 +553,12 @@ For a complete Pulumi config example, see [EKS with restricted access, encrypted
 Nimbus validates the load balancer and VPC Origin prerequisites, then adds ingress from AWS's
 service-managed CloudFront VPC Origins security group.
 
-| Option | Description |
-| --- | --- |
-| `vpcOrigin` | Optional shared private origin. `type: "alb-vpc"` accepts `albArn`, `originProtocolPolicy`, `httpPort`, `httpsPort`, `securityGroupPort`, and `albSecurityGroupIds`. `type: "nlb-vpc"` accepts `nlbArn`, HTTP-only `originProtocolPolicy`, `httpPort` (default 80), `securityGroupPort`, and `nlbSecurityGroupIds`; NLBs must be IPv4 and have no TLS listeners. With one attached security group, Nimbus infers it; otherwise select attached groups explicitly. Private origins also derive the trusted client-host header from viewer `Host` with a CloudFront Function. |
-| `aliases` | Additional hostnames on a distribution; all are routed through the shared ALB or NLB and need coverage in the viewer ACM certificate. Keep aliases in the configured Route 53 hosted zone. |
-| `cachePolicyId` / `originRequestPolicyId` | Default behavior policy IDs, overridable per ordered path behavior. Private origins default to CachingDisabled and a Host-forwarding policy. |
-| `allowedMethods` / `cachedMethods` / `viewerProtocolPolicy` | Distribution behavior settings, overridable per ordered path behavior. Cached methods must be included in allowed methods. |
+| Option                                                      | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vpcOrigin`                                                 | Optional shared private origin. `type: "alb-vpc"` accepts `albArn`, `originProtocolPolicy`, `httpPort`, `httpsPort`, `securityGroupPort`, and `albSecurityGroupIds`. `type: "nlb-vpc"` accepts `nlbArn`, HTTP-only `originProtocolPolicy`, `httpPort` (default 80), `securityGroupPort`, and `nlbSecurityGroupIds`; NLBs must be IPv4 and have no TLS listeners. With one attached security group, Nimbus infers it; otherwise select attached groups explicitly. Private origins also derive the trusted client-host header from viewer `Host` with a CloudFront Function. |
+| `aliases`                                                   | Additional hostnames on a distribution; all are routed through the shared ALB or NLB and need coverage in the viewer ACM certificate. Keep aliases in the configured Route 53 hosted zone.                                                                                                                                                                                                                                                                                                                                                                                  |
+| `cachePolicyId` / `originRequestPolicyId`                   | Default behavior policy IDs, overridable per ordered path behavior. Private origins default to CachingDisabled and a Host-forwarding policy.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `allowedMethods` / `cachedMethods` / `viewerProtocolPolicy` | Distribution behavior settings, overridable per ordered path behavior. Cached methods must be included in allowed methods.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ```typescript
 createCdn("prod-apps", {

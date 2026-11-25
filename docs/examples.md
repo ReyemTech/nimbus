@@ -171,6 +171,106 @@ provides current resource metrics; it does not replace Prometheus for history,
 dashboards, or alerting. EKS checks explicitly requested add-on versions against
 the cluster Kubernetes version.
 
+### EKS mixed Cluster Autoscaler and Karpenter pools
+
+Use Cluster Autoscaler for steady capacity and a separate Karpenter pool for
+bursts. The stable managed pool hosts both controllers; each controller has
+distinct IAM permissions and capacity ownership.
+
+```typescript
+import { createCluster } from "@reyemtech/nimbus";
+
+const cluster = createCluster(
+  "prod",
+  {
+    cloud: "aws",
+    nodePools: [
+      {
+        name: "steady",
+        instanceType: "m7i.large",
+        minNodes: 3,
+        maxNodes: 10,
+        scaling: { mode: "cluster-autoscaler" },
+        labels: { "capacity.nimbus.dev/class": "steady" },
+      },
+      {
+        name: "batch-burst",
+        labels: { "capacity.nimbus.dev/class": "burst" },
+        taints: [{ key: "workload", value: "batch", effect: "NoSchedule" }],
+        scaling: {
+          mode: "karpenter",
+          instanceTypes: ["m7i.large", "m7i.xlarge", "m7a.large"],
+          capacityTypes: ["spot", "on-demand"],
+          availabilityZones: ["ca-central-1a", "ca-central-1b"],
+          limits: { cpu: "200", memory: "800Gi" },
+        },
+      },
+    ],
+    providerOptions: {
+      aws: {
+        clusterAutoscaler: {},
+        karpenter: { interruptionHandling: true },
+        autoscalerControllerNodePoolName: "steady",
+      },
+    },
+  },
+  network
+);
+```
+
+An application that should use only burst capacity must select the burst label
+and tolerate its taint. The steady group remains independently scalable by
+Cluster Autoscaler; Karpenter does not own or modify its Auto Scaling group.
+
+```yaml
+spec:
+  template:
+    spec:
+      nodeSelector:
+        capacity.nimbus.dev/class: burst
+      tolerations:
+        - key: workload
+          operator: Equal
+          value: batch
+          effect: NoSchedule
+```
+
+Nimbus creates EKS Pod Identity roles and policies for the controllers, the
+Pod Identity Agent add-on, Karpenter's separate node role and access entry, and
+Karpenter's CRDs/controller. Karpenter IAM has no Auto Scaling group mutation
+actions, and its `iam:PassRole` permission targets only its worker role.
+Cluster Autoscaler can change only ASGs Nimbus tags for that scaler. These
+controls prevent either scaler from taking ownership of the other's pool.
+
+The Pulumi deployment identity must be allowed to create the selected EKS
+add-on, IAM roles and inline policies, Pod Identity associations, EKS access
+entries, and the related Auto Scaling tags. Karpenter Spot interruption
+handling also creates an SQS queue, queue policy, EventBridge rules, and event
+targets. At runtime, Cluster Autoscaler receives describe permissions plus
+`SetDesiredCapacity` and `TerminateInstanceInAutoScalingGroup` conditioned on
+the selected group's discovery tag. Karpenter receives EC2 provisioning and
+instance-profile permissions, `iam:PassRole` only for its own worker role, and
+SQS receive/delete permissions only for its interruption queue. Keep the
+Karpenter node role separate from the controller role.
+
+Controllers are placed on `autoscalerControllerNodePoolName`; keep that pool
+steady, on-demand, and large enough to host system services. Karpenter Spot pools
+create an SQS interruption queue and EventBridge rules unless disabled. The
+queue, Spot interruptions, and Karpenter consolidation can increase churn; set
+resource limits and use disruption budgets for critical workloads. Cluster
+Autoscaler changes managed-group size in whole-node increments, while
+Karpenter can choose among the configured instance types and zones.
+
+To migrate existing managed capacity to Karpenter, add a new Karpenter pool,
+move workloads with labels/affinity and taints/tolerations, verify availability,
+then remove the old managed group. Do not change a live pool's resource kind in
+one update because Pulumi may replace the managed group and its capacity.
+
+See the [Cluster Autoscaler AWS guide](https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/aws/README.md),
+[Karpenter EKS guide](https://karpenter.sh/docs/getting-started/getting-started-with-karpenter/),
+and [Karpenter Kubernetes compatibility matrix](https://karpenter.sh/docs/upgrading/compatibility/)
+for version, IAM, and compatibility details.
+
 ### Shared private Traefik ALB for multiple app hostnames
 
 Use one internal ALB from the existing EKS Traefik ingress. The example reads its ARN and

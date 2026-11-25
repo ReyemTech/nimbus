@@ -112,9 +112,17 @@ describe("EKS ExternalDNS add-on", () => {
     expect(configuration).not.toHaveProperty("zoneIdFilters");
     const policy = records.find((r) => r.kind === "policy")!;
     const policyText = unwrap(policy.args.policy);
-    expect(JSON.parse(policyText).Statement[0].Resource).toEqual([
-      "arn:aws:route53:::hostedzone/Z123",
-    ]);
+    const policyStatements = JSON.parse(policyText).Statement;
+    expect(
+      policyStatements.find((statement: any) =>
+        statement.Action.includes("route53:ChangeResourceRecordSets")
+      ).Resource
+    ).toEqual(["arn:aws:route53:::hostedzone/Z123"]);
+    expect(
+      policyStatements.find((statement: any) =>
+        statement.Action.includes("route53:ListResourceRecordSets")
+      ).Resource
+    ).toBe("*");
     expect(policyText).not.toContain("AmazonRoute53FullAccess");
     expect(result.certManagerIdentity).toBeDefined();
   });

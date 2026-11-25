@@ -66,8 +66,15 @@ export function deployEksExternalDns(
           Statement: [
             {
               Effect: "Allow",
-              Action: ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"],
+              Action: ["route53:ChangeResourceRecordSets"],
               Resource: resolvedZones.arns,
+            },
+            {
+              Effect: "Allow",
+              Action: ["route53:ListResourceRecordSets"],
+              // ExternalDNS discovers matching hosted zones before listing their records.
+              // Keep discovery functional even when other zones are filtered out by domain.
+              Resource: "*",
             },
             {
               Effect: "Allow",

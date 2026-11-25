@@ -47,10 +47,15 @@ Full example: [`examples/single-cloud-aws/`](../examples/single-cloud-aws/)
 ### EKS ExternalDNS community add-on
 
 On AWS EKS with Route 53, Nimbus uses the EKS community add-on and Pod Identity.
-Supply hosted zone IDs to scope both IAM permissions and ExternalDNS zone
-discovery; domain filters are the fallback and must resolve to unique hosted
-zones. Keep any existing TXT owner ID when
-migrating from the Helm chart.
+Set `domainFilters` to constrain ExternalDNS to the intended DNS suffix, and
+provide `hostedZoneIds` to limit record-change permissions to exact zones. The
+EKS add-on schema does not accept ExternalDNS's zone-ID filter, so Nimbus grants
+`ListResourceRecordSets` read access across zones for discovery while keeping
+`ChangeResourceRecordSets` scoped to the configured IDs. Domain filters cannot
+distinguish public and private zones with the same name; writes remain blocked
+outside the configured IDs, but such duplicate zones can produce access-denied
+reconciliation errors. Keep any existing TXT owner ID when migrating from the
+Helm chart.
 
 ```typescript
 createPlatformStack("prod", {

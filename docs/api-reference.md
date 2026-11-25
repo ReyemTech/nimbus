@@ -451,27 +451,34 @@ await createNetwork("prod", { cloud: ["aws", "azure"], ... });
 The same options are available under `createCluster(..., { providerOptions: {
 aws: ... }})`.
 
-| Option                                                           | Description                                                                                                                                                                                                                                                                                                                                                                              |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `publicAccessCidrs`                                              | CIDRs allowed to reach the public API endpoint. Applies when public endpoint access is enabled.                                                                                                                                                                                                                                                                                          |
-| `clusterAdminRoleArn`                                            | IAM principal ARN (role or user) granted `AmazonEKSClusterAdminPolicy` through an EKS access entry.                                                                                                                                                                                                                                                                                      |
-| `kubernetesProviderRoleArn`                                      | Optional IAM role assumed by the Kubernetes provider's `aws eks get-token` command. Use it when the provider must authenticate as a role different from the deployment credentials; that role must have EKS access.                                                                                                                                                                      |
-| `nodeGroupRootDisk`                                              | Enables an encrypted gp3 root disk launch template for managed node groups. `sizeGiB` defaults to 20 and `deleteOnTermination` defaults to `true`. Omit the option to preserve EKS defaults.                                                                                                                                                                                             |
-| `nodeGroupAmiType`                                               | AMI family for managed node groups, such as `AL2023_ARM_64_STANDARD`.                                                                                                                                                                                                                                                                                                                    |
-| `nodeGroupInstanceTags`                                          | EC2 instance tags propagated through managed node-group launch-template `tagSpecifications`.                                                                                                                                                                                                                                                                                             |
-| `ebsCsiDriver`                                                   | Installs the EBS CSI add-on and Pod Identity agent, with a dedicated role attached to `AmazonEBSCSIDriverPolicyV2`. Defaults to `false`.                                                                                                                                                                                                                                                 |
-| `metricsServer`                                                  | Opt-in EKS community add-on providing the Kubernetes Resource Metrics API. Set `true` to use the EKS-compatible default, or pass `{ enabled?, addonVersion?, configurationValues? }`. EKS validates version compatibility. This is separate from Prometheus and is EKS-only.                                                                                                             |
-| `clusterAutoscaler`                                              | Install one Cluster Autoscaler controller when at least one managed pool uses `scaling: { mode: "cluster-autoscaler" }`. Optional `version` selects the Helm chart version; Nimbus chooses a pinned chart compatible with the cluster version when omitted. Nimbus uses IRSA for the controller; it creates the cluster OIDC provider unless `oidcProviderArn` supplies an existing one. |
-| `karpenter`                                                      | Install one Karpenter controller when a pool uses `scaling: { mode: "karpenter", ... }`. Optional `version`, `namespace`, and `interruptionHandling` configure the shared controller. Spot interruption handling defaults on for Spot pools.                                                                                                                                             |
-| `autoscalerControllerNodePoolName`                               | Required when either scaler is selected. Names a managed pool with `minNodes >= 1`; Nimbus pins controller pods to this steady pool.                                                                                                                                                                                                                                                     |
-| `authenticationMode` / `bootstrapClusterCreatorAdminPermissions` | EKS access configuration. Defaults preserve Nimbus's existing `API_AND_CONFIG_MAP` mode and AWS's creator-admin behavior. When creator admin is disabled, use API authentication and provide `clusterAdminRoleArn` so Nimbus can grant access before Kubernetes resources run.                                                                                                           |
-| `upgradePolicy`                                                  | Sets `supportType` to `STANDARD` or `EXTENDED`. Omitted preserves AWS's current `EXTENDED` default. `STANDARD` avoids extended-support charges but AWS automatically upgrades the control plane at end of standard support; `EXTENDED` keeps the version longer at additional cost. See [AWS upgrade policy](https://docs.aws.amazon.com/eks/latest/userguide/view-upgrade-policy.html). |
+| Option | Description |
+| --- | --- |
+| `publicAccessCidrs` | CIDRs allowed to reach the public API endpoint. Applies when public endpoint access is enabled. |
+| `clusterAdminRoleArn` | IAM principal ARN (role or user) granted `AmazonEKSClusterAdminPolicy` through an EKS access entry. |
+| `kubernetesProviderRoleArn` | Optional IAM role assumed by the Kubernetes provider's `aws eks get-token` command. Use it when the provider must authenticate as a role different from the deployment credentials; that role must have EKS access. |
+| `nodeGroupRootDisk` | Enables an encrypted gp3 root disk launch template for managed node groups. `sizeGiB` defaults to 20 and `deleteOnTermination` defaults to `true`. Omit the option to preserve EKS defaults. |
+| `nodeGroupAmiType` | AMI family for managed node groups, such as `AL2023_ARM_64_STANDARD`. |
+| `nodeGroupInstanceTags` | EC2 instance tags propagated through managed node-group launch-template `tagSpecifications`. |
+| `ebsCsiDriver` | Installs the EBS CSI add-on and Pod Identity agent, with a dedicated role attached to `AmazonEBSCSIDriverPolicyV2`. Defaults to `false`. |
+| `metricsServer` | Opt-in EKS community add-on providing the Kubernetes Resource Metrics API. Set `true` to use the EKS-compatible default, or pass `{ enabled?, addonVersion?, configurationValues? }`. EKS validates version compatibility. This is separate from Prometheus and is EKS-only. |
+| `communityAddons` | Opts into typed EKS community add-ons for Prometheus Node Exporter, kube-state-metrics, and cert-manager. Each accepts optional `version` and `configurationValues`. |
+| `clusterAutoscaler` | Install one Cluster Autoscaler controller when at least one managed pool uses `scaling: { mode: "cluster-autoscaler" }`. Optional `version` selects the Helm chart version; Nimbus chooses a pinned chart compatible with the cluster version when omitted. Nimbus uses IRSA for the controller; it creates the cluster OIDC provider unless `oidcProviderArn` supplies an existing one. |
+| `karpenter` | Install one Karpenter controller when a pool uses `scaling: { mode: "karpenter", ... }`. Optional `version`, `namespace`, and `interruptionHandling` configure the shared controller. Spot interruption handling defaults on for Spot pools. |
+| `autoscalerControllerNodePoolName` | Required when either scaler is selected. Names a managed pool with `minNodes >= 1`; Nimbus pins controller pods to this steady pool. |
+| `authenticationMode` / `bootstrapClusterCreatorAdminPermissions` | EKS access configuration. Defaults preserve Nimbus's existing `API_AND_CONFIG_MAP` mode and AWS's creator-admin behavior. When creator admin is disabled, use API authentication and provide `clusterAdminRoleArn` so Nimbus can grant access before Kubernetes resources run. |
+| `upgradePolicy` | Sets `supportType` to `STANDARD` or `EXTENDED`. Omitted preserves AWS's current `EXTENDED` default. `STANDARD` avoids extended-support charges but AWS automatically upgrades the control plane at end of standard support; `EXTENDED` keeps the version longer at additional cost. See [AWS upgrade policy](https://docs.aws.amazon.com/eks/latest/userguide/view-upgrade-policy.html). |
 
 On AWS networks, `privateSubnetIds` resolves after route-table associations and the NAT default route report `active`. The fck-nat Auto Scaling Group waits up to 15 minutes for one healthy in-service instance before creating the private default route. If the route remains `blackhole`, the network output fails and dependent node groups are not created. Use `natStrategy: "managed"` for AWS-managed NAT gateways.
 
 The EBS CSI option is not supported with EKS Auto Mode, which has built-in block
 storage. Nimbus does not create or change a StorageClass; create one with
 `provisioner: ebs.csi.aws.com` and `parameters.type: gp3` to provision gp3 PVCs.
+
+Selecting `communityAddons.prometheusNodeExporter` or `communityAddons.kubeStateMetrics`
+disables the matching kube-prometheus-stack subchart on that cluster to avoid duplicate
+agents. Configure Prometheus scraping for the community add-on services as needed.
+Selecting `communityAddons.certManager` replaces the platform stack's cert-manager Helm
+release; Nimbus continues creating its configured issuers and certificates.
 
 ```typescript
 createCluster(
@@ -485,6 +492,11 @@ createCluster(
         clusterAdminRoleArn: adminRole.arn,
         nodeGroupRootDisk: { sizeGiB: 80, deleteOnTermination: true },
         ebsCsiDriver: true,
+        communityAddons: {
+          prometheusNodeExporter: {},
+          kubeStateMetrics: {},
+          certManager: {},
+        },
       },
     },
   },

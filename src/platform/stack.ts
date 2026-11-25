@@ -126,7 +126,7 @@ function deployToCluster(
   }
 
   // 2. cert-manager (TLS certificates) — enabled by default
-  if (config.certManager?.enabled !== false) {
+  if (config.certManager?.enabled !== false && !cluster.eksAddons?.includes("cert-manager")) {
     components["cert-manager"] = deployCertManager(
       name,
       config.certManager,

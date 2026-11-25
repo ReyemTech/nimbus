@@ -107,6 +107,11 @@ const cluster = createCluster(
         nodeGroupInstanceTags: { Name: "reyemtech-public-arm64" },
         nodeGroupRootDisk: { sizeGiB: 80, deleteOnTermination: true },
         ebsCsiDriver: true,
+        communityAddons: {
+          prometheusNodeExporter: {},
+          kubeStateMetrics: {},
+          certManager: {},
+        },
       },
     },
   },
@@ -119,6 +124,13 @@ agent, and a dedicated role with `AmazonEBSCSIDriverPolicyV2`. The add-on
 creates the IAM association for `ebs-csi-controller-sa`. Create a Kubernetes
 StorageClass with `provisioner: ebs.csi.aws.com` and `parameters.type: gp3` for
 gp3 PVCs; Nimbus does not change your cluster's default StorageClass.
+
+The community add-on settings are optional. When selected, each supports an
+optional `version` and `configurationValues` override. Node Exporter and
+kube-state-metrics replace the corresponding kube-prometheus-stack subcharts;
+configure Prometheus scraping for those EKS add-on services if required.
+cert-manager replaces Nimbus's Helm chart while Nimbus keeps creating its
+configured issuers and certificates.
 
 `upgradePolicy: { supportType: "STANDARD" }` avoids extended-support charges,
 but AWS automatically upgrades the control plane at the end of standard support.

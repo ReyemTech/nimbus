@@ -5,7 +5,13 @@
  */
 
 export { createAwsNetwork, type IAwsNetworkOptions } from "./network";
-export { createEksCluster, type IEksMetricsServerOptions, type IEksOptions } from "./cluster";
+export {
+  createEksCluster,
+  type IEksCommunityAddonOptions,
+  type IEksCommunityAddons,
+  type IEksMetricsServerOptions,
+  type IEksOptions,
+} from "./cluster";
 export { createRoute53Dns } from "./dns";
 export { createAwsSecrets } from "./secrets";
 export { createAwsStateBackend, type IAwsStateBackendOptions } from "./state";

@@ -26,12 +26,27 @@ export interface IEksMetricsServerOptions {
   readonly configurationValues?: pulumi.Input<string>;
 }
 
+/** Version and configuration overrides for one AWS community add-on. */
+export interface IEksCommunityAddonOptions {
+  readonly version?: pulumi.Input<string>;
+  readonly configurationValues?: pulumi.Input<string>;
+}
+
+/** Community add-ons Nimbus coordinates with its platform and observability stacks. */
+export interface IEksCommunityAddons {
+  readonly prometheusNodeExporter?: IEksCommunityAddonOptions;
+  readonly kubeStateMetrics?: IEksCommunityAddonOptions;
+  readonly certManager?: IEksCommunityAddonOptions;
+}
+
 /** AWS-specific EKS options beyond the base config. */
 export interface IEksOptions {
   /** Enable EKS Auto Mode (managed node provisioning). Default: false. */
   readonly autoMode?: boolean;
   /** EKS add-ons to install. Default: vpc-cni, coredns, kube-proxy. */
   readonly addons?: ReadonlyArray<string>;
+  /** Typed opt-in EKS community add-ons; selected components replace Nimbus Helm copies. */
+  readonly communityAddons?: IEksCommunityAddons;
   /** Endpoint access: "public", "private", or "both". Default: "both". */
   readonly endpointAccess?: "public" | "private" | "both";
   /** CIDRs allowed to reach the public Kubernetes API endpoint. */
@@ -108,6 +123,11 @@ export function createEksCluster(
   const endpointAccess = options?.endpointAccess ?? "both";
   const authenticationMode = options?.authenticationMode ?? "API_AND_CONFIG_MAP";
   const ebsCsiDriver = options?.ebsCsiDriver === true || addons.includes("aws-ebs-csi-driver");
+  const communityAddonSettings: Readonly<Record<string, IEksCommunityAddonOptions | undefined>> = {
+    "prometheus-node-exporter": options?.communityAddons?.prometheusNodeExporter,
+    "kube-state-metrics": options?.communityAddons?.kubeStateMetrics,
+    "cert-manager": options?.communityAddons?.certManager,
+  };
 
   validateEksNodePoolScaling(config, { ...options, autoMode });
   const controllerPlacementEnabled = config.nodePools.some(
@@ -317,6 +337,8 @@ export function createEksCluster(
     addonNames.add("metrics-server");
   } else if (metricsServerOption !== undefined) {
     addonNames.delete("metrics-server");
+  for (const [addonName, addonOptions] of Object.entries(communityAddonSettings)) {
+    if (addonOptions) addonNames.add(addonName);
   }
   if (ebsCsiDriver) {
     addonNames.add("eks-pod-identity-agent");
@@ -346,11 +368,11 @@ export function createEksCluster(
         addonVersion:
           addon === "metrics-server" && typeof metricsServerOption === "object"
             ? metricsServerOption.addonVersion
-            : undefined,
+            : communityAddonSettings[addon]?.version,
         configurationValues:
           addon === "metrics-server" && typeof metricsServerOption === "object"
             ? metricsServerOption.configurationValues
-            : undefined,
+            : communityAddonSettings[addon]?.configurationValues,
         resolveConflictsOnCreate: "OVERWRITE",
         resolveConflictsOnUpdate: "OVERWRITE",
         podIdentityAssociations:
@@ -473,6 +495,7 @@ export function createEksCluster(
     nativeResource: cluster,
     provider,
     providerResources: podIdentityAgent ? { podIdentityAgent } : undefined,
+    eksAddons: [...addonNames],
   };
 }
 

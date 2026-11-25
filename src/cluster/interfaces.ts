@@ -156,6 +156,9 @@ export interface ICluster {
   readonly storageTiers?: StorageTierMap;
   /** Native cloud resources associated with the cluster (for reuse by components). */
   readonly providerResources?: Readonly<Record<string, pulumi.Resource>>;
+
+  /** EKS add-on names managed by Nimbus on this cluster, when applicable. */
+  readonly eksAddons?: ReadonlyArray<string>;
 }
 
 /** AWS-specific cluster extensions for EKS. */

@@ -134,6 +134,8 @@ export interface ICluster {
    * When set, modules use resolveStorageTier() to select the correct class.
    */
   readonly storageTiers?: StorageTierMap;
+  /** Native cloud resources associated with the cluster (for reuse by components). */
+  readonly providerResources?: Readonly<Record<string, pulumi.Resource>>;
 }
 
 /** AWS-specific cluster extensions for EKS. */

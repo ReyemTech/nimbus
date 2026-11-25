@@ -148,6 +148,14 @@ beforeEach(() => {
 });
 
 describe("createEksCluster options", () => {
+  it("returns configured storage tiers to downstream consumers", () => {
+    const storageTiers = { standard: "gp3", performance: "gp3-encrypted" } as const;
+
+    const cluster = createEksCluster("prod", { ...config, storageTiers }, network);
+
+    expect(cluster.storageTiers).toEqual(storageTiers);
+  });
+
   it("preserves defaults when the new options are omitted", () => {
     create();
 

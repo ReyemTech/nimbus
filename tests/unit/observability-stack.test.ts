@@ -17,9 +17,11 @@ const mockProvider = (): any => ({});
 
 // Track created resources
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createdReleases: Array<{ name: string; args: any }>;
+let createdReleases: Array<{ name: string; args: any; opts: any; resource: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createdNamespaces: Array<{ name: string; args: any }>;
+let createdNamespaces: Array<{ name: string; args: any; resource: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdCustomResources: Array<{ name: string; args: any; opts: any }>;
 
 // Mock @pulumi/kubernetes
 vi.mock("@pulumi/kubernetes", () => {
@@ -27,8 +29,8 @@ vi.mock("@pulumi/kubernetes", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     status: any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    constructor(name: string, args: any, _opts?: any) {
-      createdReleases.push({ name, args });
+    constructor(name: string, args: any, opts?: any) {
+      createdReleases.push({ name, args, opts, resource: this });
       this.status = mockOutput({ namespace: "mock-ns" });
     }
   };
@@ -37,7 +39,7 @@ vi.mock("@pulumi/kubernetes", () => {
   const mockNamespace = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(name: string, args: any, _opts?: any) {
-      createdNamespaces.push({ name, args });
+      createdNamespaces.push({ name, args, resource: this });
     }
   };
 
@@ -45,7 +47,12 @@ vi.mock("@pulumi/kubernetes", () => {
   const mockConfigMap = class {};
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
-  const mockCustomResource = class {};
+  const mockCustomResource = class {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, args: any, opts: any) {
+      createdCustomResources.push({ name, args, opts });
+    }
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockSecret = class {};
@@ -86,12 +93,33 @@ function makeCluster(name: string): ICluster {
 beforeEach(() => {
   createdReleases = [];
   createdNamespaces = [];
+  createdCustomResources = [];
 });
 
 describe("observability stack — kube-prometheus-stack", () => {
+  it("orders Traefik alerts after its namespace and Prometheus release", () => {
+    createObservabilityStack("test", {
+      cluster: makeCluster("test"),
+      domain: "example.com",
+      prometheus: { enabled: true },
+    });
+    const namespace = createdNamespaces[0];
+    if (!namespace) throw new Error("Observability namespace was not created");
+    const prometheus = createdReleases.find((release) =>
+      release.name.includes("kube-prometheus-stack")
+    );
+    expect(prometheus?.opts.dependsOn).toContain(namespace.resource);
+    const rule = createdCustomResources.find((resource) =>
+      resource.name.includes("traefik-alerts")
+    );
+    expect(rule?.opts.dependsOn).toContain(namespace.resource);
+    expect(rule?.opts.dependsOn).toContain(prometheus?.resource);
+    expect(rule?.args.metadata.namespace).toBe("observability");
+  });
+
   it("deploys kube-prometheus-stack when prometheus enabled", () => {
     const cluster = makeCluster("test");
-    createObservabilityStack("test", {
+    createObservabilityStack("very-long-observability-stack-name-that-would-break-helm-release", {
       cluster,
       domain: "example.com",
       prometheus: { enabled: true },
@@ -103,6 +131,10 @@ describe("observability stack — kube-prometheus-stack", () => {
     expect(release!.args.chart).toBe("kube-prometheus-stack");
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.namespace).toBe("observability");
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(release!.args.name).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    expect(release!.args.name.length).toBeLessThanOrEqual(53);
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     expect(release!.args.values.prometheus.enabled).toBe(true);
   });

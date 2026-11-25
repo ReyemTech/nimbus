@@ -253,6 +253,36 @@ describe("createCluster factory", () => {
     expect(createAksCluster).not.toHaveBeenCalled();
   });
 
+  it("passes native EKS access, upgrade, and managed-node options through the public factory", async () => {
+    await createCluster(
+      "prod",
+      {
+        cloud: "aws",
+        nodePools,
+        providerOptions: {
+          aws: {
+            authenticationMode: "API",
+            bootstrapClusterCreatorAdminPermissions: false,
+            upgradePolicy: { supportType: "STANDARD" },
+            nodeGroupAmiType: "AL2023_ARM_64_STANDARD",
+            nodeGroupInstanceTags: { Name: "prod-workers" },
+            kubernetesProviderRoleArn: "arn:aws:iam::123456789012:role/eks-admin",
+          },
+        },
+      },
+      awsNetwork
+    );
+
+    expect(vi.mocked(createEksCluster).mock.calls[0]?.[3]).toMatchObject({
+      authenticationMode: "API",
+      bootstrapClusterCreatorAdminPermissions: false,
+      upgradePolicy: { supportType: "STANDARD" },
+      nodeGroupAmiType: "AL2023_ARM_64_STANDARD",
+      nodeGroupInstanceTags: { Name: "prod-workers" },
+      kubernetesProviderRoleArn: "arn:aws:iam::123456789012:role/eks-admin",
+    });
+  });
+
   it("dispatches to AKS for cloud: 'azure'", async () => {
     await createCluster(
       "prod",

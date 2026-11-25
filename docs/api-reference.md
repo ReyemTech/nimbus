@@ -83,6 +83,15 @@ Deploys Helm-based platform components to one or more clusters.
 | Vault            | Disabled      | `hashicorp/vault` v0.29.1                   |
 | External Secrets | Disabled      | `external-secrets/external-secrets` v0.14.4 |
 
+For AWS EKS with Route 53, `externalDns` instead provisions the EKS community
+add-on. Configure `hostedZoneIds` to scope its Pod Identity role; if omitted,
+Nimbus resolves each `domainFilters` value to a hosted zone. Set `addonVersion`
+for the EKS add-on (`version` remains the Helm chart version for other
+clusters). `values` supplies add-on configuration such as `txtOwnerId`,
+`sources`, `registry`, and `policy`. EKS does not receive static AWS credentials.
+Existing Helm deployments should use the two-apply migration documented in the
+[examples](examples.md#eks-externaldns-community-add-on).
+
 ### `createGlobalLoadBalancer(name, config)`
 
 Routes traffic across clusters using DNS-based health checks.

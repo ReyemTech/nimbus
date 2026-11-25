@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type * as pulumi from "@pulumi/pulumi";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockOutput = (val: unknown): any => ({
@@ -17,7 +18,7 @@ const mockProvider = (): any => ({});
 
 // Track created resources
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createdReleases: Array<{ name: string; args: any }>;
+let createdReleases: Array<{ name: string; args: any; opts: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdCustomResources: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,6 +44,25 @@ let createdCustomResourcesForAssertions: Array<{ name: string; args: any }>;
 
 // Mock @pulumi/aws
 vi.mock("@pulumi/aws", () => {
+  const mockEksCluster = class {
+    name = mockOutput("test-cluster");
+    arn = mockOutput("arn:aws:eks:us-east-1:123456789012:cluster/test-cluster");
+  };
+  const mockAddon = class {
+    name: ReturnType<typeof mockOutput>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, _args: any, _opts?: any) {
+      this.name = mockOutput(name);
+    }
+  };
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockIdentityAssociation = class {};
+  const mockIamRole = class {
+    arn = mockOutput("arn:aws:iam::123456789012:role/external-dns");
+    id = mockOutput("external-dns");
+  };
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockIamRolePolicy = class {};
   const mockIamUser = class {
     name: ReturnType<typeof mockOutput>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -72,11 +92,21 @@ vi.mock("@pulumi/aws", () => {
   };
 
   return {
+    eks: {
+      Cluster: mockEksCluster,
+      Addon: mockAddon,
+      PodIdentityAssociation: mockIdentityAssociation,
+    },
     iam: {
       User: mockIamUser,
       UserPolicy: mockUserPolicy,
       AccessKey: mockAccessKey,
+      Role: mockIamRole,
+      RolePolicy: mockIamRolePolicy,
     },
+    getPartitionOutput: () => mockOutput({ partition: "aws" }),
+    getCallerIdentityOutput: () => mockOutput({ accountId: "123456789012" }),
+    route53: { getZoneOutput: () => mockOutput({ zoneId: "Z123" }) },
   };
 });
 
@@ -86,8 +116,8 @@ vi.mock("@pulumi/kubernetes", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     status: any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    constructor(name: string, args: any, _opts?: any) {
-      createdReleases.push({ name, args });
+    constructor(name: string, args: any, opts?: any) {
+      createdReleases.push({ name, args, opts });
       this.status = mockOutput({ namespace: "mock-ns" });
     }
   };
@@ -206,6 +236,7 @@ vi.mock("@pulumi/pulumi", () => ({
 
 import { createPlatformStack } from "../../src/platform/stack";
 import type { ICluster } from "../../src/cluster";
+import * as aws from "@pulumi/aws";
 
 function makeCluster(name: string): ICluster {
   return {
@@ -236,6 +267,19 @@ beforeEach(() => {
 });
 
 describe("platform stack — ArgoCD values", () => {
+  it("forwards explicit dependencies to the Traefik release", () => {
+    const prerequisite = {} as pulumi.Resource;
+    createPlatformStack("test", {
+      cluster: makeCluster("test"),
+      domain: "example.com",
+      traefik: { dependsOn: [prerequisite] },
+      certManager: { enabled: false },
+    });
+    expect(
+      createdReleases.find((release) => release.name === "test-traefik")?.opts.dependsOn
+    ).toContain(prerequisite);
+  });
+
   it("merges caller config maps with Nimbus defaults", () => {
     const cluster = makeCluster("test");
     createPlatformStack("test", {
@@ -538,6 +582,26 @@ describe("platform stack — wildcard cert and TLSStore", () => {
 });
 
 describe("platform stack — Route53 IAM auto-provisioning", () => {
+  it("uses native EKS resources without static AWS users, access keys, or Kubernetes Secrets", () => {
+    const cluster = {
+      ...makeCluster("test"),
+      nativeResource: new aws.eks.Cluster("test", {
+        roleArn: "test-role",
+        vpcConfig: { subnetIds: [] },
+      }),
+    } as unknown as ICluster;
+    const result = createPlatformStack("test", {
+      cluster,
+      domain: "example.com",
+      traefik: { enabled: false },
+      certManager: { enabled: false },
+      externalDns: { dnsProvider: "route53", hostedZoneIds: ["Z123"] },
+    }) as { providerResources?: Record<string, unknown> };
+    expect(createdIamUsers).toHaveLength(0);
+    expect(createdIamAccessKeys).toHaveLength(0);
+    expect(createdSecrets).toHaveLength(0);
+    expect(result.providerResources?.["external-dns"]).toBeDefined();
+  });
   it("creates IAM user, policy, access key, and K8s secrets when route53 without manual credentials", () => {
     const cluster = makeCluster("test");
     createPlatformStack("test", {

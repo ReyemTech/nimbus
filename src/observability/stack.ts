@@ -24,6 +24,7 @@ import type { StorageTierMap } from "../types/storage-tiers";
 import { createDashboards, lokiLogsDashboard } from "./dashboards/index";
 import { resolveStorageTier } from "../types/storage-tiers";
 import { createGlobalAlertRules, buildAlertmanagerConfig } from "./alerts";
+import { createPrometheusRule } from "./alerts";
 
 /**
  * Default Helm chart versions. Used only when the consumer doesn't pass `version`.
@@ -67,7 +68,7 @@ export function createObservabilityStack(
   const components: Record<string, k8s.helm.v3.Release> = {};
 
   // 1. Create the namespace
-  new k8s.core.v1.Namespace(
+  const observabilityNamespace = new k8s.core.v1.Namespace(
     `${name}-ns`,
     {
       metadata: { name: namespace },
@@ -97,13 +98,52 @@ export function createObservabilityStack(
       provider,
       cluster.storageTiers,
       grafanaPlugins,
-      config.alerts
+      config.alerts,
+      observabilityNamespace
     );
   }
 
   // Global alert rules (PVC, cert-manager) — after kube-prometheus-stack
   if (config.alerts && components["kube-prometheus-stack"]) {
-    createGlobalAlertRules(name, namespace, provider, [components["kube-prometheus-stack"]]);
+    createGlobalAlertRules(name, namespace, provider, [
+      observabilityNamespace,
+      components["kube-prometheus-stack"],
+    ]);
+  }
+
+  if (components["kube-prometheus-stack"]) {
+    createPrometheusRule(
+      `${name}-traefik-alerts`,
+      namespace,
+      [
+        {
+          name: "nimbus.traefik",
+          rules: [
+            {
+              alert: "TraefikDown",
+              expr: `kube_deployment_status_replicas_available{namespace="traefik",deployment=~".*traefik.*"} == 0`,
+              for: "2m",
+              labels: { severity: "critical" },
+              annotations: {
+                summary:
+                  "Traefik ingress controller has 0 available replicas — all traffic stopped",
+              },
+            },
+            {
+              alert: "TraefikHighErrorRate",
+              expr: `sum(rate(traefik_service_requests_total{code=~"5.."}[5m])) / sum(rate(traefik_service_requests_total[5m])) > 0.05`,
+              for: "5m",
+              labels: { severity: "warning" },
+              annotations: {
+                summary: "Traefik 5xx error rate is above 5% ({{ $value | humanizePercentage }})",
+              },
+            },
+          ],
+        },
+      ],
+      provider,
+      [observabilityNamespace, components["kube-prometheus-stack"]]
+    );
   }
 
   // 3. Loki (log aggregation)
@@ -320,7 +360,8 @@ function deployKubePrometheusStack(
   provider: k8s.Provider,
   storageTiers?: StorageTierMap,
   grafanaPlugins?: string[],
-  alertConfig?: IAlertConfig
+  alertConfig?: IAlertConfig,
+  namespaceResource?: pulumi.Resource
 ): k8s.helm.v3.Release {
   const certName = domain.replace(/\./g, "-");
   const tlsSecretName = `${certName}-wildcard-tls`;
@@ -455,10 +496,22 @@ function deployKubePrometheusStack(
     alertmanager?.version ??
     DEFAULT_VERSIONS.kubePrometheusStack;
 
+  const releaseBase = `${name}-kps`
+    .replace(/[^a-zA-Z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  const releaseName =
+    releaseBase.length <= 53
+      ? undefined
+      : `${releaseBase.slice(0, 45).replace(/-+$/g, "")}-${Array.from(releaseBase)
+          .reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 0)
+          .toString(36)
+          .slice(-7)}`;
   return new k8s.helm.v3.Release(
     `${name}-kube-prometheus-stack`,
     {
       chart: "kube-prometheus-stack",
+      name: releaseName,
       repositoryOpts: { repo: "https://prometheus-community.github.io/helm-charts" },
       version,
       namespace,
@@ -475,7 +528,7 @@ function deployKubePrometheusStack(
           : {}),
       },
     },
-    { provider }
+    { provider, dependsOn: namespaceResource ? [namespaceResource] : undefined }
   );
 }
 

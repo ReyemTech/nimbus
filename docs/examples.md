@@ -43,6 +43,41 @@ createPlatformStack("prod", {
 
 Full example: [`examples/single-cloud-aws/`](../examples/single-cloud-aws/)
 
+### EKS ExternalDNS community add-on
+
+On AWS EKS with Route 53, Nimbus uses the EKS community add-on and Pod Identity.
+Supply hosted zone IDs for exact IAM scoping; domain filters are the fallback
+and must resolve to unique hosted zones. Keep any existing TXT owner ID when
+migrating from the Helm chart.
+
+```typescript
+createPlatformStack("prod", {
+  cluster,
+  domain: "example.com",
+  externalDns: {
+    dnsProvider: "route53",
+    hostedZoneIds: [dns.zoneId],
+    addonVersion: "v1.0.0-eksbuild.1",
+    domainFilters: ["example.com"],
+    values: {
+      txtOwnerId: "prod-cluster",
+      sources: ["ingress", "service", "traefik-proxy"],
+      registry: "txt",
+      policy: "sync",
+    },
+  },
+});
+```
+
+Nimbus grants record changes only on the selected hosted zones and does not
+create an IAM user, access key, or Kubernetes AWS credential Secret for EKS.
+For an existing Helm installation, migrate in two updates: first set
+`externalDns.enabled: false` and apply to remove the chart and static
+credentials; then enable it again with the prior domain filters and exact same
+`txtOwnerId`, and apply to create the add-on. This avoids two controllers
+writing the same records during replacement. Non-EKS Route 53 and other DNS
+providers continue to use the Helm path.
+
 ### EKS with restricted access, encrypted node disks, and EBS CSI
 
 Use these options with standard EKS managed node groups. When omitted, Nimbus

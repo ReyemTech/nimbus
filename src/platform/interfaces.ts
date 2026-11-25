@@ -38,6 +38,8 @@ export interface IPlatformComponentConfig {
   readonly version?: string;
   /** Additional Helm values to merge with defaults. */
   readonly values?: Readonly<Record<string, unknown>>;
+  /** Pulumi resources this component must wait for. */
+  readonly dependsOn?: ReadonlyArray<pulumi.Resource>;
 }
 
 /** External DNS component configuration with provider-specific auth. */
@@ -54,6 +56,10 @@ export interface IExternalDnsConfig extends IPlatformComponentConfig {
   readonly dnsCredentials?: Record<string, pulumi.Input<string>>;
   /** DNS zone filter (e.g., ["reyem.tech"]). */
   readonly domainFilters?: ReadonlyArray<string>;
+  /** Route 53 hosted zones authorized by the EKS Pod Identity role. */
+  readonly hostedZoneIds?: ReadonlyArray<pulumi.Input<string>>;
+  /** EKS community add-on version (separate from the Helm chart version). */
+  readonly addonVersion?: pulumi.Input<string>;
 }
 
 /** AWS KMS auto-unseal configuration. */
@@ -196,6 +202,8 @@ export interface IPlatformStack {
   readonly name: string;
   readonly cluster: ICluster;
   readonly components: Readonly<Record<string, k8s.helm.v3.Release>>;
+  /** Native cloud resources managed alongside Helm components. */
+  readonly providerResources?: Readonly<Record<string, pulumi.Resource>>;
   readonly traefikEndpoint: pulumi.Output<string>;
   /** Services available for access gateway exposure. */
   readonly exposedServices: ReadonlyArray<IExposedService>;

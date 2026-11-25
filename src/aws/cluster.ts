@@ -62,7 +62,11 @@ export interface IEksOptions {
   /** Opt in to the EKS community Metrics Server add-on. */
   readonly metricsServer?: boolean | IEksMetricsServerOptions;
   /** Shared Cluster Autoscaler Helm chart options; enabled by CA-managed pools. */
-  readonly clusterAutoscaler?: { readonly version?: pulumi.Input<string> };
+  readonly clusterAutoscaler?: {
+    readonly version?: pulumi.Input<string>;
+    /** Existing cluster OIDC provider ARN; Nimbus creates one when omitted. */
+    readonly oidcProviderArn?: pulumi.Input<string>;
+  };
   /** Shared Karpenter Helm chart and interruption handling options. */
   readonly karpenter?: {
     readonly version?: pulumi.Input<string>;
@@ -299,9 +303,7 @@ export function createEksCluster(
     });
   }
 
-  const needsPodIdentityAgent = config.nodePools.some(
-    (pool) => pool.scaling?.mode === "cluster-autoscaler" || isKarpenterPool(pool)
-  );
+  const needsPodIdentityAgent = config.nodePools.some(isKarpenterPool);
 
   // Add-on names are deduplicated so the explicit add-on list can include the
   // EBS driver without creating a second copy of it or its Pod Identity agent.

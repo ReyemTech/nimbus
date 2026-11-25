@@ -111,7 +111,52 @@ export function createEksAutoscaling(
       : 1;
   const controllerReplicas = stablePoolGuaranteedNodes >= 2 ? 2 : 1;
   if (caPools.length) {
-    const role = createPodRole(`${name}-cluster-autoscaler`, tags);
+    const issuer = cluster.identities.apply((identities) => {
+      const url = identities[0]?.oidcs[0]?.issuer;
+      if (!url)
+        throw new Error("EKS cluster does not expose an OIDC issuer for Cluster Autoscaler.");
+      return url;
+    });
+    const oidcProvider = options.clusterAutoscaler?.oidcProviderArn
+      ? undefined
+      : new aws.iam.OpenIdConnectProvider(
+          `${name}-cluster-autoscaler-oidc-provider`,
+          { url: issuer, clientIdLists: ["sts.amazonaws.com"], tags },
+          { dependsOn: [cluster] }
+        );
+    const oidcProviderArn = options.clusterAutoscaler?.oidcProviderArn ?? oidcProvider?.arn;
+    if (!oidcProviderArn) {
+      throw new Error("Cluster Autoscaler requires an EKS OIDC provider ARN.");
+    }
+    const role = new aws.iam.Role(
+      `${name}-cluster-autoscaler-role`,
+      {
+        namePrefix: `${name}-cluster-autoscaler-`,
+        assumeRolePolicy: pulumi
+          .all([issuer, oidcProviderArn])
+          .apply(([issuerUrl, providerArn]) => {
+            const issuerKey = issuerUrl.replace(/^https?:\/\//, "");
+            return JSON.stringify({
+              Version: "2012-10-17",
+              Statement: [
+                {
+                  Effect: "Allow",
+                  Principal: { Federated: providerArn },
+                  Action: "sts:AssumeRoleWithWebIdentity",
+                  Condition: {
+                    StringEquals: {
+                      [`${issuerKey}:aud`]: "sts.amazonaws.com",
+                      [`${issuerKey}:sub`]: "system:serviceaccount:kube-system:cluster-autoscaler",
+                    },
+                  },
+                },
+              ],
+            });
+          }),
+        tags,
+      },
+      { dependsOn: [cluster, ...(oidcProvider ? [oidcProvider] : [])] }
+    );
     const policy = new aws.iam.RolePolicy(`${name}-cluster-autoscaler-policy`, {
       role: role.name,
       policy: pulumi.all([cluster.name]).apply(([clusterName]) =>
@@ -149,17 +194,7 @@ export function createEksAutoscaling(
         })
       ),
     });
-    const association = new aws.eks.PodIdentityAssociation(
-      `${name}-cluster-autoscaler-identity`,
-      {
-        clusterName: cluster.name,
-        namespace: "kube-system",
-        serviceAccount: "cluster-autoscaler",
-        roleArn: role.arn,
-      },
-      { dependsOn: [cluster, policy, ...(podIdentityAgent ? [podIdentityAgent] : [])] }
-    );
-    resources.push(role, policy, association);
+    resources.push(role, policy, ...(oidcProvider ? [oidcProvider] : []));
     for (const pool of caPools) {
       const group = nodeGroupsByPool.get(pool.name);
       if (!group)
@@ -202,7 +237,13 @@ export function createEksAutoscaling(
             tags: [`nimbus.dev/cluster-autoscaler/${name}`],
           },
           awsRegion: clusterRegion,
-          rbac: { serviceAccount: { create: true, name: "cluster-autoscaler" } },
+          rbac: {
+            serviceAccount: {
+              create: true,
+              name: "cluster-autoscaler",
+              annotations: { "eks.amazonaws.com/role-arn": role.arn },
+            },
+          },
           nodeSelector: stableSelector.matchLabels,
           extraArgs: {
             "skip-nodes-with-local-storage": "false",
@@ -210,7 +251,10 @@ export function createEksAutoscaling(
           },
         },
       },
-      { provider, dependsOn: [association, ...caNodeGroups] }
+      {
+        provider,
+        dependsOn: [role, policy, ...(oidcProvider ? [oidcProvider] : []), ...caNodeGroups],
+      }
     );
     resources.push(chart as unknown as pulumi.Resource);
   }

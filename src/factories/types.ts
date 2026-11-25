@@ -49,7 +49,11 @@ export interface IAwsProviderOptions {
   /** Opt in to the EKS community Metrics Server add-on. */
   readonly metricsServer?: boolean | IEksMetricsServerOptions;
   /** Install/configure the shared Cluster Autoscaler for selected EKS pools. */
-  readonly clusterAutoscaler?: { readonly version?: pulumi.Input<string> };
+  readonly clusterAutoscaler?: {
+    readonly version?: pulumi.Input<string>;
+    /** Existing cluster OIDC provider ARN; Nimbus creates one when omitted. */
+    readonly oidcProviderArn?: pulumi.Input<string>;
+  };
   /** Install/configure the shared Karpenter controller and Spot handling. */
   readonly karpenter?: {
     readonly version?: pulumi.Input<string>;

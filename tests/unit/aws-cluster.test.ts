@@ -14,9 +14,13 @@ const mockPulumi = vi.hoisted(() => {
 
   const allCalls: ReadonlyArray<unknown>[] = [];
   const clusterArn = { value: "arn:aws:eks:us-east-1:123456789012:cluster/prod" };
+  const clusterIssuer = {
+    value: "https://oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE",
+  };
   return {
     allCalls,
     clusterArn,
+    clusterIssuer,
     output,
     all: (values: ReadonlyArray<unknown>) => {
       allCalls.push(values);
@@ -112,6 +116,16 @@ vi.mock("@pulumi/aws", () => {
           record("iam.RolePolicy", name, args);
         }
       },
+      OpenIdConnectProvider: class {
+        readonly kind = "iam.OpenIdConnectProvider";
+        readonly arn = output(
+          `arn:aws:iam::123456789012:oidc-provider/${mockPulumi.clusterIssuer.value.replace("https://", "")}`
+        );
+        readonly url = output(mockPulumi.clusterIssuer.value);
+        constructor(name: string, args: Record<string, unknown>) {
+          record("iam.OpenIdConnectProvider", name, args);
+        }
+      },
     },
     ec2: {
       LaunchTemplate: class {
@@ -127,6 +141,11 @@ vi.mock("@pulumi/aws", () => {
         readonly kind = "eks.Cluster";
         readonly name = output("prod");
         readonly arn = output(mockPulumi.clusterArn.value);
+        readonly identities = output([
+          {
+            oidcs: [{ issuer: mockPulumi.clusterIssuer.value }],
+          },
+        ]);
         readonly endpoint = output("https://eks.example.com");
         readonly certificateAuthority = output({ data: "mock-ca" });
         readonly version = output("1.32");
@@ -249,6 +268,7 @@ beforeEach(() => {
   constructed.resources.length = 0;
   mockPulumi.allCalls.length = 0;
   mockPulumi.clusterArn.value = "arn:aws:eks:us-east-1:123456789012:cluster/prod";
+  mockPulumi.clusterIssuer.value = "https://oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE";
 });
 
 describe("createEksCluster options", () => {
@@ -629,7 +649,49 @@ describe("createEksCluster options", () => {
     expect(
       resourcesOf("k8s.Chart").find(({ name }) => name === "prod-cluster-autoscaler")?.args.version
     ).toMatchObject({ value: "9.46.6" });
-    expect(resourcesOf("eks.PodIdentityAssociation")).toHaveLength(1);
+    expect(resourcesOf("eks.PodIdentityAssociation")).toHaveLength(0);
+    expect(resourcesOf("iam.OpenIdConnectProvider")).toHaveLength(1);
+    expect(resourcesOf("iam.OpenIdConnectProvider")[0]?.args).toMatchObject({
+      url: { value: "https://oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE" },
+      clientIdLists: ["sts.amazonaws.com"],
+    });
+    const caRole = resourcesOf("iam.Role").find(
+      ({ name }) => name === "prod-cluster-autoscaler-role"
+    );
+    const caTrust = JSON.parse((caRole?.args.assumeRolePolicy as { value: string }).value) as {
+      Statement: Array<{
+        Action: string;
+        Principal: { Federated: string };
+        Condition: { StringEquals: Record<string, string> };
+      }>;
+    };
+    expect(caTrust.Statement[0]).toMatchObject({
+      Action: "sts:AssumeRoleWithWebIdentity",
+      Principal: {
+        Federated:
+          "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE",
+      },
+      Condition: {
+        StringEquals: {
+          "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE:aud": "sts.amazonaws.com",
+          "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE:sub":
+            "system:serviceaccount:kube-system:cluster-autoscaler",
+        },
+      },
+    });
+    const caChart = resourcesOf("k8s.Chart").find(({ name }) => name === "prod-cluster-autoscaler");
+    expect(
+      (
+        caChart?.args.values as {
+          rbac: {
+            serviceAccount: { annotations: { "eks.amazonaws.com/role-arn": { value: string } } };
+          };
+        }
+      ).rbac.serviceAccount.annotations["eks.amazonaws.com/role-arn"].value
+    ).toBe("arn:aws:iam::123456789012:role/mock-role");
+    expect(resourcesOf("eks.Addon").map(({ args }) => args.addonName)).not.toContain(
+      "eks-pod-identity-agent"
+    );
     const caPolicy = resourcesOf("iam.RolePolicy").find(({ name }) =>
       name.includes("cluster-autoscaler-policy")
     );
@@ -645,9 +707,6 @@ describe("createEksCluster options", () => {
     expect(caWriteStatement?.Condition?.StringEquals).toEqual({
       "autoscaling:ResourceTag/nimbus.dev/cluster-autoscaler/prod": "owned",
     });
-    expect(resourcesOf("eks.Addon").map(({ args }) => args.addonName)).toContain(
-      "eks-pod-identity-agent"
-    );
     expect(
       resourcesOf("eks.NodeGroup").find(({ name }) => name === "prod-ng-steady")?.opts
     ).toMatchObject({ ignoreChanges: ["scalingConfig.desiredSize"] });
@@ -658,6 +717,39 @@ describe("createEksCluster options", () => {
           | undefined
       )?.ignoreChanges
     ).toBeUndefined();
+  });
+
+  it("uses a caller-owned OIDC provider for Cluster Autoscaler IRSA", () => {
+    const oidcProviderArn =
+      "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE";
+    create(
+      {
+        autoscalerControllerNodePoolName: "steady",
+        clusterAutoscaler: { oidcProviderArn },
+      },
+      network,
+      {
+        ...config,
+        nodePools: [
+          {
+            name: "steady",
+            instanceType: "m7i.large",
+            minNodes: 1,
+            maxNodes: 2,
+            scaling: { mode: "cluster-autoscaler" },
+          },
+        ],
+      }
+    );
+
+    expect(resourcesOf("iam.OpenIdConnectProvider")).toHaveLength(0);
+    const role = resourcesOf("iam.Role").find(
+      ({ name }) => name === "prod-cluster-autoscaler-role"
+    );
+    const trust = JSON.parse((role?.args.assumeRolePolicy as { value: string }).value) as {
+      Statement: Array<{ Principal: { Federated: string } }>;
+    };
+    expect(trust.Statement[0]?.Principal.Federated).toBe(oidcProviderArn);
   });
 
   it("keeps Karpenter capacity separate from EKS managed groups and Cluster Autoscaler", () => {
@@ -780,6 +872,7 @@ describe("createEksCluster options", () => {
 
   it("uses the deployed cluster region for autoscaler configuration and IAM", () => {
     mockPulumi.clusterArn.value = "arn:aws:eks:ca-central-1:123456789012:cluster/prod";
+    mockPulumi.clusterIssuer.value = "https://oidc.eks.ca-central-1.amazonaws.com/id/EXAMPLE";
     create({ autoscalerControllerNodePoolName: "steady" }, network, {
       ...config,
       nodePools: [

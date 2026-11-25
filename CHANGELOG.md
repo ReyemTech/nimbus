@@ -1,3 +1,11 @@
+## [3.10.1](https://github.com/ReyemTech/nimbus/compare/v3.10.0...v3.10.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **aws:** align EKS provider identity ([839a971](https://github.com/ReyemTech/nimbus/commit/839a9719e7609681547fe61ee98e8b40c0c3152f))
+* **aws:** harden EKS foundation provisioning ([3327591](https://github.com/ReyemTech/nimbus/commit/33275912aae5784cbade9cc7ac4f986bf6299d4c))
+
 # [3.10.0](https://github.com/ReyemTech/nimbus/compare/v3.9.0...v3.10.0) (2026-11-24)
 
 

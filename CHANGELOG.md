@@ -1,3 +1,11 @@
+## [3.14.1](https://github.com/ReyemTech/nimbus/compare/v3.14.0...v3.14.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* **aws:** allow external-dns zone discovery reads ([d17a3bc](https://github.com/ReyemTech/nimbus/commit/d17a3bcaf65fa9526c65ed6bbddb2c3118e74396))
+* **aws:** remove unsupported external-dns addon setting ([68e835f](https://github.com/ReyemTech/nimbus/commit/68e835f491b245e3b9566ec77c2146680075be7e))
+
 # [3.14.0](https://github.com/ReyemTech/nimbus/compare/v3.13.0...v3.14.0) (2026-11-25)
 
 

@@ -156,6 +156,11 @@ export interface ICluster {
   readonly storageTiers?: StorageTierMap;
   /** Native cloud resources associated with the cluster (for reuse by components). */
   readonly providerResources?: Readonly<Record<string, pulumi.Resource>>;
+  /**
+   * Resolved AWS tag map for cluster resources and AWS-created child resources.
+   * The protected `nimbus:cluster` value is `<region>/<cluster-name>`.
+   */
+  readonly awsResourceTags?: Readonly<Record<string, string>>;
 
   /** EKS add-on names managed by Nimbus on this cluster, when applicable. */
   readonly eksAddons?: ReadonlyArray<string>;

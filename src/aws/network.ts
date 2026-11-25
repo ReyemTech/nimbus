@@ -8,6 +8,7 @@ import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
 import type { INetwork, INetworkConfig, NatStrategy } from "../network";
 import { resolveCloudTarget } from "../types";
+import { createAwsClusterTags } from "./tagging";
 
 /** AWS account ID that publishes the fck-nat community AMI. */
 const FCK_NAT_AMI_OWNER = "568608671756";
@@ -43,7 +44,9 @@ export function createAwsNetwork(
   const cidr = config.cidr ?? "10.0.0.0/16";
   const azCount = options?.availabilityZoneCount ?? 2;
   const natStrategy: NatStrategy = config.natStrategy ?? "managed";
-  const tags = config.tags ?? {};
+  const tags = config.clusterNameForTags
+    ? createAwsClusterTags(target.region, config.clusterNameForTags, config.tags)
+    : (config.tags ?? {});
 
   const vpc = new aws.ec2.Vpc(`${name}-vpc`, {
     cidrBlock: cidr,
@@ -281,6 +284,7 @@ function createFckNat(
   const instanceProfile = new aws.iam.InstanceProfile(`${name}-fck-nat-profile`, {
     namePrefix: `${name}-fck-nat`,
     role: role.name,
+    tags,
   });
 
   const lt = new aws.ec2.LaunchTemplate(`${name}-fck-nat-lt`, {
@@ -299,6 +303,10 @@ function createFckNat(
         resourceType: "instance",
         tags: { ...tags, Name: `${name}-fck-nat` },
       },
+      {
+        resourceType: "volume",
+        tags,
+      },
     ],
     tags,
   });
@@ -313,6 +321,11 @@ function createFckNat(
       desiredCapacity: 1,
       launchTemplate: { id: lt.id, version: "$Latest" },
       waitForCapacityTimeout: "15m",
+      tags: Object.entries(tags).map(([key, value]) => ({
+        key,
+        value,
+        propagateAtLaunch: true,
+      })),
     },
     { dependsOn: [publicRouteTable, eni, eip] }
   );

@@ -142,6 +142,48 @@ beforeEach(() => {
 });
 
 describe("createAwsNetwork NAT readiness", () => {
+  it("adds the cluster identifier to dedicated network resources only when requested", () => {
+    createAwsNetwork("prod", {
+      cloud: { provider: "aws", region: "ca-central-1" },
+      cidr: "10.0.0.0/16",
+      natStrategy: "fck-nat",
+      tags: { environment: "production" },
+      clusterNameForTags: "prod-eks",
+    });
+
+    const taggedResources = constructed.resources.filter(({ args }) => args.tags !== undefined);
+    expect(taggedResources.length).toBeGreaterThan(0);
+    expect(
+      taggedResources.every(({ args }) => {
+        const resourceTags = args.tags;
+        return Array.isArray(resourceTags)
+          ? resourceTags.some(
+              (tag) =>
+                (tag as { key?: string; value?: string }).key === "nimbus:cluster" &&
+                (tag as { key?: string; value?: string }).value === "ca-central-1/prod-eks"
+            )
+          : (resourceTags as Record<string, string>)?.["nimbus:cluster"] ===
+              "ca-central-1/prod-eks";
+      })
+    ).toBe(true);
+    expect(taggedResources[0]?.args.tags).toMatchObject({ environment: "production" });
+  });
+
+  it("does not apply the cluster identifier to shared networks by default", () => {
+    createAwsNetwork("shared", {
+      cloud: { provider: "aws", region: "ca-central-1" },
+      cidr: "10.0.0.0/16",
+      natStrategy: "none",
+      tags: { environment: "shared" },
+    });
+
+    expect(
+      constructed.resources
+        .filter(({ args }) => args.tags !== undefined)
+        .every(({ args }) => !(args.tags as Record<string, string>)?.["nimbus:cluster"])
+    ).toBe(true);
+  });
+
   it("waits for fck-nat capacity and an active default route before exposing private subnets", () => {
     const network = createAwsNetwork("prod", {
       cloud: "aws",

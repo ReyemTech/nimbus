@@ -63,6 +63,8 @@ export interface INetworkConfig {
   readonly enableDnsSupport?: boolean;
   /** Resource tags applied to the network and child resources. */
   readonly tags?: Readonly<Record<string, string>>;
+  /** Associate a dedicated network with an EKS cluster for cost allocation. */
+  readonly clusterNameForTags?: string;
 }
 
 /**

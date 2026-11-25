@@ -53,6 +53,33 @@ import { eks } from "@pulumi/aws";
 describe("EKS ExternalDNS add-on", () => {
   beforeEach(() => records.splice(0));
 
+  it("applies cluster tags to its AWS-created IAM and EKS resources", () => {
+    const awsResourceTags = {
+      environment: "production",
+      "nimbus:cluster": "ca-central-1/prod",
+    };
+    const cluster = {
+      nativeResource: new eks.Cluster("test", { roleArn: "test", vpcConfig: { subnetIds: [] } }),
+      providerResources: {},
+      awsResourceTags,
+    } as any;
+
+    deployEksExternalDns("prod", cluster, {
+      dnsProvider: "route53",
+      hostedZoneIds: ["Z123"],
+    });
+
+    expect(records.find((resource) => resource.kind === "role")?.args.tags).toEqual(
+      awsResourceTags
+    );
+    expect(
+      records.filter((resource) => resource.kind === "addon").map((resource) => resource.args.tags)
+    ).toEqual([awsResourceTags, awsResourceTags]);
+    expect(records.find((resource) => resource.kind === "identity")?.args.tags).toEqual(
+      awsResourceTags
+    );
+  });
+
   it("uses the community add-on with Pod Identity and explicit zone scope", () => {
     const cluster = {
       nativeResource: new eks.Cluster("test", { roleArn: "test", vpcConfig: { subnetIds: [] } }),

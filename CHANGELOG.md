@@ -1,3 +1,18 @@
+# [3.13.0](https://github.com/ReyemTech/nimbus/compare/v3.12.0...v3.13.0) (2026-11-25)
+
+
+### Bug Fixes
+
+* **observability:** disable exporter chart dependencies ([328e0c4](https://github.com/ReyemTech/nimbus/commit/328e0c4250d74e45ac5a0300a969a592b98f1839))
+* **platform:** create issuer with EKS cert-manager add-on ([656ed36](https://github.com/ReyemTech/nimbus/commit/656ed361b3560d0b0a69be3020b0cd15682d56df))
+* **platform:** restart cert-manager after Route53 identity ([3427ad7](https://github.com/ReyemTech/nimbus/commit/3427ad70da13a9e2b5fc8d57ba768db325a8aa07))
+
+
+### Features
+
+* **eks:** add AWS managed EKS add-ons ([46d086a](https://github.com/ReyemTech/nimbus/commit/46d086aee9b6a8e7b5242110655d18b42a742094))
+* **eks:** support community observability add-ons ([a9ef43f](https://github.com/ReyemTech/nimbus/commit/a9ef43f3f343f654c669b954e78921518df5561b))
+
 # [3.12.0](https://github.com/ReyemTech/nimbus/compare/v3.11.0...v3.12.0) (2026-11-25)
 
 

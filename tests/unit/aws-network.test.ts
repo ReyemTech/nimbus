@@ -29,6 +29,8 @@ const constructed = vi.hoisted(() => ({
   natRouteState: "active",
 }));
 
+const mockAwsConfig = vi.hoisted(() => ({ region: undefined as string | undefined }));
+
 vi.mock("@pulumi/pulumi", () => mockPulumi);
 
 vi.mock("@pulumi/aws", () => {
@@ -37,6 +39,7 @@ vi.mock("@pulumi/aws", () => {
   };
   const output = mockPulumi.output;
   return {
+    config: mockAwsConfig,
     getAvailabilityZonesOutput: vi.fn(() => ({
       names: output(["ca-central-1a", "ca-central-1b"]),
     })),
@@ -139,12 +142,14 @@ import { createAwsNetwork } from "../../src/aws/network";
 beforeEach(() => {
   constructed.resources.length = 0;
   constructed.natRouteState = "active";
+  mockAwsConfig.region = undefined;
 });
 
 describe("createAwsNetwork NAT readiness", () => {
   it("adds the cluster identifier to dedicated network resources only when requested", () => {
+    mockAwsConfig.region = "ca-central-1";
     createAwsNetwork("prod", {
-      cloud: { provider: "aws", region: "ca-central-1" },
+      cloud: "aws",
       cidr: "10.0.0.0/16",
       natStrategy: "fck-nat",
       tags: { environment: "production" },

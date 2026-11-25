@@ -45,7 +45,11 @@ export function createAwsNetwork(
   const azCount = options?.availabilityZoneCount ?? 2;
   const natStrategy: NatStrategy = config.natStrategy ?? "managed";
   const tags = config.clusterNameForTags
-    ? createAwsClusterTags(target.region, config.clusterNameForTags, config.tags)
+    ? createAwsClusterTags(
+        aws.config.region ?? target.region,
+        config.clusterNameForTags,
+        config.tags
+      )
     : (config.tags ?? {});
 
   const vpc = new aws.ec2.Vpc(`${name}-vpc`, {

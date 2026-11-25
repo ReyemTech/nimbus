@@ -44,6 +44,8 @@ const constructed = vi.hoisted(() => ({
   }>,
 }));
 
+const mockAwsConfig = vi.hoisted(() => ({ region: undefined as string | undefined }));
+
 vi.mock("@pulumi/pulumi", () => mockPulumi);
 
 vi.mock("@pulumi/kubernetes", () => ({
@@ -96,6 +98,7 @@ vi.mock("@pulumi/aws", () => {
   const output = mockPulumi.output;
 
   return {
+    config: mockAwsConfig,
     iam: {
       Role: class {
         readonly name = output("mock-role-name");
@@ -272,12 +275,21 @@ const resourcesOf = (kind: string) => constructed.resources.filter((item) => ite
 
 beforeEach(() => {
   constructed.resources.length = 0;
+  mockAwsConfig.region = undefined;
   mockPulumi.allCalls.length = 0;
   mockPulumi.clusterArn.value = "arn:aws:eks:us-east-1:123456789012:cluster/prod";
   mockPulumi.clusterIssuer.value = "https://oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE";
 });
 
 describe("createEksCluster options", () => {
+  it("uses the configured default AWS provider region for cluster tags", () => {
+    mockAwsConfig.region = "ca-central-1";
+
+    const cluster = create();
+
+    expect(cluster.awsResourceTags?.["nimbus:cluster"]).toBe("ca-central-1/prod");
+  });
+
   it("applies the protected cluster tag to EKS resources and the EKS cluster security group", () => {
     const cluster = create(undefined, network, {
       ...config,
@@ -347,9 +359,7 @@ describe("createEksCluster options", () => {
       },
       {
         resourceType: "volume",
-        tags: {
-          "nimbus:cluster": "us-east-1/prod",
-        },
+        tags: { "nimbus:cluster": "us-east-1/prod" },
       },
     ]);
   });
@@ -733,9 +743,16 @@ describe("createEksCluster options", () => {
   });
 
   it("propagates managed node-group EC2 instance tags through a launch template", () => {
-    create({
-      nodeGroupInstanceTags: { Name: "reyemtech-public-arm64", environment: "production" },
-    });
+    create(
+      {
+        nodeGroupInstanceTags: { Name: "reyemtech-public-arm64", environment: "production" },
+      },
+      network,
+      {
+        ...config,
+        tags: { Name: "cluster-name", environment: "cluster", owner: "platform" },
+      }
+    );
 
     expect(resourcesOf("ec2.LaunchTemplate")[0]?.args.tagSpecifications).toEqual([
       {
@@ -743,12 +760,16 @@ describe("createEksCluster options", () => {
         tags: {
           Name: "reyemtech-public-arm64",
           environment: "production",
+          owner: "platform",
           "nimbus:cluster": "us-east-1/prod",
         },
       },
       {
         resourceType: "volume",
         tags: {
+          Name: "cluster-name",
+          environment: "cluster",
+          owner: "platform",
           "nimbus:cluster": "us-east-1/prod",
         },
       },

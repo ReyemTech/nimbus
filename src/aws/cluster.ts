@@ -159,7 +159,7 @@ export function createEksCluster(
   const cloud = Array.isArray(config.cloud) ? (config.cloud[0] ?? "aws") : config.cloud;
   const target = resolveCloudTarget(cloud);
 
-  const tags = createAwsClusterTags(target.region, name, config.tags);
+  const tags = createAwsClusterTags(aws.config.region ?? target.region, name, config.tags);
   const autoMode = options?.autoMode ?? config.autoMode ?? false;
   const addons = options?.addons ?? DEFAULT_ADDONS;
   const endpointAccess = options?.endpointAccess ?? "both";
@@ -336,7 +336,11 @@ export function createEksCluster(
               tagSpecifications: [
                 {
                   resourceType: "instance",
-                  tags: { ...options?.nodeGroupInstanceTags, ...tags },
+                  tags: {
+                    ...tags,
+                    ...options?.nodeGroupInstanceTags,
+                    "nimbus:cluster": tags["nimbus:cluster"] as string,
+                  },
                 },
                 { resourceType: "volume", tags },
               ],

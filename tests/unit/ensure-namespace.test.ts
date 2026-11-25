@@ -8,23 +8,23 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockProvider = (): any => ({});
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createdNamespaces: Array<{ name: string; args: any }>;
+let createdNamespaces: Array<{ name: string; args: any; opts?: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createdLimitRanges: Array<{ name: string; args: any }>;
+let createdLimitRanges: Array<{ name: string; args: any; opts?: any }>;
 
 vi.mock("@pulumi/kubernetes", () => {
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockNamespace = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    constructor(name: string, args: any, _opts?: any) {
-      createdNamespaces.push({ name, args });
+    constructor(name: string, args: any, opts?: any) {
+      createdNamespaces.push({ name, args, opts });
     }
   };
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockLimitRange = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    constructor(name: string, args: any, _opts?: any) {
-      createdLimitRanges.push({ name, args });
+    constructor(name: string, args: any, opts?: any) {
+      createdLimitRanges.push({ name, args, opts });
     }
   };
   return {
@@ -69,6 +69,19 @@ describe("ensureNamespace", () => {
 
     expect(second).not.toBe(first);
     expect(createdNamespaces).toHaveLength(2);
+    expect(createdNamespaces[0]?.name).toBe(createdNamespaces[1]?.name);
+    expect(createdNamespaces[0]?.opts?.parent).toBeDefined();
+    expect(createdNamespaces[1]?.opts?.parent).toBeDefined();
+    expect(createdNamespaces[0]?.opts?.parent).not.toBe(createdNamespaces[1]?.opts?.parent);
+    expect(createdNamespaces[0]?.opts?.aliases).toHaveLength(1);
+    expect(createdNamespaces[0]?.opts?.aliases?.[0]).toHaveProperty("parent");
+    expect(createdNamespaces[1]?.opts?.aliases).toBeUndefined();
+    expect(createdLimitRanges).toHaveLength(2);
+    expect(createdLimitRanges[0]?.name).toBe(createdLimitRanges[1]?.name);
+    expect(createdLimitRanges[0]?.opts?.parent).not.toBe(createdLimitRanges[1]?.opts?.parent);
+    expect(createdLimitRanges[0]?.opts?.aliases).toHaveLength(1);
+    expect(createdLimitRanges[0]?.opts?.aliases?.[0]).toHaveProperty("parent");
+    expect(createdLimitRanges[1]?.opts?.aliases).toBeUndefined();
   });
 
   it("creates Namespace only (no LimitRange) when policy is false", async () => {

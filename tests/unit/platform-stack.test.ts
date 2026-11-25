@@ -249,6 +249,7 @@ vi.mock("@pulumi/kubernetes", () => {
 
 // Mock @pulumi/pulumi
 vi.mock("@pulumi/pulumi", () => ({
+  rootStackResource: {},
   output: (val: unknown) => mockOutput(val),
   all: (vals: unknown[]) => ({
     apply: (fn: (...args: unknown[]) => unknown) => mockOutput(fn(vals)),

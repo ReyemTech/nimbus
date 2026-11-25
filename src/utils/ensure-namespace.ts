@@ -1,9 +1,11 @@
 import * as k8s from "@pulumi/kubernetes";
+import * as pulumi from "@pulumi/pulumi";
 import type { INamespacePolicy } from "../platform/interfaces";
 import { DEFAULT_NAMESPACE_POLICY, SYSTEM_NAMESPACES } from "../platform/interfaces";
 import { nimbus } from "../nimbus";
 
 const createdNamespaces = new WeakMap<k8s.Provider, Map<string, k8s.core.v1.Namespace>>();
+const namespaceOwners = new Map<string, k8s.Provider>();
 
 export interface IEnsureNamespaceOpts {
   /**
@@ -45,7 +47,18 @@ export function ensureNamespace(
   if (existing) {
     return existing;
   }
-  const ns = new k8s.core.v1.Namespace(`ensure-ns-${name}`, { metadata: { name } }, { provider });
+  const isLegacyIdentityOwner = !namespaceOwners.has(name);
+  if (isLegacyIdentityOwner) namespaceOwners.set(name, provider);
+  const identityOptions: pulumi.CustomResourceOptions = {
+    provider,
+    parent: provider,
+    ...(isLegacyIdentityOwner ? { aliases: [{ parent: pulumi.rootStackResource }] } : {}),
+  };
+  const ns = new k8s.core.v1.Namespace(
+    `ensure-ns-${name}`,
+    { metadata: { name } },
+    identityOptions
+  );
   providerNamespaces.set(name, ns);
 
   if (SYSTEM_NAMESPACES.has(name)) {
@@ -87,7 +100,7 @@ export function ensureNamespace(
         ],
       },
     },
-    { provider, dependsOn: [ns] }
+    { ...identityOptions, dependsOn: [ns] }
   );
 
   return ns;

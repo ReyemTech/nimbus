@@ -5,6 +5,7 @@
  */
 
 import * as k8s from "@pulumi/kubernetes";
+import type * as pulumi from "@pulumi/pulumi";
 import type { IPlatformComponentConfig } from "../interfaces";
 import { ensureNamespace } from "../../utils/ensure-namespace";
 
@@ -13,7 +14,8 @@ export function deployTraefik(
   config: IPlatformComponentConfig | undefined,
   provider: k8s.Provider,
   defaultVersion: string | undefined,
-  robotsBlock?: boolean
+  robotsBlock?: boolean,
+  dependsOn?: ReadonlyArray<pulumi.Resource>
 ): k8s.helm.v3.Release {
   ensureNamespace("traefik", provider);
 
@@ -48,6 +50,6 @@ export function deployTraefik(
         ...config?.values,
       },
     },
-    { provider }
+    { provider, dependsOn: [...(dependsOn ?? [])] }
   );
 }

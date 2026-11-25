@@ -377,8 +377,10 @@ export function createEksCluster(
     kubeconfig,
     version: cluster.version,
     nodePools: config.nodePools,
+    storageTiers: config.storageTiers,
     nativeResource: cluster,
     provider,
+    providerResources: podIdentityAgent ? { podIdentityAgent } : undefined,
   };
 }
 

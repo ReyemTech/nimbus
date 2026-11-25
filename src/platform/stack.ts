@@ -12,14 +12,15 @@ import * as aws from "@pulumi/aws";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type { ICluster } from "../cluster";
-import { createPrometheusRule } from "../observability/alerts";
 import type { IPlatformStack, IPlatformStackConfig } from "./interfaces";
 import type { IExposedService } from "../types";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import {
   deployTraefik,
   deployCertManager,
+  certManagerServiceAccountName,
   deployExternalDns,
+  deployEksExternalDns,
   deployArgocd,
   deployVault,
   deployExternalSecrets,
@@ -91,6 +92,7 @@ function deployToCluster(
   cluster: ICluster
 ): IPlatformStack {
   const components: Record<string, k8s.helm.v3.Release> = {};
+  const providerResources: Record<string, pulumi.Resource> = {};
   const provider = cluster.provider;
 
   // 1. Traefik (ingress controller) — enabled by default
@@ -100,42 +102,27 @@ function deployToCluster(
       config.traefik,
       provider,
       DEFAULT_VERSIONS.traefik,
-      config.robotsBlock
+      config.robotsBlock,
+      config.traefik?.dependsOn
     );
+  }
 
-    // Traefik alert rules
-    createPrometheusRule(
-      `${name}-traefik-alerts`,
-      "observability",
-      [
-        {
-          name: "nimbus.traefik",
-          rules: [
-            {
-              alert: "TraefikDown",
-              expr: `kube_deployment_status_replicas_available{namespace="traefik",deployment=~".*traefik.*"} == 0`,
-              for: "2m",
-              labels: { severity: "critical" },
-              annotations: {
-                summary:
-                  "Traefik ingress controller has 0 available replicas — all traffic stopped",
-              },
-            },
-            {
-              alert: "TraefikHighErrorRate",
-              expr: `sum(rate(traefik_service_requests_total{code=~"5.."}[5m])) / sum(rate(traefik_service_requests_total[5m])) > 0.05`,
-              for: "5m",
-              labels: { severity: "warning" },
-              annotations: {
-                summary: "Traefik 5xx error rate is above 5% ({{ $value | humanizePercentage }})",
-              },
-            },
-          ],
-        },
-      ],
-      provider,
-      [components["traefik"]]
+  let eksDnsResources: ReturnType<typeof deployEksExternalDns> | undefined;
+  if (
+    config.externalDns?.enabled !== false &&
+    config.externalDns?.dnsProvider === "route53" &&
+    cluster.nativeResource instanceof aws.eks.Cluster
+  ) {
+    eksDnsResources = deployEksExternalDns(
+      name,
+      cluster,
+      config.externalDns,
+      config.externalDns.awsProvider as aws.Provider | undefined,
+      certManagerServiceAccountName(config.certManager)
     );
+    providerResources["external-dns"] = eksDnsResources.addon;
+    providerResources["cert-manager-route53-identity"] = eksDnsResources.certManagerIdentity;
+    providerResources["pod-identity-agent"] = eksDnsResources.podIdentityAgent;
   }
 
   // 2. cert-manager (TLS certificates) — enabled by default
@@ -144,156 +131,182 @@ function deployToCluster(
       name,
       config.certManager,
       provider,
-      DEFAULT_VERSIONS.certManager
+      DEFAULT_VERSIONS.certManager,
+      eksDnsResources?.certManagerIdentity,
+      eksDnsResources?.certManagerIdentity.associationId
     );
   }
 
   // 3. External DNS — enabled if configured
   if (config.externalDns && config.externalDns.enabled !== false) {
     const dnsConfig = config.externalDns;
-
-    // 3a. Route53 IAM provisioning — create IAM user + access key when no manual credentials
-    if (dnsConfig.dnsProvider === "route53" && !dnsConfig.dnsCredentials) {
-      const awsRegion = dnsConfig.awsRegion ?? "us-east-1";
-      const awsOpts = dnsConfig.awsProvider ? { provider: dnsConfig.awsProvider } : {};
-
-      const iamUser = new aws.iam.User(
-        `${name}-external-dns-user`,
-        {
-          name: `${name}-external-dns`,
-          path: "/nimbus/",
-        },
-        awsOpts
-      );
-
-      new aws.iam.UserPolicy(
-        `${name}-external-dns-policy`,
-        {
-          user: iamUser.name,
-          policy: JSON.stringify({
-            Version: "2012-10-17",
-            Statement: [
-              {
-                Effect: "Allow",
-                Action: ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"],
-                Resource: "arn:aws:route53:::hostedzone/*",
-              },
-              {
-                Effect: "Allow",
-                Action: ["route53:GetChange"],
-                Resource: "arn:aws:route53:::change/*",
-              },
-              {
-                Effect: "Allow",
-                Action: ["route53:ListHostedZones", "route53:ListHostedZonesByName"],
-                Resource: "*",
-              },
-            ],
-          }),
-        },
-        awsOpts
-      );
-
-      const accessKey = new aws.iam.AccessKey(
-        `${name}-external-dns-key`,
-        {
-          user: iamUser.name,
-        },
-        awsOpts
-      );
-
-      // Secret for external-dns namespace
-      new k8s.core.v1.Secret(
-        `${name}-route53-external-dns`,
-        {
-          metadata: { name: "route53-credentials", namespace: "external-dns" },
-          stringData: {
-            AWS_ACCESS_KEY_ID: accessKey.id,
-            AWS_SECRET_ACCESS_KEY: accessKey.secret,
-          },
-        },
-        { provider }
-      );
-
-      // Secret for cert-manager namespace (DNS-01 solver)
-      new k8s.core.v1.Secret(
-        `${name}-route53-cert-manager`,
-        {
-          metadata: { name: "route53-credentials", namespace: "cert-manager" },
-          stringData: {
-            "secret-access-key": accessKey.secret,
-          },
-        },
-        {
-          provider,
-          dependsOn: [components["cert-manager"]].filter(Boolean) as k8s.helm.v3.Release[],
-        }
-      );
-
-      // Deploy external-dns with env vars referencing the K8s secret
-      components["external-dns"] = deployExternalDns(
-        name,
-        dnsConfig,
-        provider,
-        DEFAULT_VERSIONS.externalDns,
-        [
+    if (eksDnsResources) {
+      if (components["cert-manager"]) {
+        new k8s.apiextensions.CustomResource(
+          `${name}-clusterissuer-dns`,
           {
-            name: "AWS_ACCESS_KEY_ID",
-            valueFrom: {
-              secretKeyRef: { name: "route53-credentials", key: "AWS_ACCESS_KEY_ID" },
+            apiVersion: "cert-manager.io/v1",
+            kind: "ClusterIssuer",
+            metadata: { name: "letsencrypt-dns" },
+            spec: {
+              acme: {
+                email: `contact@${config.domain}`,
+                server: "https://acme-v02.api.letsencrypt.org/directory",
+                privateKeySecretRef: { name: "letsencrypt-dns-account-key" },
+                solvers: [{ dns01: { route53: { region: dnsConfig.awsRegion ?? "us-east-1" } } }],
+              },
             },
           },
           {
-            name: "AWS_SECRET_ACCESS_KEY",
-            valueFrom: {
-              secretKeyRef: { name: "route53-credentials", key: "AWS_SECRET_ACCESS_KEY" },
-            },
-          },
-          { name: "AWS_REGION", value: awsRegion },
-        ]
-      );
+            provider,
+            dependsOn: [components["cert-manager"], eksDnsResources.certManagerIdentity],
+          }
+        );
+      }
+    } else {
+      // 3a. Route53 IAM provisioning — create IAM user + access key when no manual credentials
+      if (dnsConfig.dnsProvider === "route53" && !dnsConfig.dnsCredentials) {
+        const awsRegion = dnsConfig.awsRegion ?? "us-east-1";
+        const awsOpts = dnsConfig.awsProvider ? { provider: dnsConfig.awsProvider } : {};
 
-      // ClusterIssuer for DNS-01 validation via Route53
-      new k8s.apiextensions.CustomResource(
-        `${name}-clusterissuer-dns`,
-        {
-          apiVersion: "cert-manager.io/v1",
-          kind: "ClusterIssuer",
-          metadata: { name: "letsencrypt-dns" },
-          spec: {
-            acme: {
-              email: `contact@${config.domain}`,
-              server: "https://acme-v02.api.letsencrypt.org/directory",
-              privateKeySecretRef: { name: "letsencrypt-dns-account-key" },
-              solvers: [
+        const iamUser = new aws.iam.User(
+          `${name}-external-dns-user`,
+          {
+            name: `${name}-external-dns`,
+            path: "/nimbus/",
+          },
+          awsOpts
+        );
+
+        new aws.iam.UserPolicy(
+          `${name}-external-dns-policy`,
+          {
+            user: iamUser.name,
+            policy: JSON.stringify({
+              Version: "2012-10-17",
+              Statement: [
                 {
-                  dns01: {
-                    route53: {
-                      region: awsRegion,
-                      accessKeyID: accessKey.id,
-                      secretAccessKeySecretRef: {
-                        name: "route53-credentials",
-                        key: "secret-access-key",
+                  Effect: "Allow",
+                  Action: ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"],
+                  Resource: "arn:aws:route53:::hostedzone/*",
+                },
+                {
+                  Effect: "Allow",
+                  Action: ["route53:GetChange"],
+                  Resource: "arn:aws:route53:::change/*",
+                },
+                {
+                  Effect: "Allow",
+                  Action: ["route53:ListHostedZones", "route53:ListHostedZonesByName"],
+                  Resource: "*",
+                },
+              ],
+            }),
+          },
+          awsOpts
+        );
+
+        const accessKey = new aws.iam.AccessKey(
+          `${name}-external-dns-key`,
+          {
+            user: iamUser.name,
+          },
+          awsOpts
+        );
+
+        // Secret for external-dns namespace
+        new k8s.core.v1.Secret(
+          `${name}-route53-external-dns`,
+          {
+            metadata: { name: "route53-credentials", namespace: "external-dns" },
+            stringData: {
+              AWS_ACCESS_KEY_ID: accessKey.id,
+              AWS_SECRET_ACCESS_KEY: accessKey.secret,
+            },
+          },
+          { provider }
+        );
+
+        // Secret for cert-manager namespace (DNS-01 solver)
+        new k8s.core.v1.Secret(
+          `${name}-route53-cert-manager`,
+          {
+            metadata: { name: "route53-credentials", namespace: "cert-manager" },
+            stringData: {
+              "secret-access-key": accessKey.secret,
+            },
+          },
+          {
+            provider,
+            dependsOn: [components["cert-manager"]].filter(Boolean) as k8s.helm.v3.Release[],
+          }
+        );
+
+        // Deploy external-dns with env vars referencing the K8s secret
+        components["external-dns"] = deployExternalDns(
+          name,
+          dnsConfig,
+          provider,
+          DEFAULT_VERSIONS.externalDns,
+          [
+            {
+              name: "AWS_ACCESS_KEY_ID",
+              valueFrom: {
+                secretKeyRef: { name: "route53-credentials", key: "AWS_ACCESS_KEY_ID" },
+              },
+            },
+            {
+              name: "AWS_SECRET_ACCESS_KEY",
+              valueFrom: {
+                secretKeyRef: { name: "route53-credentials", key: "AWS_SECRET_ACCESS_KEY" },
+              },
+            },
+            { name: "AWS_REGION", value: awsRegion },
+          ]
+        );
+
+        // ClusterIssuer for DNS-01 validation via Route53
+        new k8s.apiextensions.CustomResource(
+          `${name}-clusterissuer-dns`,
+          {
+            apiVersion: "cert-manager.io/v1",
+            kind: "ClusterIssuer",
+            metadata: { name: "letsencrypt-dns" },
+            spec: {
+              acme: {
+                email: `contact@${config.domain}`,
+                server: "https://acme-v02.api.letsencrypt.org/directory",
+                privateKeySecretRef: { name: "letsencrypt-dns-account-key" },
+                solvers: [
+                  {
+                    dns01: {
+                      route53: {
+                        region: awsRegion,
+                        accessKeyID: accessKey.id,
+                        secretAccessKeySecretRef: {
+                          name: "route53-credentials",
+                          key: "secret-access-key",
+                        },
                       },
                     },
                   },
-                },
-              ],
+                ],
+              },
             },
           },
-        },
-        {
+          {
+            provider,
+            dependsOn: [components["cert-manager"]].filter(Boolean) as k8s.helm.v3.Release[],
+          }
+        );
+      } else {
+        components["external-dns"] = deployExternalDns(
+          name,
+          dnsConfig,
           provider,
-          dependsOn: [components["cert-manager"]].filter(Boolean) as k8s.helm.v3.Release[],
-        }
-      );
-    } else {
-      components["external-dns"] = deployExternalDns(
-        name,
-        dnsConfig,
-        provider,
-        DEFAULT_VERSIONS.externalDns
-      );
+          DEFAULT_VERSIONS.externalDns
+        );
+      }
     }
   }
 
@@ -636,6 +649,7 @@ function deployToCluster(
     name,
     cluster,
     components,
+    providerResources,
     traefikEndpoint,
     exposedServices,
   };

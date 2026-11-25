@@ -24,8 +24,10 @@ export interface IAwsProviderOptions {
   readonly endpointAccess?: "public" | "private" | "both";
   /** CIDRs allowed to reach the public Kubernetes API endpoint. */
   readonly publicAccessCidrs?: ReadonlyArray<string>;
-  /** IAM role ARN to grant cluster-admin through an EKS access entry. */
+  /** IAM role or user principal ARN to grant cluster-admin through an EKS access entry. */
   readonly clusterAdminRoleArn?: pulumi.Input<string>;
+  /** Kubernetes provider's `aws eks get-token` role to assume. */
+  readonly kubernetesProviderRoleArn?: pulumi.Input<string>;
   /** Encrypted gp3 root volume configuration for EKS managed node groups. */
   readonly nodeGroupRootDisk?: {
     readonly sizeGiB?: number;
@@ -33,6 +35,16 @@ export interface IAwsProviderOptions {
   };
   /** Install EBS CSI plus Pod Identity permissions. */
   readonly ebsCsiDriver?: boolean;
+  /** EKS API authentication mode. Defaults to API_AND_CONFIG_MAP. */
+  readonly authenticationMode?: "API" | "API_AND_CONFIG_MAP" | "CONFIG_MAP";
+  /** Whether the cluster creator gets bootstrap administrator access. */
+  readonly bootstrapClusterCreatorAdminPermissions?: boolean;
+  /** EKS version support policy; omitted preserves the AWS default. */
+  readonly upgradePolicy?: { readonly supportType: "STANDARD" | "EXTENDED" };
+  /** Tags applied to EC2 instances in managed node groups. */
+  readonly nodeGroupInstanceTags?: Readonly<Record<string, string>>;
+  /** Managed node-group AMI family, e.g. AL2023_ARM_64_STANDARD. */
+  readonly nodeGroupAmiType?: pulumi.Input<string>;
   /** KMS key ARN for state backend encryption. Uses AES256 if not provided. */
   readonly stateKmsKeyArn?: string;
   /** Allow Pulumi to destroy the state bucket (for dev/test). Default: false. */

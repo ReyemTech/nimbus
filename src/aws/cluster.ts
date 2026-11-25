@@ -264,7 +264,7 @@ export function createEksCluster(
   const metricsServerEnabled =
     typeof metricsServerOption === "boolean"
       ? metricsServerOption
-      : metricsServerOption?.enabled ?? metricsServerOption !== undefined;
+      : (metricsServerOption?.enabled ?? metricsServerOption !== undefined);
   if (metricsServerEnabled) {
     addonNames.add("metrics-server");
   } else if (metricsServerOption !== undefined) {

@@ -15,6 +15,12 @@ describe("EKS node pool scaling validation", () => {
     expect(() => validateEksNodePoolScaling(base, {})).not.toThrow();
     expect(() =>
       validateEksNodePoolScaling(
+        { ...base, nodePools: [{ ...legacyPool, name: "batch_workers" }] },
+        {}
+      )
+    ).not.toThrow();
+    expect(() =>
+      validateEksNodePoolScaling(
         {
           ...base,
           nodePools: [{ ...legacyPool, scaling: { mode: "fixed" } }],

@@ -25,9 +25,9 @@ export function validateEksNodePoolScaling(config: IClusterConfig, options: IEks
     (pool) => pool.scaling?.mode === "cluster-autoscaler" || isKarpenterPool(pool)
   );
   for (const pool of config.nodePools) {
-    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(pool.name)) {
+    if (isKarpenterPool(pool) && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(pool.name)) {
       throw new Error(
-        `Node pool name "${pool.name}" must use lowercase letters, numbers, and hyphens.`
+        `Karpenter node pool name "${pool.name}" must use lowercase letters, numbers, and hyphens.`
       );
     }
     if (names.has(pool.name)) throw new Error(`Duplicate node pool name "${pool.name}".`);
@@ -135,7 +135,7 @@ export function createEksAutoscaling(
               Resource: "*",
               Condition: {
                 StringEquals: {
-                  [`autoscaling:ResourceTag/k8s.io/cluster-autoscaler/${clusterName}`]: "owned",
+                  [`autoscaling:ResourceTag/nimbus.dev/cluster-autoscaler/${clusterName}`]: "owned",
                 },
               },
             },
@@ -160,29 +160,13 @@ export function createEksAutoscaling(
         throw new Error(`Cluster Autoscaler pool "${pool.name}" has no managed node group.`);
       resources.push(
         new aws.autoscaling.Tag(
-          `${name}-ca-tag-${pool.name}-enabled`,
+          `${name}-ca-tag-${pool.name}`,
           {
             autoscalingGroupName: group.resources.apply(
               (items) => items[0]?.autoscalingGroups[0]?.name ?? ""
             ),
             tag: {
-              key: "k8s.io/cluster-autoscaler/enabled",
-              value: "true",
-              propagateAtLaunch: false,
-            },
-          },
-          { dependsOn: [group] }
-        )
-      );
-      resources.push(
-        new aws.autoscaling.Tag(
-          `${name}-ca-tag-${pool.name}-cluster`,
-          {
-            autoscalingGroupName: group.resources.apply(
-              (items) => items[0]?.autoscalingGroups[0]?.name ?? ""
-            ),
-            tag: {
-              key: `k8s.io/cluster-autoscaler/${name}`,
+              key: `nimbus.dev/cluster-autoscaler/${name}`,
               value: "owned",
               propagateAtLaunch: false,
             },
@@ -207,7 +191,10 @@ export function createEksAutoscaling(
         namespace: "kube-system",
         fetchOpts: { repo: "https://kubernetes.github.io/autoscaler" },
         values: {
-          autoDiscovery: { clusterName: name },
+          autoDiscovery: {
+            clusterName: name,
+            tags: [`nimbus.dev/cluster-autoscaler/${name}`],
+          },
           awsRegion: region,
           rbac: { serviceAccount: { create: true, name: "cluster-autoscaler" } },
           nodeSelector: stableSelector.matchLabels,

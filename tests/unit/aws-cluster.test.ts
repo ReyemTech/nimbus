@@ -575,20 +575,41 @@ describe("createEksCluster options", () => {
           maxNodes: 1,
           scaling: { mode: "fixed" },
         },
+        {
+          name: "legacy",
+          instanceType: "m7i.large",
+          minNodes: 1,
+          maxNodes: 3,
+        },
       ],
     });
-    expect(resourcesOf("autoscaling.Tag")).toHaveLength(4);
+    expect(resourcesOf("autoscaling.Tag")).toHaveLength(2);
     expect(
       resourcesOf("autoscaling.Tag").map(
         ({ args }) => (args.autoscalingGroupName as { value: string }).value
       )
-    ).toEqual([
-      "asg-prod-ng-steady",
-      "asg-prod-ng-steady",
-      "asg-prod-ng-platform",
-      "asg-prod-ng-platform",
+    ).toEqual(["asg-prod-ng-steady", "asg-prod-ng-platform"]);
+    expect(resourcesOf("autoscaling.Tag").map(({ args }) => args.tag)).toEqual([
+      {
+        key: "nimbus.dev/cluster-autoscaler/prod",
+        value: "owned",
+        propagateAtLaunch: false,
+      },
+      {
+        key: "nimbus.dev/cluster-autoscaler/prod",
+        value: "owned",
+        propagateAtLaunch: false,
+      },
     ]);
     expect(resourcesOf("k8s.Chart").map(({ name }) => name)).toContain("prod-cluster-autoscaler");
+    expect(
+      resourcesOf("k8s.Chart").find(({ name }) => name === "prod-cluster-autoscaler")?.args.values
+    ).toMatchObject({
+      autoDiscovery: {
+        clusterName: "prod",
+        tags: ["nimbus.dev/cluster-autoscaler/prod"],
+      },
+    });
     expect(
       resourcesOf("k8s.Chart").find(({ name }) => name === "prod-cluster-autoscaler")?.args.version
     ).toMatchObject({ value: "9.46.6" });
@@ -606,7 +627,7 @@ describe("createEksCluster options", () => {
       statement.Action.includes("autoscaling:SetDesiredCapacity")
     );
     expect(caWriteStatement?.Condition?.StringEquals).toEqual({
-      "autoscaling:ResourceTag/k8s.io/cluster-autoscaler/prod": "owned",
+      "autoscaling:ResourceTag/nimbus.dev/cluster-autoscaler/prod": "owned",
     });
     expect(resourcesOf("eks.Addon").map(({ args }) => args.addonName)).toContain(
       "eks-pod-identity-agent"
@@ -661,7 +682,7 @@ describe("createEksCluster options", () => {
       ({ name }) => name === "prod-karpenter"
     );
     expect((karpenterRelease?.args.values as { replicas?: number } | undefined)?.replicas).toBe(1);
-    expect(resourcesOf("autoscaling.Tag")).toHaveLength(2);
+    expect(resourcesOf("autoscaling.Tag")).toHaveLength(1);
     expect(
       resourcesOf("autoscaling.Tag").every(({ args }) =>
         (args.autoscalingGroupName as { value: string }).value.includes("steady")

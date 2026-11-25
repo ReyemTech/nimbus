@@ -99,7 +99,7 @@ export function createObservabilityStack(
       cluster.storageTiers,
       grafanaPlugins,
       config.alerts,
-      observabilityNamespace
+      observabilityNamespace,
       cluster.eksAddons
     );
   }

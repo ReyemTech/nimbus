@@ -26,17 +26,56 @@ export interface IEksMetricsServerOptions {
   readonly configurationValues?: pulumi.Input<string>;
 }
 
-/** Version and configuration overrides for one AWS community add-on. */
-export interface IEksCommunityAddonOptions {
+/** Version and configuration overrides for an EKS add-on. */
+export interface IEksAddonOptions {
   readonly version?: pulumi.Input<string>;
   readonly configurationValues?: pulumi.Input<string>;
 }
+
+/** Add-on using a caller-managed EKS Pod Identity role. */
+export interface IEksPodIdentityAddonOptions extends IEksAddonOptions {
+  readonly podIdentityRoleArn: pulumi.Input<string>;
+}
+
+/** EFS CSI roles for the controller and, optionally, the S3 Files node plugin. */
+export interface IEksEfsCsiAddonOptions extends IEksPodIdentityAddonOptions {
+  /** Additional role for `efs-csi-node-sa` when using Amazon S3 Files. */
+  readonly nodePodIdentityRoleArn?: pulumi.Input<string>;
+}
+
+/** Add-on using a caller-managed IRSA role. */
+export interface IEksServiceAccountRoleAddonOptions extends IEksAddonOptions {
+  readonly serviceAccountRoleArn: pulumi.Input<string>;
+}
+
+/** Version and configuration overrides for one AWS community add-on. */
+export type IEksCommunityAddonOptions = IEksAddonOptions;
 
 /** Community add-ons Nimbus coordinates with its platform and observability stacks. */
 export interface IEksCommunityAddons {
   readonly prometheusNodeExporter?: IEksCommunityAddonOptions;
   readonly kubeStateMetrics?: IEksCommunityAddonOptions;
   readonly certManager?: IEksCommunityAddonOptions;
+}
+
+/** AWS-managed EKS add-ons beyond the default networking and DNS add-ons. */
+export interface IEksAwsAddons {
+  /** Amazon EFS CSI driver. Requires a role with EFS CSI controller permissions. */
+  readonly efsCsiDriver?: IEksEfsCsiAddonOptions;
+  /** AWS Secrets Store CSI provider; workload pods need their own IAM identity. */
+  readonly secretsStoreCsiDriverProvider?: IEksAddonOptions;
+  /** CloudWatch agent, Container Insights, and Application Signals. */
+  readonly cloudWatchObservability?: IEksPodIdentityAddonOptions;
+  /** CSI snapshot CRDs and controller; requires a compatible CSI driver. */
+  readonly csiSnapshotController?: IEksAddonOptions;
+  /** GuardDuty runtime agent; GuardDuty Runtime Monitoring must be enabled. */
+  readonly guardDutyAgent?: IEksAddonOptions;
+  /** Node health agent; EKS Auto Mode already includes this agent. */
+  readonly nodeMonitoringAgent?: IEksAddonOptions;
+  /** S3 Mountpoint CSI driver; requires a bucket-scoped IRSA role. */
+  readonly mountpointS3CsiDriver?: IEksServiceAccountRoleAddonOptions;
+  /** FSx for Lustre CSI driver. Requires an FSx CSI controller role. */
+  readonly fsxCsiDriver?: IEksPodIdentityAddonOptions;
 }
 
 /** AWS-specific EKS options beyond the base config. */
@@ -47,6 +86,8 @@ export interface IEksOptions {
   readonly addons?: ReadonlyArray<string>;
   /** Typed opt-in EKS community add-ons; selected components replace Nimbus Helm copies. */
   readonly communityAddons?: IEksCommunityAddons;
+  /** Typed opt-in AWS-managed EKS add-ons and their IAM role bindings. */
+  readonly awsAddons?: IEksAwsAddons;
   /** Endpoint access: "public", "private", or "both". Default: "both". */
   readonly endpointAccess?: "public" | "private" | "both";
   /** CIDRs allowed to reach the public Kubernetes API endpoint. */
@@ -128,6 +169,52 @@ export function createEksCluster(
     "kube-state-metrics": options?.communityAddons?.kubeStateMetrics,
     "cert-manager": options?.communityAddons?.certManager,
   };
+  const awsAddonSettings: Readonly<Record<string, IEksAddonOptions | undefined>> = {
+    "aws-efs-csi-driver": options?.awsAddons?.efsCsiDriver,
+    "aws-secrets-store-csi-driver-provider": options?.awsAddons?.secretsStoreCsiDriverProvider,
+    "amazon-cloudwatch-observability": options?.awsAddons?.cloudWatchObservability,
+    "snapshot-controller": options?.awsAddons?.csiSnapshotController,
+    "aws-guardduty-agent": options?.awsAddons?.guardDutyAgent,
+    "eks-node-monitoring-agent": options?.awsAddons?.nodeMonitoringAgent,
+    "aws-mountpoint-s3-csi-driver": options?.awsAddons?.mountpointS3CsiDriver,
+    "aws-fsx-csi-driver": options?.awsAddons?.fsxCsiDriver,
+  };
+  const podIdentityAssociations: Readonly<
+    Record<string, Array<{ roleArn: pulumi.Input<string>; serviceAccount: string }> | undefined>
+  > = {
+    "aws-efs-csi-driver": options?.awsAddons?.efsCsiDriver
+      ? [
+          {
+            roleArn: options.awsAddons.efsCsiDriver.podIdentityRoleArn,
+            serviceAccount: "efs-csi-controller-sa",
+          },
+          ...(options.awsAddons.efsCsiDriver.nodePodIdentityRoleArn
+            ? [
+                {
+                  roleArn: options.awsAddons.efsCsiDriver.nodePodIdentityRoleArn,
+                  serviceAccount: "efs-csi-node-sa",
+                },
+              ]
+            : []),
+        ]
+      : undefined,
+    "amazon-cloudwatch-observability": options?.awsAddons?.cloudWatchObservability
+      ? [
+          {
+            roleArn: options.awsAddons.cloudWatchObservability.podIdentityRoleArn,
+            serviceAccount: "cloudwatch-agent",
+          },
+        ]
+      : undefined,
+    "aws-fsx-csi-driver": options?.awsAddons?.fsxCsiDriver
+      ? [
+          {
+            roleArn: options.awsAddons.fsxCsiDriver.podIdentityRoleArn,
+            serviceAccount: "fsx-csi-controller-sa",
+          },
+        ]
+      : undefined,
+  };
 
   validateEksNodePoolScaling(config, { ...options, autoMode });
   const controllerPlacementEnabled = config.nodePools.some(
@@ -146,6 +233,9 @@ export function createEksCluster(
     throw new Error(
       "nodeGroupInstanceTags and nodeGroupAmiType apply only to managed node groups, not Auto Mode."
     );
+  }
+  if (autoMode && options?.awsAddons?.nodeMonitoringAgent) {
+    throw new Error("EKS Auto Mode already includes the node monitoring agent add-on.");
   }
   if (
     options?.bootstrapClusterCreatorAdminPermissions === false &&
@@ -323,7 +413,10 @@ export function createEksCluster(
     });
   }
 
-  const needsPodIdentityAgent = config.nodePools.some(isKarpenterPool);
+  const usesPodIdentity =
+    ebsCsiDriver ||
+    config.nodePools.some(isKarpenterPool) ||
+    Object.values(podIdentityAssociations).some((associations) => associations !== undefined);
 
   // Add-on names are deduplicated so the explicit add-on list can include the
   // EBS driver without creating a second copy of it or its Pod Identity agent.
@@ -337,11 +430,19 @@ export function createEksCluster(
     addonNames.add("metrics-server");
   } else if (metricsServerOption !== undefined) {
     addonNames.delete("metrics-server");
+  }
+  const needsPodIdentityAgent = !autoMode && usesPodIdentity;
+  if (needsPodIdentityAgent) {
+    addonNames.delete("eks-pod-identity-agent");
+    addonNames.add("eks-pod-identity-agent");
+  }
   for (const [addonName, addonOptions] of Object.entries(communityAddonSettings)) {
     if (addonOptions) addonNames.add(addonName);
   }
+  for (const [addonName, addonOptions] of Object.entries(awsAddonSettings)) {
+    if (addonOptions) addonNames.add(addonName);
+  }
   if (ebsCsiDriver) {
-    addonNames.add("eks-pod-identity-agent");
     // Ensure callers that explicitly listed the CSI add-on still get its
     // required Pod Identity agent created first.
     addonNames.delete("aws-ebs-csi-driver");
@@ -354,7 +455,8 @@ export function createEksCluster(
   const addonsCreated: aws.eks.Addon[] = [];
   for (const addon of addonNames) {
     const dependsOn: pulumi.Resource[] = [cluster, ...nodeGroups];
-    if (addon === "aws-ebs-csi-driver" && podIdentityAgent) {
+    const addonPodIdentityAssociations = podIdentityAssociations[addon];
+    if ((addon === "aws-ebs-csi-driver" || addonPodIdentityAssociations) && podIdentityAgent) {
       dependsOn.push(podIdentityAgent);
     }
     if (addon === "aws-ebs-csi-driver" && ebsCsiPolicyAttachment) {
@@ -368,16 +470,21 @@ export function createEksCluster(
         addonVersion:
           addon === "metrics-server" && typeof metricsServerOption === "object"
             ? metricsServerOption.addonVersion
-            : communityAddonSettings[addon]?.version,
+            : (communityAddonSettings[addon]?.version ?? awsAddonSettings[addon]?.version),
         configurationValues:
           addon === "metrics-server" && typeof metricsServerOption === "object"
             ? metricsServerOption.configurationValues
-            : communityAddonSettings[addon]?.configurationValues,
+            : (communityAddonSettings[addon]?.configurationValues ??
+              awsAddonSettings[addon]?.configurationValues),
         resolveConflictsOnCreate: "OVERWRITE",
         resolveConflictsOnUpdate: "OVERWRITE",
         podIdentityAssociations:
           addon === "aws-ebs-csi-driver" && ebsCsiRole
             ? [{ roleArn: ebsCsiRole.arn, serviceAccount: "ebs-csi-controller-sa" }]
+            : addonPodIdentityAssociations,
+        serviceAccountRoleArn:
+          addon === "aws-mountpoint-s3-csi-driver"
+            ? options?.awsAddons?.mountpointS3CsiDriver?.serviceAccountRoleArn
             : undefined,
         tags,
       },

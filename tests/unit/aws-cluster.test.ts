@@ -534,6 +534,82 @@ describe("createEksCluster options", () => {
     ).toBe(true);
   });
 
+  it("installs selected AWS add-ons with their IAM bindings and Pod Identity agent", () => {
+    create({
+      awsAddons: {
+        efsCsiDriver: {
+          podIdentityRoleArn: "arn:aws:iam::123456789012:role/efs-controller",
+          nodePodIdentityRoleArn: "arn:aws:iam::123456789012:role/efs-node",
+        },
+        secretsStoreCsiDriverProvider: { version: "v1.0.0-eksbuild.1" },
+        cloudWatchObservability: {
+          podIdentityRoleArn: "arn:aws:iam::123456789012:role/cloudwatch",
+        },
+        csiSnapshotController: {},
+        guardDutyAgent: {},
+        nodeMonitoringAgent: {},
+        mountpointS3CsiDriver: {
+          serviceAccountRoleArn: "arn:aws:iam::123456789012:role/s3-csi",
+        },
+        fsxCsiDriver: { podIdentityRoleArn: "arn:aws:iam::123456789012:role/fsx" },
+      },
+    });
+
+    const addons = resourcesOf("eks.Addon");
+    const addonNames = addons.map(({ args }) => args.addonName);
+    expect(addonNames).toEqual(
+      expect.arrayContaining([
+        "eks-pod-identity-agent",
+        "aws-efs-csi-driver",
+        "aws-secrets-store-csi-driver-provider",
+        "amazon-cloudwatch-observability",
+        "snapshot-controller",
+        "aws-guardduty-agent",
+        "eks-node-monitoring-agent",
+        "aws-mountpoint-s3-csi-driver",
+        "aws-fsx-csi-driver",
+      ])
+    );
+
+    const podIdentityAgentIndex = addonNames.indexOf("eks-pod-identity-agent");
+    for (const addonName of [
+      "aws-efs-csi-driver",
+      "amazon-cloudwatch-observability",
+      "aws-fsx-csi-driver",
+    ]) {
+      const addon = addons.find(({ args }) => args.addonName === addonName);
+      expect(addon?.opts).toMatchObject({
+        dependsOn: expect.arrayContaining([expect.objectContaining({ kind: "eks.Addon" })]),
+      });
+      expect(addonNames.indexOf(addonName)).toBeGreaterThan(podIdentityAgentIndex);
+    }
+    expect(addons.find(({ args }) => args.addonName === "aws-efs-csi-driver")?.args).toMatchObject({
+      podIdentityAssociations: [
+        {
+          roleArn: "arn:aws:iam::123456789012:role/efs-controller",
+          serviceAccount: "efs-csi-controller-sa",
+        },
+        {
+          roleArn: "arn:aws:iam::123456789012:role/efs-node",
+          serviceAccount: "efs-csi-node-sa",
+        },
+      ],
+    });
+    expect(
+      addons.find(({ args }) => args.addonName === "amazon-cloudwatch-observability")?.args
+    ).toMatchObject({
+      podIdentityAssociations: [
+        {
+          roleArn: "arn:aws:iam::123456789012:role/cloudwatch",
+          serviceAccount: "cloudwatch-agent",
+        },
+      ],
+    });
+    expect(
+      addons.find(({ args }) => args.addonName === "aws-mountpoint-s3-csi-driver")?.args
+    ).toMatchObject({ serviceAccountRoleArn: "arn:aws:iam::123456789012:role/s3-csi" });
+  });
+
   it("propagates managed node-group EC2 instance tags through a launch template", () => {
     create({
       nodeGroupInstanceTags: { Name: "reyemtech-public-arm64", environment: "production" },

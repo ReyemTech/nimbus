@@ -141,6 +141,32 @@ function deployToCluster(
     components["cert-manager"] ??
     (cluster.eksAddons?.includes("cert-manager") ? cluster.provider : undefined);
 
+  // EKS Pod Identity credentials are injected when a pod starts. If the EKS
+  // cert-manager add-on already owns the Deployment, changing its pod template
+  // annotation forces a rollout after the Route 53 association is ready.
+  if (eksDnsResources && certManagerEnabled && cluster.eksAddons?.includes("cert-manager")) {
+    new k8s.apps.v1.DeploymentPatch(
+      `${name}-cert-manager-route53-identity-rollout`,
+      {
+        metadata: { name: "cert-manager", namespace: "cert-manager" },
+        spec: {
+          template: {
+            metadata: {
+              annotations: {
+                "nimbus.dev/route53-pod-identity":
+                  eksDnsResources.certManagerIdentity.associationId,
+              },
+            },
+          },
+        },
+      },
+      {
+        provider,
+        dependsOn: [cluster.provider, eksDnsResources.certManagerIdentity],
+      }
+    );
+  }
+
   // 3. External DNS — enabled if configured
   if (config.externalDns && config.externalDns.enabled !== false) {
     const dnsConfig = config.externalDns;

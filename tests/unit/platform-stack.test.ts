@@ -38,6 +38,8 @@ let createdDaemonSets: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdDeployments: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdDeploymentPatches: Array<{ name: string; args: any; opts: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdConfigMaps: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdClusterRoles: Array<{ name: string; args: any }>;
@@ -171,6 +173,14 @@ vi.mock("@pulumi/kubernetes", () => {
   };
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockDeploymentPatch = class {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, args: any, opts?: any) {
+      createdDeploymentPatches.push({ name, args, opts });
+    }
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockConfigMap = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(name: string, args: any, _opts?: any) {
@@ -204,7 +214,13 @@ vi.mock("@pulumi/kubernetes", () => {
   return {
     helm: { v3: { Release: mockRelease } },
     apiextensions: { CustomResource: mockCustomResource },
-    apps: { v1: { DaemonSet: mockDaemonSet, Deployment: mockDeployment } },
+    apps: {
+      v1: {
+        DaemonSet: mockDaemonSet,
+        Deployment: mockDeployment,
+        DeploymentPatch: mockDeploymentPatch,
+      },
+    },
     core: {
       v1: {
         Secret: mockSecret,
@@ -269,6 +285,7 @@ beforeEach(() => {
   createdPodIdentityAssociations = [];
   createdDaemonSets = [];
   createdDeployments = [];
+  createdDeploymentPatches = [];
   createdConfigMaps = [];
   createdClusterRoles = [];
   createdCustomResourcesForAssertions = [];
@@ -692,6 +709,22 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
           resource.args.kind === "Certificate" && resource.args.metadata?.namespace === "traefik"
       )
     ).toBe(true);
+    const rolloutPatch = createdDeploymentPatches.find(
+      (patch) => patch.args.metadata?.name === "cert-manager"
+    );
+    expect(rolloutPatch?.args.metadata.namespace).toBe("cert-manager");
+    expect(
+      rolloutPatch?.args.spec.template.metadata.annotations["nimbus.dev/route53-pod-identity"]
+    ).toBe(
+      createdPodIdentityAssociations.find(
+        (association) => association.args.namespace === "cert-manager"
+      )?.resource.associationId
+    );
+    expect(rolloutPatch?.opts.dependsOn).toContain(
+      createdPodIdentityAssociations.find(
+        (association) => association.args.namespace === "cert-manager"
+      )?.resource
+    );
   });
 
   it("creates IAM user, policy, access key, and K8s secrets when route53 without manual credentials", () => {

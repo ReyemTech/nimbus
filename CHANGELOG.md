@@ -1,3 +1,20 @@
+# [3.12.0](https://github.com/ReyemTech/nimbus/compare/v3.11.0...v3.12.0) (2026-11-25)
+
+
+### Bug Fixes
+
+* **eks:** address autoscaler review findings ([300c740](https://github.com/ReyemTech/nimbus/commit/300c7403c39fdb59e7640882c23078087f182785))
+* **eks:** scope autoscaler discovery to selected pools ([0ff06cb](https://github.com/ReyemTech/nimbus/commit/0ff06cb32296a491efbf7c8fad3278e9b89d763a))
+* **eks:** support zero-node fixed pools ([24e8caf](https://github.com/ReyemTech/nimbus/commit/24e8cafd1b6850a79a5ffcaf95b12098194fc7c6))
+* **eks:** use deployed region for autoscalers ([34f8dcf](https://github.com/ReyemTech/nimbus/commit/34f8dcfdb8dc2dde9a2dc014ae63d966418b7f94))
+* **eks:** use IRSA for Cluster Autoscaler ([f82f528](https://github.com/ReyemTech/nimbus/commit/f82f5283893aa00d210f03c31659fff8b5b5f3b6))
+
+
+### Features
+
+* **eks:** add opt-in Metrics Server add-on ([bb7a758](https://github.com/ReyemTech/nimbus/commit/bb7a758891db31c4275e5c0a28656c5ee1cff7f5))
+* **eks:** add per-pool autoscaling modes ([b0abfa4](https://github.com/ReyemTech/nimbus/commit/b0abfa4746af09d6dda3b64120d0af0b1b2bce2b))
+
 # [3.11.0](https://github.com/ReyemTech/nimbus/compare/v3.10.1...v3.11.0) (2026-11-25)
 
 

@@ -536,6 +536,8 @@ without `scaling` keep their current EKS managed-node-group behavior. Use
 adjust, or `mode: "karpenter"` for a Karpenter NodePool with instance types,
 capacity types, optional AZs, and CPU/memory limits. See the mixed example in
 [EKS mixed autoscaling](./examples.md#eks-mixed-cluster-autoscaler-and-karpenter-pools).
+For a zero-node fixed pool, Nimbus sets desired and minimum size to zero and
+maximum size to one because the EKS API requires `maxSize >= 1`.
 
 Nimbus creates one controller and Pod Identity role per selected scaler. It
 attaches the Pod Identity Agent add-on when needed. Cluster Autoscaler gets

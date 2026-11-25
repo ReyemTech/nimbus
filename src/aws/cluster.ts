@@ -198,6 +198,7 @@ export function createEksCluster(
         continue;
       }
       const managedPool = np as IManagedNodePool;
+      const desiredNodes = managedPool.desiredNodes ?? managedPool.minNodes;
       const nodeRole = createNodeRole(`${name}-${managedPool.name}`, tags);
       const launchTemplate =
         options?.nodeGroupRootDisk || options?.nodeGroupInstanceTags
@@ -235,12 +236,12 @@ export function createEksCluster(
           scalingConfig:
             managedPool.scaling?.mode === "fixed"
               ? {
-                  desiredSize: managedPool.desiredNodes ?? managedPool.minNodes,
-                  minSize: managedPool.desiredNodes ?? managedPool.minNodes,
-                  maxSize: managedPool.desiredNodes ?? managedPool.minNodes,
+                  desiredSize: desiredNodes,
+                  minSize: desiredNodes,
+                  maxSize: Math.max(1, desiredNodes),
                 }
               : {
-                  desiredSize: managedPool.desiredNodes ?? managedPool.minNodes,
+                  desiredSize: desiredNodes,
                   minSize: managedPool.minNodes,
                   maxSize: managedPool.maxNodes,
                 },

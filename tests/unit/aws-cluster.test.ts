@@ -553,6 +553,19 @@ describe("createEksCluster options", () => {
     expect(resourcesOf("k8s.Chart")).toHaveLength(0);
   });
 
+  it("keeps zero-node fixed pools valid for the EKS scaling API", () => {
+    create(undefined, network, {
+      ...config,
+      nodePools: [{ ...baseNodePool, minNodes: 0, maxNodes: 10, scaling: { mode: "fixed" } }],
+    });
+
+    expect(resourcesOf("eks.NodeGroup")[0]?.args.scalingConfig).toEqual({
+      desiredSize: 0,
+      minSize: 0,
+      maxSize: 1,
+    });
+  });
+
   it("limits Cluster Autoscaler discovery to selected managed pools", () => {
     create({ autoscalerControllerNodePoolName: "steady" }, network, {
       ...config,

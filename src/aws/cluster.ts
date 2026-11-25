@@ -23,6 +23,8 @@ export interface IEksOptions {
   readonly publicAccessCidrs?: ReadonlyArray<string>;
   /** IAM role or user principal ARN to grant cluster-admin through an EKS access entry. */
   readonly clusterAdminRoleArn?: pulumi.Input<string>;
+  /** IAM role ARN for the Kubernetes provider's `aws eks get-token` exec authentication. */
+  readonly kubernetesProviderRoleArn?: pulumi.Input<string>;
   /** Root EBS settings for managed node groups. Omitted preserves EKS defaults. */
   readonly nodeGroupRootDisk?: {
     /** Root volume size in GiB. Defaults to 20 when this option is set. */
@@ -310,9 +312,16 @@ export function createEksCluster(
 
   // K8s provider for this cluster
   const kubeconfig = pulumi
-    .all([cluster.endpoint, cluster.certificateAuthority, cluster.name])
-    .apply(([endpoint, ca, clusterName]) =>
-      JSON.stringify({
+    .all([
+      cluster.endpoint,
+      cluster.certificateAuthority,
+      cluster.name,
+      options?.kubernetesProviderRoleArn,
+    ])
+    .apply(([endpoint, ca, clusterName, providerRoleArn]) => {
+      const tokenArgs = ["eks", "get-token", "--cluster-name", clusterName];
+      if (providerRoleArn) tokenArgs.push("--role-arn", providerRoleArn);
+      return JSON.stringify({
         apiVersion: "v1",
         kind: "Config",
         clusters: [
@@ -338,13 +347,13 @@ export function createEksCluster(
               exec: {
                 apiVersion: "client.authentication.k8s.io/v1beta1",
                 command: "aws",
-                args: ["eks", "get-token", "--cluster-name", clusterName],
+                args: tokenArgs,
               },
             },
           },
         ],
-      })
-    );
+      });
+    });
 
   const provider = new k8s.Provider(
     `${name}-k8s`,

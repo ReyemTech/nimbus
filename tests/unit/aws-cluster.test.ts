@@ -224,6 +224,28 @@ describe("createEksCluster options", () => {
     });
   });
 
+  it("configures the Kubernetes provider to assume the granted admin role", () => {
+    const cluster = create({
+      authenticationMode: "API",
+      bootstrapClusterCreatorAdminPermissions: false,
+      clusterAdminRoleArn: "arn:aws:iam::123456789012:role/platform-admin",
+      kubernetesProviderRoleArn: "arn:aws:iam::123456789012:role/platform-admin",
+    });
+    const kubeconfigOutput = cluster.kubeconfig as unknown as { value: string };
+    const kubeconfig = JSON.parse(kubeconfigOutput.value) as {
+      users: Array<{ user: { exec: { args: string[] } } }>;
+    };
+
+    expect(kubeconfig.users[0]?.user.exec.args).toEqual([
+      "eks",
+      "get-token",
+      "--cluster-name",
+      "prod",
+      "--role-arn",
+      "arn:aws:iam::123456789012:role/platform-admin",
+    ]);
+  });
+
   it("requires an API access principal when creator admin bootstrap is disabled", () => {
     expect(() =>
       create({ authenticationMode: "API", bootstrapClusterCreatorAdminPermissions: false })

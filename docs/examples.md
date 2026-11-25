@@ -57,12 +57,13 @@ const cluster = createCluster(
   "prod",
   {
     cloud: "aws",
-    nodePools: [{ name: "workers", instanceType: "m7i.large", minNodes: 2, maxNodes: 5 }],
+    nodePools: [{ name: "workers", instanceType: "t4g.large", minNodes: 2, maxNodes: 5 }],
     providerOptions: {
       aws: {
         endpointAccess: "both",
         publicAccessCidrs: config.requireObject<string[]>("eksPublicAccessCidrs"),
         clusterAdminRoleArn: config.require("eksAdminRoleArn"),
+        kubernetesProviderRoleArn: config.require("eksAdminRoleArn"),
         authenticationMode: "API",
         bootstrapClusterCreatorAdminPermissions: false,
         upgradePolicy: { supportType: "STANDARD" },

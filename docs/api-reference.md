@@ -444,6 +444,7 @@ aws: ... }})`.
 | --- | --- |
 | `publicAccessCidrs` | CIDRs allowed to reach the public API endpoint. Applies when public endpoint access is enabled. |
 | `clusterAdminRoleArn` | IAM principal ARN (role or user) granted `AmazonEKSClusterAdminPolicy` through an EKS access entry. |
+| `kubernetesProviderRoleArn` | Optional IAM role assumed by the Kubernetes provider's `aws eks get-token` command. Use it when the provider must authenticate as a role different from the deployment credentials; that role must have EKS access. |
 | `nodeGroupRootDisk` | Enables an encrypted gp3 root disk launch template for managed node groups. `sizeGiB` defaults to 20 and `deleteOnTermination` defaults to `true`. Omit the option to preserve EKS defaults. |
 | `nodeGroupAmiType` | AMI family for managed node groups, such as `AL2023_ARM_64_STANDARD`. |
 | `nodeGroupInstanceTags` | EC2 instance tags propagated through managed node-group launch-template `tagSpecifications`. |

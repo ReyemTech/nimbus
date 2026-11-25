@@ -12,6 +12,7 @@
  */
 
 import {
+  createAccessGateway,
   createNetwork,
   createCluster,
   createDns,
@@ -19,6 +20,7 @@ import {
   createPlatformStack,
 } from "@reyemtech/nimbus";
 import type { INetwork, ICluster, IDns, ISecrets } from "@reyemtech/nimbus";
+import * as pulumi from "@pulumi/pulumi";
 
 // 1. Network — VPC with fck-nat (~$3/mo vs $32/mo managed NAT)
 const network = createNetwork("prod", {
@@ -84,7 +86,28 @@ const platform = createPlatformStack("prod", {
     domainFilters: ["example.com"],
   },
   vault: { enabled: true, ingressHost: "vault.example.com" },
+  argocd: { enabled: true },
+  headlamp: { enabled: true },
 });
+
+const platformStack = Array.isArray(platform) ? platform[0] : platform;
+if (!platformStack) throw new Error("No platform stack was created");
+
+// Headlamp is included in exposedServices by default. Enable this optional
+// gateway to make platform services available from the Tailscale tailnet.
+const config = new pulumi.Config();
+if (config.getBoolean("enableTailscaleAccess")) {
+  createAccessGateway("prod-access", {
+    cluster,
+    provider: "tailscale",
+    tailscale: {
+      oauthClientId: config.require("tailscaleOAuthClientId"),
+      oauthClientSecret: config.requireSecret("tailscaleOAuthClientSecret"),
+      routes: [],
+      services: platformStack.exposedServices,
+    },
+  });
+}
 
 // Stack outputs
 export const vpcId = network.vpcId;

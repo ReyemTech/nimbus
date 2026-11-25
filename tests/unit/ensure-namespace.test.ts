@@ -62,6 +62,15 @@ describe("ensureNamespace", () => {
     expect(createdNamespaces).toHaveLength(1);
   });
 
+  it("creates a separate namespace resource for each Kubernetes provider", async () => {
+    const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
+    const first = ensureNamespace("shared-name", mockProvider());
+    const second = ensureNamespace("shared-name", mockProvider());
+
+    expect(second).not.toBe(first);
+    expect(createdNamespaces).toHaveLength(2);
+  });
+
   it("creates Namespace only (no LimitRange) when policy is false", async () => {
     const { ensureNamespace } = await import("../../src/utils/ensure-namespace.js");
     ensureNamespace("opt-out-ns", mockProvider(), { policy: false });

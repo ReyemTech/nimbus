@@ -8,6 +8,11 @@
  */
 
 export { deployTraefik } from "./traefik";
+export {
+  HEADLAMP_PLUGIN_MANAGER_VERSION,
+  deployHeadlamp,
+  resolveHeadlampPlugins,
+} from "./headlamp";
 export { deployCertManager, certManagerServiceAccountName } from "./cert-manager";
 export { deployExternalDns } from "./external-dns";
 export { deployEksExternalDns } from "./external-dns-eks";

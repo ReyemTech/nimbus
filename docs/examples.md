@@ -5,7 +5,14 @@ Usage examples for common nimbus patterns. See the [`examples/`](../examples/) d
 ## Single Cloud (AWS)
 
 ```typescript
-import { createNetwork, createCluster, createDns, createPlatformStack } from "@reyemtech/nimbus";
+import * as pulumi from "@pulumi/pulumi";
+import {
+  createAccessGateway,
+  createNetwork,
+  createCluster,
+  createDns,
+  createPlatformStack,
+} from "@reyemtech/nimbus";
 import type { INetwork, ICluster, IDns } from "@reyemtech/nimbus";
 
 // Network with fck-nat (~$3/mo)
@@ -33,16 +40,44 @@ const cluster = (await createCluster(
 // DNS zone
 const dns = (await createDns("prod", { cloud: "aws", zoneName: "example.com" })) as IDns;
 
-// Platform stack (Traefik, cert-manager, External DNS, ArgoCD, Vault)
-createPlatformStack("prod", {
+// Platform stack (Headlamp stays private; its service is returned for Tailscale)
+const platform = createPlatformStack("prod", {
   cluster,
   domain: "example.com",
   externalDns: { dnsProvider: "route53", domainFilters: ["example.com"] },
   vault: { enabled: true, ingressHost: "vault.example.com" },
+  argocd: { enabled: true },
+  headlamp: { enabled: true },
+});
+
+const platformStack = Array.isArray(platform) ? platform[0] : platform;
+if (!platformStack) throw new Error("No platform stack was created");
+
+// The Headlamp service is included by default in platformStack.exposedServices.
+const config = new pulumi.Config();
+createAccessGateway("prod-access", {
+  cluster,
+  provider: "tailscale",
+  tailscale: {
+    oauthClientId: config.require("tailscaleOAuthClientId"),
+    oauthClientSecret: config.requireSecret("tailscaleOAuthClientSecret"),
+    routes: [],
+    services: platformStack.exposedServices,
+  },
 });
 ```
 
 Full example: [`examples/single-cloud-aws/`](../examples/single-cloud-aws/)
+
+Headlamp is exposed only through the configured Tailscale gateway. To access it
+directly for local troubleshooting, run:
+
+```bash
+kubectl port-forward -n headlamp svc/headlamp 8080:80
+```
+
+Users still authenticate to Headlamp with their own Kubernetes credentials;
+their cluster RBAC determines which resources and actions they can use.
 
 ### EKS ExternalDNS community add-on
 

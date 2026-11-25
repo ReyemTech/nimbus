@@ -29,6 +29,8 @@ import {
   deployTrivyOperator,
   createTrivyExposureClassifier,
   createImagePruner,
+  deployHeadlamp,
+  resolveHeadlampPlugins,
 } from "./components";
 
 /**
@@ -45,6 +47,7 @@ const DEFAULT_VERSIONS: Record<string, string | undefined> = {
   oauth2Proxy: undefined,
   descheduler: undefined,
   trivyOperator: undefined,
+  headlamp: undefined,
 };
 
 /**
@@ -512,7 +515,24 @@ function deployToCluster(
     );
   }
 
-  // 11. Robot blocking header — for staging environments
+  // 11. Headlamp dashboard — opt-in; private ClusterIP with per-user auth.
+  if (config.headlamp?.enabled) {
+    const plugins = resolveHeadlampPlugins(cluster, config);
+    const headlampDependencies: pulumi.Resource[] = [...(config.headlamp.dependsOn ?? [])];
+    if (components["cert-manager"]) headlampDependencies.push(components["cert-manager"]);
+    if (components["argocd"]) headlampDependencies.push(components["argocd"]);
+
+    components["headlamp"] = deployHeadlamp(
+      name,
+      config.headlamp,
+      plugins,
+      provider,
+      DEFAULT_VERSIONS.headlamp,
+      headlampDependencies
+    );
+  }
+
+  // 12. Robot blocking header — for staging environments
   if (config.robotsBlock && components["traefik"]) {
     new k8s.apiextensions.CustomResource(
       `${name}-robots-block`,
@@ -532,7 +552,7 @@ function deployToCluster(
     );
   }
 
-  // 12. Image pull secrets — replicated to specified namespaces
+  // 13. Image pull secrets — replicated to specified namespaces
   if (config.imagePullSecrets) {
     for (const secret of config.imagePullSecrets) {
       const namespaces = secret.namespaces ?? ["default"];
@@ -567,7 +587,7 @@ function deployToCluster(
     }
   }
 
-  // 13. Descheduler — pod rebalancing for spot instances
+  // 14. Descheduler — pod rebalancing for spot instances
   if (config.descheduler?.enabled) {
     components["descheduler"] = deployDescheduler(
       name,
@@ -577,7 +597,7 @@ function deployToCluster(
     );
   }
 
-  // 14. Trivy Operator — continuous image CVE, SBOM, secret, and config reports
+  // 15. Trivy Operator — continuous image CVE, SBOM, secret, and config reports
   if (config.trivyOperator?.enabled) {
     components["trivy-operator"] = deployTrivyOperator(
       name,
@@ -601,7 +621,7 @@ function deployToCluster(
     createImagePruner(name, config.imagePruner ?? {}, provider);
   }
 
-  // 15. ClusterSecretStore — connects ESO to Vault
+  // 16. ClusterSecretStore — connects ESO to Vault
   if (components["vault"] && components["external-secrets"]) {
     new k8s.apiextensions.CustomResource(
       `${name}-cluster-secret-store`,
@@ -674,6 +694,16 @@ function deployToCluster(
       namespace: "argocd",
       port: 80,
       label: "argocd",
+    });
+  }
+
+  if (components["headlamp"] && config.headlamp?.expose !== false) {
+    exposedServices.push({
+      name: "headlamp",
+      originalName: "headlamp",
+      namespace: config.headlamp?.namespace ?? "headlamp",
+      port: 80,
+      label: "headlamp",
     });
   }
 

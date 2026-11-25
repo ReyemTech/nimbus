@@ -62,6 +62,38 @@ export interface IExternalDnsConfig extends IPlatformComponentConfig {
   readonly addonVersion?: pulumi.Input<string>;
 }
 
+/** Headlamp integrations Nimbus can infer from its cluster and platform configuration. */
+export type IHeadlampPluginId = "cert-manager" | "karpenter" | "argocd";
+
+/** Pinned plugin package entry consumed by Headlamp's in-cluster plugin manager. */
+export interface IHeadlampPluginConfig {
+  readonly name: string;
+  readonly source: string;
+  readonly version: string;
+}
+
+/** Automatic plugin selection overrides and additional trusted Artifact Hub packages. */
+export interface IHeadlampPluginsConfig {
+  /** Inferred plugins to skip. */
+  readonly disabled?: ReadonlyArray<IHeadlampPluginId>;
+  /** Additional Artifact Hub plugins, each with an explicit version. */
+  readonly additional?: ReadonlyArray<IHeadlampPluginConfig>;
+}
+
+/** Headlamp Kubernetes dashboard configuration. */
+export interface IHeadlampConfig extends IPlatformComponentConfig {
+  /** Enable the dashboard. Defaults to false. */
+  readonly enabled?: boolean;
+  /** Include Headlamp in access-gateway outputs. Defaults to true when enabled. */
+  readonly expose?: boolean;
+  /** Kubernetes namespace for Headlamp. Defaults to `headlamp`. */
+  readonly namespace?: string;
+  /** Plugin integrations. Nimbus infers supported plugins by default. */
+  readonly plugins?: IHeadlampPluginsConfig;
+  /** Existing ClusterRole name for Headlamp's pod ServiceAccount. Defaults to read-only `view`. */
+  readonly serviceAccountClusterRoleName?: string;
+}
+
 /** AWS KMS auto-unseal configuration. */
 export interface IAwsKmsUnsealConfig {
   readonly provider: "awskms";
@@ -152,6 +184,8 @@ export interface IPlatformStackConfig {
   readonly traefik?: IPlatformComponentConfig;
   readonly certManager?: IPlatformComponentConfig;
   readonly externalDns?: IExternalDnsConfig;
+  /** Kubernetes dashboard. Disabled by default; included in access-gateway outputs when enabled. */
+  readonly headlamp?: IHeadlampConfig;
 
   /** Optional components. */
   readonly argocd?: IPlatformComponentConfig;

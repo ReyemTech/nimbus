@@ -3,7 +3,7 @@ import type { INamespacePolicy } from "../platform/interfaces";
 import { DEFAULT_NAMESPACE_POLICY, SYSTEM_NAMESPACES } from "../platform/interfaces";
 import { nimbus } from "../nimbus";
 
-const createdNamespaces = new Map<string, k8s.core.v1.Namespace>();
+const createdNamespaces = new WeakMap<k8s.Provider, Map<string, k8s.core.v1.Namespace>>();
 
 export interface IEnsureNamespaceOpts {
   /**
@@ -18,7 +18,9 @@ export interface IEnsureNamespaceOpts {
 
 /**
  * Ensure a Kubernetes namespace exists. Creates it if it doesn't.
- * Idempotent — returns the same Namespace resource for repeated calls.
+ * Idempotent per Kubernetes provider — returns the same Namespace resource for
+ * repeated calls targeting the same cluster, while allowing multiple clusters
+ * to use a namespace with the same name in one Pulumi program.
  *
  * Side effect: co-creates a sibling `LimitRange/default-limits` in the same
  * namespace. Resolution order for the policy:
@@ -33,12 +35,18 @@ export function ensureNamespace(
   provider: k8s.Provider,
   opts: IEnsureNamespaceOpts = {}
 ): k8s.core.v1.Namespace {
-  const existing = createdNamespaces.get(name);
+  let providerNamespaces = createdNamespaces.get(provider);
+  if (!providerNamespaces) {
+    providerNamespaces = new Map<string, k8s.core.v1.Namespace>();
+    createdNamespaces.set(provider, providerNamespaces);
+  }
+
+  const existing = providerNamespaces.get(name);
   if (existing) {
     return existing;
   }
   const ns = new k8s.core.v1.Namespace(`ensure-ns-${name}`, { metadata: { name } }, { provider });
-  createdNamespaces.set(name, ns);
+  providerNamespaces.set(name, ns);
 
   if (SYSTEM_NAMESPACES.has(name)) {
     return ns;

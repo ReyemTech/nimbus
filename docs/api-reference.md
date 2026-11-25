@@ -89,6 +89,7 @@ Deploys Helm-based platform components to one or more clusters.
 | ArgoCD           | Disabled      | `argoproj/argo-cd` v7.8.26                  |
 | Vault            | Disabled      | `hashicorp/vault` v0.29.1                   |
 | External Secrets | Disabled      | `external-secrets/external-secrets` v0.14.4 |
+| Headlamp         | Disabled      | `headlamp/headlamp`                         |
 
 For AWS EKS with Route 53, `externalDns` instead provisions the EKS community
 add-on. `hostedZoneIds` scopes `ChangeResourceRecordSets`; because the add-on
@@ -103,6 +104,34 @@ clusters). `values` supplies add-on configuration such as `txtOwnerId`,
 `sources`, `registry`, and `policy`. EKS does not receive static AWS credentials.
 Existing Helm deployments should use the two-apply migration documented in the
 [examples](examples.md#eks-externaldns-community-add-on).
+
+Set `headlamp: { enabled: true }` to install the Kubernetes dashboard as a
+private `ClusterIP` service in the `headlamp` namespace. Nimbus does not create
+an Ingress or public load balancer for it. When Headlamp is enabled,
+`platform.exposedServices` includes it by default; pass that list to
+`createAccessGateway` to make it available on Tailscale. Set
+`headlamp.expose: false` to omit it from the gateway output. You can also use
+`kubectl port-forward -n headlamp svc/headlamp 8080:80`.
+
+Nimbus infers the cert-manager plugin when the platform stack installs
+cert-manager or the EKS community add-on is present, the Karpenter plugin when
+an EKS node pool uses `scaling.mode: "karpenter"`, and the Argo CD plugin when
+`argocd.enabled` is true. The Argo CD plugin package is third-party and
+read-only. Prometheus support is bundled with the Headlamp chart; Metrics
+Server metrics are native Headlamp views. Traefik, ExternalDNS, Vault, External
+Secrets, and Nimbus operators remain available through Headlamp's standard
+Kubernetes resource and CRD views.
+
+Use `headlamp.plugins.disabled` to skip inferred integrations or
+`headlamp.plugins.additional` to add Artifact Hub Headlamp packages with an
+explicit `name`, HTTPS package `source`, and pinned `version`. Plugins execute
+in the dashboard's UI security context, so only add sources you trust.
+`headlamp.version` selects the chart version, `namespace` changes its namespace,
+`serviceAccountClusterRoleName` selects the Pod ServiceAccount's ClusterRole
+(defaults to read-only `view`), and `values` merges additional chart settings.
+The dashboard authenticates users with their own Kubernetes credentials;
+Nimbus leaves shared ServiceAccount-token authentication disabled and does not
+replace users' Kubernetes RBAC.
 
 AWS cluster tags apply to Nimbus-managed, tag-capable cluster resources and
 supported children. A dedicated Nimbus network opts in with

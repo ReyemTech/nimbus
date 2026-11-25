@@ -312,6 +312,10 @@ describe("createCluster factory", () => {
             clusterAdminRoleArn: "arn:aws:iam::123456789012:role/platform-admin",
             nodeGroupRootDisk: { sizeGiB: 80, deleteOnTermination: false },
             ebsCsiDriver: true,
+            metricsServer: {
+              addonVersion: "v0.7.2-eksbuild.1",
+              configurationValues: JSON.stringify({ replicas: 2 }),
+            },
           },
         },
       },
@@ -326,6 +330,10 @@ describe("createCluster factory", () => {
       clusterAdminRoleArn: "arn:aws:iam::123456789012:role/platform-admin",
       nodeGroupRootDisk: { sizeGiB: 80, deleteOnTermination: false },
       ebsCsiDriver: true,
+      metricsServer: {
+        addonVersion: "v0.7.2-eksbuild.1",
+        configurationValues: JSON.stringify({ replicas: 2 }),
+      },
     });
   });
 

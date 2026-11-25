@@ -11,6 +11,16 @@ import type { ICluster, IClusterConfig } from "../cluster";
 import type { INetwork } from "../network";
 import { resolveCloudTarget } from "../types";
 
+/** EKS community Metrics Server add-on configuration. */
+export interface IEksMetricsServerOptions {
+  /** Create the add-on. Defaults to `true` when an options object is provided. */
+  readonly enabled?: boolean;
+  /** EKS add-on version. AWS validates compatibility with the cluster version. */
+  readonly addonVersion?: pulumi.Input<string>;
+  /** JSON add-on configuration values. */
+  readonly configurationValues?: pulumi.Input<string>;
+}
+
 /** AWS-specific EKS options beyond the base config. */
 export interface IEksOptions {
   /** Enable EKS Auto Mode (managed node provisioning). Default: false. */
@@ -44,6 +54,8 @@ export interface IEksOptions {
   readonly nodeGroupInstanceTags?: Readonly<Record<string, string>>;
   /** Managed node-group AMI family, for example AL2023_ARM_64_STANDARD. */
   readonly nodeGroupAmiType?: pulumi.Input<string>;
+  /** Opt in to the EKS community Metrics Server add-on. */
+  readonly metricsServer?: boolean | IEksMetricsServerOptions;
 }
 
 const DEFAULT_ADDONS = ["vpc-cni", "coredns", "kube-proxy"];
@@ -248,6 +260,16 @@ export function createEksCluster(
   // Add-on names are deduplicated so the explicit add-on list can include the
   // EBS driver without creating a second copy of it or its Pod Identity agent.
   const addonNames = new Set(addons);
+  const metricsServerOption = options?.metricsServer;
+  const metricsServerEnabled =
+    typeof metricsServerOption === "boolean"
+      ? metricsServerOption
+      : metricsServerOption?.enabled ?? metricsServerOption !== undefined;
+  if (metricsServerEnabled) {
+    addonNames.add("metrics-server");
+  } else if (metricsServerOption !== undefined) {
+    addonNames.delete("metrics-server");
+  }
   if (ebsCsiDriver) {
     addonNames.add("eks-pod-identity-agent");
     // Ensure callers that explicitly listed the CSI add-on still get its
@@ -272,6 +294,14 @@ export function createEksCluster(
       {
         clusterName: cluster.name,
         addonName: addon,
+        addonVersion:
+          addon === "metrics-server" && typeof metricsServerOption === "object"
+            ? metricsServerOption.addonVersion
+            : undefined,
+        configurationValues:
+          addon === "metrics-server" && typeof metricsServerOption === "object"
+            ? metricsServerOption.configurationValues
+            : undefined,
         resolveConflictsOnCreate: "OVERWRITE",
         resolveConflictsOnUpdate: "OVERWRITE",
         podIdentityAssociations:

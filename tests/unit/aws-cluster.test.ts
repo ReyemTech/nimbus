@@ -148,6 +148,48 @@ beforeEach(() => {
 });
 
 describe("createEksCluster options", () => {
+  it("does not install Metrics Server when omitted, false, or disabled in its options", () => {
+    create({ metricsServer: false });
+    expect(resourcesOf("eks.Addon").map(({ args }) => args.addonName)).not.toContain("metrics-server");
+
+    constructed.resources.length = 0;
+    create({ metricsServer: { enabled: false } });
+    expect(resourcesOf("eks.Addon").map(({ args }) => args.addonName)).not.toContain("metrics-server");
+  });
+
+  it("installs Metrics Server as an EKS add-on after the cluster when enabled", () => {
+    create({ metricsServer: true });
+
+    const metricsServer = resourcesOf("eks.Addon").find(({ args }) => args.addonName === "metrics-server");
+    expect(metricsServer).toBeDefined();
+    expect(metricsServer?.args).toMatchObject({ addonName: "metrics-server" });
+    expect(metricsServer?.args.addonVersion).toBeUndefined();
+    expect(metricsServer?.args.configurationValues).toBeUndefined();
+    expect(metricsServer?.opts).toMatchObject({
+      dependsOn: expect.arrayContaining([expect.objectContaining({ kind: "eks.Cluster" })]),
+    });
+    expect(resourcesOf("eks.Addon").filter(({ args }) => args.addonName === "metrics-server")).toHaveLength(1);
+    expect(resourcesOf("k8s.Provider")[0]?.opts).toMatchObject({
+      dependsOn: expect.arrayContaining([expect.objectContaining({ kind: "eks.Addon" })]),
+    });
+  });
+
+  it("passes a requested Metrics Server version and configuration to EKS", () => {
+    create({
+      metricsServer: {
+        addonVersion: "v0.7.2-eksbuild.1",
+        configurationValues: JSON.stringify({ replicas: 2 }),
+      },
+    });
+
+    const metricsServer = resourcesOf("eks.Addon").find(({ args }) => args.addonName === "metrics-server");
+    expect(metricsServer?.args).toMatchObject({
+      addonName: "metrics-server",
+      addonVersion: "v0.7.2-eksbuild.1",
+      configurationValues: JSON.stringify({ replicas: 2 }),
+    });
+  });
+
   it("returns configured storage tiers to downstream consumers", () => {
     const storageTiers = { standard: "gp3", performance: "gp3-encrypted" } as const;
 

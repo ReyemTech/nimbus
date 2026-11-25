@@ -8,6 +8,7 @@
  */
 
 import type * as pulumi from "@pulumi/pulumi";
+import type { IEksMetricsServerOptions } from "../aws/cluster";
 import type { CloudArg, CloudProvider, CloudTarget } from "../types";
 
 /** AWS-specific options passed through factory functions. */
@@ -45,6 +46,8 @@ export interface IAwsProviderOptions {
   readonly nodeGroupInstanceTags?: Readonly<Record<string, string>>;
   /** Managed node-group AMI family, e.g. AL2023_ARM_64_STANDARD. */
   readonly nodeGroupAmiType?: pulumi.Input<string>;
+  /** Opt in to the EKS community Metrics Server add-on. */
+  readonly metricsServer?: boolean | IEksMetricsServerOptions;
   /** KMS key ARN for state backend encryption. Uses AES256 if not provided. */
   readonly stateKmsKeyArn?: string;
   /** Allow Pulumi to destroy the state bucket (for dev/test). Default: false. */

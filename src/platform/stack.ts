@@ -126,7 +126,8 @@ function deployToCluster(
   }
 
   // 2. cert-manager (TLS certificates) — enabled by default
-  if (config.certManager?.enabled !== false) {
+  const certManagerEnabled = config.certManager?.enabled !== false;
+  if (certManagerEnabled && !cluster.eksAddons?.includes("cert-manager")) {
     components["cert-manager"] = deployCertManager(
       name,
       config.certManager,
@@ -136,12 +137,41 @@ function deployToCluster(
       eksDnsResources?.certManagerIdentity.associationId
     );
   }
+  const certManagerReady =
+    components["cert-manager"] ??
+    (cluster.eksAddons?.includes("cert-manager") ? cluster.provider : undefined);
+
+  // EKS Pod Identity credentials are injected when a pod starts. If the EKS
+  // cert-manager add-on already owns the Deployment, changing its pod template
+  // annotation forces a rollout after the Route 53 association is ready.
+  if (eksDnsResources && certManagerEnabled && cluster.eksAddons?.includes("cert-manager")) {
+    new k8s.apps.v1.DeploymentPatch(
+      `${name}-cert-manager-route53-identity-rollout`,
+      {
+        metadata: { name: "cert-manager", namespace: "cert-manager" },
+        spec: {
+          template: {
+            metadata: {
+              annotations: {
+                "nimbus.dev/route53-pod-identity":
+                  eksDnsResources.certManagerIdentity.associationId,
+              },
+            },
+          },
+        },
+      },
+      {
+        provider,
+        dependsOn: [cluster.provider, eksDnsResources.certManagerIdentity],
+      }
+    );
+  }
 
   // 3. External DNS — enabled if configured
   if (config.externalDns && config.externalDns.enabled !== false) {
     const dnsConfig = config.externalDns;
     if (eksDnsResources) {
-      if (components["cert-manager"]) {
+      if (certManagerEnabled) {
         new k8s.apiextensions.CustomResource(
           `${name}-clusterissuer-dns`,
           {
@@ -159,7 +189,9 @@ function deployToCluster(
           },
           {
             provider,
-            dependsOn: [components["cert-manager"], eksDnsResources.certManagerIdentity],
+            dependsOn: certManagerReady
+              ? [certManagerReady, eksDnsResources.certManagerIdentity]
+              : [eksDnsResources.certManagerIdentity],
           }
         );
       }
@@ -238,7 +270,7 @@ function deployToCluster(
           },
           {
             provider,
-            dependsOn: [components["cert-manager"]].filter(Boolean) as k8s.helm.v3.Release[],
+            dependsOn: certManagerReady ? [certManagerReady] : undefined,
           }
         );
 
@@ -296,7 +328,7 @@ function deployToCluster(
           },
           {
             provider,
-            dependsOn: [components["cert-manager"]].filter(Boolean) as k8s.helm.v3.Release[],
+            dependsOn: certManagerReady ? [certManagerReady] : undefined,
           }
         );
       } else {
@@ -343,7 +375,7 @@ function deployToCluster(
   }
 
   // 7. Wildcard certificate — auto-created when cert-manager is enabled
-  if (config.certManager?.enabled !== false) {
+  if (certManagerEnabled) {
     const certName = config.domain.replace(/\./g, "-");
     new k8s.apiextensions.CustomResource(
       `${name}-wildcard-cert`,
@@ -359,7 +391,7 @@ function deployToCluster(
       },
       {
         provider,
-        dependsOn: [components["cert-manager"]].filter(Boolean) as k8s.helm.v3.Release[],
+        dependsOn: certManagerReady ? [certManagerReady] : undefined,
       }
     );
   }

@@ -8,7 +8,7 @@
  */
 
 import type * as pulumi from "@pulumi/pulumi";
-import type { IEksMetricsServerOptions } from "../aws/cluster";
+import type { IEksAwsAddons, IEksCommunityAddons, IEksMetricsServerOptions } from "../aws/cluster";
 import type { CloudArg, CloudProvider, CloudTarget } from "../types";
 
 /** AWS-specific options passed through factory functions. */
@@ -21,6 +21,10 @@ export interface IAwsProviderOptions {
   readonly autoMode?: boolean;
   /** EKS add-ons to install. Default: vpc-cni, coredns, kube-proxy. */
   readonly addons?: ReadonlyArray<string>;
+  /** Typed opt-in EKS community add-ons. */
+  readonly communityAddons?: IEksCommunityAddons;
+  /** Typed opt-in AWS-managed EKS add-ons. */
+  readonly awsAddons?: IEksAwsAddons;
   /** Endpoint access: "public", "private", or "both". Default: "both". */
   readonly endpointAccess?: "public" | "private" | "both";
   /** CIDRs allowed to reach the public Kubernetes API endpoint. */

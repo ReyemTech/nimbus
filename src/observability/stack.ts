@@ -99,7 +99,8 @@ export function createObservabilityStack(
       cluster.storageTiers,
       grafanaPlugins,
       config.alerts,
-      observabilityNamespace
+      observabilityNamespace,
+      cluster.eksAddons
     );
   }
 
@@ -361,7 +362,8 @@ function deployKubePrometheusStack(
   storageTiers?: StorageTierMap,
   grafanaPlugins?: string[],
   alertConfig?: IAlertConfig,
-  namespaceResource?: pulumi.Resource
+  namespaceResource?: pulumi.Resource,
+  managedEksAddons?: ReadonlyArray<string>
 ): k8s.helm.v3.Release {
   const certName = domain.replace(/\./g, "-");
   const tlsSecretName = `${certName}-wildcard-tls`;
@@ -507,6 +509,26 @@ function deployKubePrometheusStack(
           .reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 0)
           .toString(36)
           .slice(-7)}`;
+  const stackValues: Record<string, unknown> = {
+    prometheus: prometheusValues,
+    grafana: grafanaValues,
+    alertmanager: alertmanagerValues,
+    ...prometheus?.values,
+    ...grafana?.values,
+    ...alertmanager?.values,
+    ...(alertConfig
+      ? { alertmanager: { ...alertmanagerValues, ...buildAlertmanagerConfig(alertConfig) } }
+      : {}),
+  };
+
+  // The EKS community add-ons own these agents when selected. Disable the
+  // kube-prometheus-stack subcharts to prevent duplicate DaemonSets/Deployments.
+  if (managedEksAddons?.includes("prometheus-node-exporter")) {
+    disableHelmSubchart(stackValues, "nodeExporter");
+  }
+  if (managedEksAddons?.includes("kube-state-metrics")) {
+    disableHelmSubchart(stackValues, "kubeStateMetrics");
+  }
   return new k8s.helm.v3.Release(
     `${name}-kube-prometheus-stack`,
     {
@@ -516,20 +538,20 @@ function deployKubePrometheusStack(
       version,
       namespace,
       createNamespace: false,
-      values: {
-        prometheus: prometheusValues,
-        grafana: grafanaValues,
-        alertmanager: alertmanagerValues,
-        ...prometheus?.values,
-        ...grafana?.values,
-        ...alertmanager?.values,
-        ...(alertConfig
-          ? { alertmanager: { ...alertmanagerValues, ...buildAlertmanagerConfig(alertConfig) } }
-          : {}),
-      },
+      values: stackValues,
     },
     { provider, dependsOn: namespaceResource ? [namespaceResource] : undefined }
   );
+}
+
+function disableHelmSubchart(values: Record<string, unknown>, name: string): void {
+  const current = values[name];
+  values[name] = {
+    ...(typeof current === "object" && current !== null
+      ? (current as Record<string, unknown>)
+      : {}),
+    enabled: false,
+  };
 }
 
 function deployLoki(

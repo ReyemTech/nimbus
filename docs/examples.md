@@ -107,6 +107,27 @@ const cluster = createCluster(
         nodeGroupInstanceTags: { Name: "reyemtech-public-arm64" },
         nodeGroupRootDisk: { sizeGiB: 80, deleteOnTermination: true },
         ebsCsiDriver: true,
+        communityAddons: {
+          prometheusNodeExporter: {},
+          kubeStateMetrics: {},
+          certManager: {},
+        },
+        awsAddons: {
+          efsCsiDriver: {
+            podIdentityRoleArn: config.require("efsCsiRoleArn"),
+            // Optional; required only when using EFS CSI with S3 Files.
+            nodePodIdentityRoleArn: config.get("efsS3FilesNodeRoleArn"),
+          },
+          secretsStoreCsiDriverProvider: {},
+          cloudWatchObservability: { podIdentityRoleArn: config.require("cloudWatchRoleArn") },
+          csiSnapshotController: {},
+          guardDutyAgent: {}, // Requires GuardDuty Runtime Monitoring to be enabled.
+          nodeMonitoringAgent: {},
+          mountpointS3CsiDriver: {
+            serviceAccountRoleArn: config.require("s3CsiRoleArn"),
+          },
+          fsxCsiDriver: { podIdentityRoleArn: config.require("fsxCsiRoleArn") },
+        },
       },
     },
   },
@@ -119,6 +140,25 @@ agent, and a dedicated role with `AmazonEBSCSIDriverPolicyV2`. The add-on
 creates the IAM association for `ebs-csi-controller-sa`. Create a Kubernetes
 StorageClass with `provisioner: ebs.csi.aws.com` and `parameters.type: gp3` for
 gp3 PVCs; Nimbus does not change your cluster's default StorageClass.
+
+The community add-on settings are optional. When selected, each supports an
+optional `version` and `configurationValues` override. Node Exporter and
+kube-state-metrics replace the corresponding kube-prometheus-stack subcharts;
+configure Prometheus scraping for those EKS add-on services if required.
+cert-manager replaces Nimbus's Helm chart while Nimbus keeps creating its
+configured issuers and certificates.
+
+`awsAddons` exposes other opt-in AWS add-ons. EFS CSI, CloudWatch Observability, and
+FSx CSI use caller-created Pod Identity roles; Nimbus creates the add-on association
+and Pod Identity agent when needed, but does not create IAM roles or attach policies.
+S3 Mountpoint CSI uses a caller-created IRSA role via `serviceAccountRoleArn`; scope
+its S3 access to the required bucket. The Secrets Store provider has no add-on IAM role,
+but workloads need their own identity for secret access. The snapshot and node health
+agents need no add-on role. GuardDuty Runtime Monitoring must already be enabled for the
+GuardDuty agent to provide runtime detection. EKS Auto Mode already includes the node
+monitoring agent, so Nimbus rejects enabling it explicitly.
+
+AWS policy and add-on requirements can change; consult the [EKS add-on catalog](https://docs.aws.amazon.com/eks/latest/userguide/workloads-add-ons-available-eks.html), [S3 Mountpoint IAM setup](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi-create.html), and [GuardDuty EKS Runtime Monitoring](https://docs.aws.amazon.com/guardduty/latest/ug/eksrunmon-deploy-security-agent.html) for the selected add-on and version.
 
 `upgradePolicy: { supportType: "STANDARD" }` avoids extended-support charges,
 but AWS automatically upgrades the control plane at the end of standard support.

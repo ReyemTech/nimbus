@@ -139,6 +139,24 @@ describe("observability stack — kube-prometheus-stack", () => {
     expect(release!.args.values.prometheus.enabled).toBe(true);
   });
 
+  it("disables community add-on dependencies using the chart condition keys", () => {
+    const cluster = {
+      ...makeCluster("test"),
+      eksAddons: ["prometheus-node-exporter", "kube-state-metrics"],
+    };
+    createObservabilityStack("test", {
+      cluster,
+      domain: "example.com",
+      prometheus: { enabled: true },
+    });
+
+    const release = createdReleases.find((r) => r.name.includes("kube-prometheus-stack"));
+    expect(release?.args.values.nodeExporter.enabled).toBe(false);
+    expect(release?.args.values.kubeStateMetrics.enabled).toBe(false);
+    expect(release?.args.values["prometheus-node-exporter"]).toBeUndefined();
+    expect(release?.args.values["kube-state-metrics"]).toBeUndefined();
+  });
+
   it("deploys grafana with sidecar when dashboardPersistence is configmap", () => {
     const cluster = makeCluster("test");
     createObservabilityStack("test", {

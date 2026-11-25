@@ -1,3 +1,15 @@
+# [3.15.0](https://github.com/ReyemTech/nimbus/compare/v3.14.1...v3.15.0) (2026-11-25)
+
+
+### Bug Fixes
+
+* **kubernetes:** scope namespace URNs by provider ([b70a963](https://github.com/ReyemTech/nimbus/commit/b70a9636eef969bbc7e409bf3016dbbba8fa2eff))
+
+
+### Features
+
+* **platform:** add Headlamp dashboard ([249b674](https://github.com/ReyemTech/nimbus/commit/249b6745df42b41a0eaf07bf8e87baf00feee196))
+
 ## [3.14.1](https://github.com/ReyemTech/nimbus/compare/v3.14.0...v3.14.1) (2026-11-25)
 
 

@@ -611,6 +611,16 @@ describe("createEksCluster options", () => {
     expect(resourcesOf("eks.Addon").map(({ args }) => args.addonName)).toContain(
       "eks-pod-identity-agent"
     );
+    expect(
+      resourcesOf("eks.NodeGroup").find(({ name }) => name === "prod-ng-steady")?.opts
+    ).toMatchObject({ ignoreChanges: ["scalingConfig.desiredSize"] });
+    expect(
+      (
+        resourcesOf("eks.NodeGroup").find(({ name }) => name === "prod-ng-fixed")?.opts as
+          | { ignoreChanges?: string[] }
+          | undefined
+      )?.ignoreChanges
+    ).toBeUndefined();
   });
 
   it("keeps Karpenter capacity separate from EKS managed groups and Cluster Autoscaler", () => {
@@ -640,9 +650,17 @@ describe("createEksCluster options", () => {
             limits: { cpu: "100" },
           },
         },
+        {
+          name: "unrestricted",
+          scaling: { mode: "karpenter", instanceTypes: ["m7i.large"] },
+        },
       ],
     });
     expect(resourcesOf("eks.NodeGroup")).toHaveLength(1);
+    const karpenterRelease = resourcesOf("k8s.Release").find(
+      ({ name }) => name === "prod-karpenter"
+    );
+    expect((karpenterRelease?.args.values as { replicas?: number } | undefined)?.replicas).toBe(1);
     expect(resourcesOf("autoscaling.Tag")).toHaveLength(2);
     expect(
       resourcesOf("autoscaling.Tag").every(({ args }) =>
@@ -670,7 +688,13 @@ describe("createEksCluster options", () => {
     expect(
       (nodeClass?.args.spec as { subnetSelectorTerms: { value: Array<{ id: string }> } })
         .subnetSelectorTerms.value
-    ).toEqual([{ id: "subnet-private-a" }]);
+    ).toEqual([{ id: "subnet-private-a" }, { id: "subnet-private-b" }]);
+    const unrestrictedPool = resourcesOf("k8s.CustomResource").find(({ name }) =>
+      name.includes("pool-unrestricted")
+    );
+    expect(JSON.stringify(unrestrictedPool?.args.spec)).not.toContain(
+      "topology.kubernetes.io/zone"
+    );
     expect(
       (nodeClass?.args.spec as { securityGroupSelectorTerms: Array<{ id: { value: string } }> })
         .securityGroupSelectorTerms[0]?.id.value

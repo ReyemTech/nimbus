@@ -261,7 +261,13 @@ export function createEksCluster(
             : undefined,
           tags: { ...tags, Name: `${name}-${managedPool.name}` },
         },
-        { dependsOn: [cluster, ...nodeRole.policyAttachments] }
+        {
+          dependsOn: [cluster, ...nodeRole.policyAttachments],
+          ignoreChanges:
+            managedPool.scaling?.mode === "cluster-autoscaler"
+              ? ["scalingConfig.desiredSize"]
+              : undefined,
+        }
       );
       nodeGroups.push(nodeGroup);
       nodeGroupsByPool.set(managedPool.name, nodeGroup);

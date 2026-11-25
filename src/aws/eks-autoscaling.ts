@@ -96,6 +96,14 @@ export function createEksAutoscaling(
   const karpenterPools = pools.filter(isKarpenterPool);
   const stablePool = options.autoscalerControllerNodePoolName;
   const stableSelector = { matchLabels: { [STABLE_LABEL]: stablePool ?? "" } };
+  const stablePoolConfig = pools.find((pool) => pool.name === stablePool);
+  const stablePoolGuaranteedNodes =
+    stablePoolConfig && isManagedPool(stablePoolConfig)
+      ? stablePoolConfig.scaling?.mode === "fixed"
+        ? (stablePoolConfig.desiredNodes ?? stablePoolConfig.minNodes)
+        : stablePoolConfig.minNodes
+      : 1;
+  const controllerReplicas = stablePoolGuaranteedNodes >= 2 ? 2 : 1;
   if (caPools.length) {
     const role = createPodRole(`${name}-cluster-autoscaler`, tags);
     const policy = new aws.iam.RolePolicy(`${name}-cluster-autoscaler-policy`, {
@@ -360,7 +368,7 @@ export function createEksAutoscaling(
           controller: {
             env: [{ name: "AWS_REGION", value: region }],
           },
-          replicas: 2,
+          replicas: controllerReplicas,
         },
       },
       {
@@ -411,9 +419,10 @@ export function createEksAutoscaling(
                 throw new Error(
                   `Karpenter availability zones are outside Nimbus private subnets: ${missing.join(", ")}.`
                 );
-              return ids
-                .filter((_id, index) => !requested.size || requested.has(zones[index] ?? ""))
-                .map((id) => ({ id }));
+              // A NodeClass is shared across pools. Keep every private subnet
+              // available here; each NodePool's topology requirement applies
+              // its own optional AZ restriction.
+              return ids.map((id) => ({ id }));
             }),
           securityGroupSelectorTerms: [
             { id: cluster.vpcConfig.apply((v) => v.clusterSecurityGroupId) },

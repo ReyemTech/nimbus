@@ -17,6 +17,11 @@ export function deployEksExternalDns(
 } {
   const eks = cluster.nativeResource as aws.eks.Cluster;
   const tags = cluster.awsResourceTags;
+  // AWS's selected add-on schema rejects this upstream ExternalDNS flag.
+  // Zone writes remain scoped by the IAM policy built from hostedZoneIds.
+  const configurationOverrides = Object.fromEntries(
+    Object.entries(config.values ?? {}).filter(([key]) => key !== "zoneIdFilters")
+  );
   const opts = awsProvider ? { provider: awsProvider } : {};
   const podIdentityAgent =
     cluster.providerResources?.podIdentityAgent ??
@@ -87,15 +92,13 @@ export function deployEksExternalDns(
       addonName: "external-dns",
       tags,
       addonVersion: config.addonVersion,
-      configurationValues: pulumi.output(zones).apply((resolvedZones) =>
+      configurationValues: pulumi.output(zones).apply(() =>
         JSON.stringify({
           domainFilters: config.domainFilters ?? [],
           policy: "sync",
           sources: ["ingress", "service", "traefik-proxy"],
           registry: "txt",
-          ...config.values,
-          // Keep discovery aligned with the zone-scoped IAM policy.
-          zoneIdFilters: resolvedZones.ids,
+          ...configurationOverrides,
         })
       ),
       podIdentityAssociations: [{ roleArn: role.arn, serviceAccount: "external-dns" }],

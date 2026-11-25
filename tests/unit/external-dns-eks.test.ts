@@ -90,20 +90,26 @@ describe("EKS ExternalDNS add-on", () => {
       hostedZoneIds: ["Z123"],
       domainFilters: ["example.com"],
       addonVersion: "v1.0.0-eksbuild.1",
-      values: { txtOwnerId: "prod-cluster", zoneIdFilters: ["UNAUTHORIZED"] },
+      values: {
+        policy: "upsert",
+        txtOwnerId: "prod-cluster",
+        zoneIdFilters: ["UNAUTHORIZED"],
+      },
     });
     const addon = records.find((r) => r.kind === "addon" && r.args.addonName === "external-dns")!;
     expect(addon.args.addonName).toBe("external-dns");
     expect(addon.args.addonVersion).toBe("v1.0.0-eksbuild.1");
     expect(addon.args.podIdentityAssociations[0].roleArn).toBe("role-arn");
     expect(addon.args.podIdentityAssociations[0].serviceAccount).toBe("external-dns");
-    expect(JSON.parse(unwrap(addon.args.configurationValues))).toMatchObject({
+    const configuration = JSON.parse(unwrap(addon.args.configurationValues));
+    expect(configuration).toMatchObject({
       domainFilters: ["example.com"],
-      zoneIdFilters: ["Z123"],
+      policy: "upsert",
       registry: "txt",
       txtOwnerId: "prod-cluster",
       sources: ["ingress", "service", "traefik-proxy"],
     });
+    expect(configuration).not.toHaveProperty("zoneIdFilters");
     const policy = records.find((r) => r.kind === "policy")!;
     const policyText = unwrap(policy.args.policy);
     expect(JSON.parse(policyText).Statement[0].Resource).toEqual([
@@ -147,6 +153,9 @@ describe("EKS ExternalDNS add-on", () => {
       "arn:aws:route53:::hostedzone/Z-ONE",
     ]);
     if (!addon) throw new Error("ExternalDNS add-on was not created");
-    expect(JSON.parse(unwrap(addon.args.configurationValues)).zoneIdFilters).toEqual(["Z-ONE"]);
+    expect(JSON.parse(unwrap(addon.args.configurationValues))).toMatchObject({
+      domainFilters: ["example.com"],
+    });
+    expect(JSON.parse(unwrap(addon.args.configurationValues))).not.toHaveProperty("zoneIdFilters");
   });
 });

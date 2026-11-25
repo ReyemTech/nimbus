@@ -18,6 +18,7 @@ Creates a VPC (AWS) or VNet (Azure) with subnets and NAT.
 | `config.cloud`           | `CloudArg`         | `"aws"`, `"azure"`, or `["aws", "azure"]` for multi-cloud                                                          |
 | `config.cidr`            | `string`           | CIDR block (auto-offset for multi-cloud)                                                                           |
 | `config.natStrategy`     | `NatStrategy`      | `"managed"`, `"fck-nat"`, or `"none"`. On AWS, private subnet outputs wait for the default route to report active. |
+| `config.clusterNameForTags` | `string` | AWS-only cluster association for a dedicated network; generates `nimbus:cluster=<region>/<cluster-name>`. Omit for shared networks. |
 | `config.providerOptions` | `IProviderOptions` | Provider-specific options (see below)                                                                              |
 
 Returns: `Promise<INetwork>` (single cloud) or `Promise<INetwork[]>` (multi-cloud)
@@ -34,6 +35,12 @@ Creates an EKS (AWS) or AKS (Azure) cluster.
 | `networks`               | `INetwork \| INetwork[]` | Network(s) — auto-matched by provider for multi-cloud |
 
 Returns: `Promise<ICluster>` (single cloud) or `Promise<ICluster[]>` (multi-cloud)
+
+AWS EKS clusters expose `ICluster.awsResourceTags`, the resolved AWS tag map
+including the protected `nimbus:cluster=<region>/<cluster-name>` identifier.
+Pass it to caller-managed AWS integrations such as the AWS Load Balancer
+Controller Helm chart's `defaultTags` value so its load balancers, target groups,
+and security groups use the same Cost Explorer dimension.
 
 ### `createDns(name, config)`
 
@@ -92,6 +99,13 @@ clusters). `values` supplies add-on configuration such as `txtOwnerId`,
 `sources`, `registry`, and `policy`. EKS does not receive static AWS credentials.
 Existing Helm deployments should use the two-apply migration documented in the
 [examples](examples.md#eks-externaldns-community-add-on).
+
+AWS cluster tags apply to Nimbus-managed, tag-capable cluster resources and
+supported children. A dedicated Nimbus network opts in with
+`clusterNameForTags`; shared networks are left unchanged. Auto Scaling tag
+propagation labels newly launched nodes only, so running instances are not
+backfilled automatically. Activate `nimbus:cluster` as a user-defined cost
+allocation tag in Billing and Cost Management before using Cost Explorer.
 
 ### `createGlobalLoadBalancer(name, config)`
 

@@ -16,12 +16,13 @@ export function deployEksExternalDns(
   podIdentityAgent: aws.eks.Addon | pulumi.Resource;
 } {
   const eks = cluster.nativeResource as aws.eks.Cluster;
+  const tags = cluster.awsResourceTags;
   const opts = awsProvider ? { provider: awsProvider } : {};
   const podIdentityAgent =
     cluster.providerResources?.podIdentityAgent ??
     new aws.eks.Addon(
       `${name}-addon-eks-pod-identity-agent`,
-      { clusterName: eks.name, addonName: "eks-pod-identity-agent" },
+      { clusterName: eks.name, addonName: "eks-pod-identity-agent", tags },
       { ...opts, dependsOn: [eks] }
     );
   const zones = resolveZones(name, config, opts);
@@ -46,6 +47,7 @@ export function deployEksExternalDns(
             ],
           })
         ),
+      tags,
     },
     opts
   );
@@ -83,6 +85,7 @@ export function deployEksExternalDns(
     {
       clusterName: eks.name,
       addonName: "external-dns",
+      tags,
       addonVersion: config.addonVersion,
       configurationValues: pulumi.output(zones).apply((resolvedZones) =>
         JSON.stringify({
@@ -111,6 +114,7 @@ export function deployEksExternalDns(
       namespace: "cert-manager",
       serviceAccount: certManagerServiceAccountName,
       roleArn: role.arn,
+      tags,
     },
     { ...opts, dependsOn: [eks, podIdentityAgent, policy] }
   );

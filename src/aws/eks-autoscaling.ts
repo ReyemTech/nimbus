@@ -361,6 +361,7 @@ export function createEksAutoscaling(
         namespace,
         serviceAccount: "karpenter",
         roleArn: role.arn,
+        tags,
       },
       { dependsOn: [cluster, policy, ...(podIdentityAgent ? [podIdentityAgent] : [])] }
     );
@@ -463,6 +464,7 @@ export function createEksAutoscaling(
           securityGroupSelectorTerms: [
             { id: cluster.vpcConfig.apply((v) => v.clusterSecurityGroupId) },
           ],
+          tags,
         },
       },
       { provider, dependsOn: [karpenterRelease, access, network.nativeResource] }

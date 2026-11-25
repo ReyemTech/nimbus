@@ -44,6 +44,8 @@ const constructed = vi.hoisted(() => ({
   }>,
 }));
 
+const mockAwsConfig = vi.hoisted(() => ({ region: undefined as string | undefined }));
+
 vi.mock("@pulumi/pulumi", () => mockPulumi);
 
 vi.mock("@pulumi/kubernetes", () => ({
@@ -96,6 +98,7 @@ vi.mock("@pulumi/aws", () => {
   const output = mockPulumi.output;
 
   return {
+    config: mockAwsConfig,
     iam: {
       Role: class {
         readonly name = output("mock-role-name");
@@ -128,6 +131,12 @@ vi.mock("@pulumi/aws", () => {
       },
     },
     ec2: {
+      Tag: class {
+        readonly kind = "ec2.Tag";
+        constructor(name: string, args: Record<string, unknown>, opts?: unknown) {
+          record("ec2.Tag", name, args, opts);
+        }
+      },
       LaunchTemplate: class {
         readonly id = output("lt-123");
         readonly latestVersion = output(7);
@@ -266,12 +275,135 @@ const resourcesOf = (kind: string) => constructed.resources.filter((item) => ite
 
 beforeEach(() => {
   constructed.resources.length = 0;
+  mockAwsConfig.region = undefined;
   mockPulumi.allCalls.length = 0;
   mockPulumi.clusterArn.value = "arn:aws:eks:us-east-1:123456789012:cluster/prod";
   mockPulumi.clusterIssuer.value = "https://oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE";
 });
 
 describe("createEksCluster options", () => {
+  it("uses the configured default AWS provider region for cluster tags", () => {
+    mockAwsConfig.region = "ca-central-1";
+
+    const cluster = create();
+
+    expect(cluster.awsResourceTags?.["nimbus:cluster"]).toBe("ca-central-1/prod");
+  });
+
+  it("applies the protected cluster tag to EKS resources and the EKS cluster security group", () => {
+    const cluster = create(undefined, network, {
+      ...config,
+      tags: { environment: "production", "nimbus:cluster": "caller-value" },
+    });
+
+    const expectedTags = {
+      environment: "production",
+      "nimbus:cluster": "us-east-1/prod",
+    };
+    expect(cluster.awsResourceTags).toEqual(expectedTags);
+    expect(resourcesOf("eks.Cluster")[0]?.args.tags).toMatchObject(expectedTags);
+    expect(resourcesOf("eks.NodeGroup")[0]?.args.tags).toMatchObject(expectedTags);
+    expect(resourcesOf("iam.Role").map(({ args }) => args.tags)).toEqual([
+      expectedTags,
+      expectedTags,
+    ]);
+    expect(resourcesOf("eks.Addon").every(({ args }) => args.tags)).toBe(true);
+    expect(resourcesOf("ec2.Tag")).toContainEqual(
+      expect.objectContaining({
+        name: "prod-cluster-security-group-tag",
+        args: expect.objectContaining({
+          resourceId: expect.objectContaining({ value: "sg-cluster" }),
+          key: "nimbus:cluster",
+          value: "us-east-1/prod",
+        }),
+      })
+    );
+  });
+
+  it("adds the cluster tag to worker instances without introducing a launch template", () => {
+    create();
+
+    expect(resourcesOf("eks.NodeGroup")[0]?.args.launchTemplate).toBeUndefined();
+    expect(resourcesOf("autoscaling.Tag")).toContainEqual(
+      expect.objectContaining({
+        name: "prod-node-pool-tag-workers",
+        args: expect.objectContaining({
+          autoscalingGroupName: expect.objectContaining({ value: "asg-prod-ng-workers" }),
+          tag: {
+            key: "nimbus:cluster",
+            value: "us-east-1/prod",
+            propagateAtLaunch: true,
+          },
+        }),
+      })
+    );
+  });
+
+  it("merges protected cluster tags into explicit instance launch-template tags", () => {
+    create({
+      nodeGroupInstanceTags: {
+        Name: "reyemtech-public-arm64",
+        environment: "production",
+        "nimbus:cluster": "caller-value",
+      },
+    });
+
+    expect(resourcesOf("ec2.LaunchTemplate")[0]?.args.tagSpecifications).toEqual([
+      {
+        resourceType: "instance",
+        tags: {
+          Name: "reyemtech-public-arm64",
+          environment: "production",
+          "nimbus:cluster": "us-east-1/prod",
+        },
+      },
+      {
+        resourceType: "volume",
+        tags: { "nimbus:cluster": "us-east-1/prod" },
+      },
+    ]);
+  });
+
+  it("tags instances and volumes when a disk option already requires a launch template", () => {
+    create({ nodeGroupRootDisk: { sizeGiB: 80 } });
+
+    expect(resourcesOf("ec2.LaunchTemplate")[0]?.args.tagSpecifications).toEqual([
+      {
+        resourceType: "instance",
+        tags: { "nimbus:cluster": "us-east-1/prod" },
+      },
+      {
+        resourceType: "volume",
+        tags: { "nimbus:cluster": "us-east-1/prod" },
+      },
+    ]);
+  });
+
+  it("passes cluster tags to Karpenter-provisioned AWS instances", () => {
+    create({ autoscalerControllerNodePoolName: "steady" }, network, {
+      ...config,
+      nodePools: [
+        { ...baseNodePool, name: "steady", minNodes: 1, maxNodes: 2 },
+        {
+          name: "burst",
+          scaling: { mode: "karpenter", instanceTypes: ["m7i.large"] },
+        },
+      ],
+      tags: { environment: "production" },
+    });
+
+    const nodeClass = constructed.resources.find(
+      (resource) =>
+        resource.kind === "k8s.CustomResource" && resource.name === "prod-karpenter-nodeclass"
+    );
+    expect(nodeClass?.args.spec).toMatchObject({
+      tags: {
+        environment: "production",
+        "nimbus:cluster": "us-east-1/prod",
+      },
+    });
+  });
+
   it("does not install Metrics Server when omitted, false, or disabled in its options", () => {
     create({ metricsServer: false });
     expect(resourcesOf("eks.Addon").map(({ args }) => args.addonName)).not.toContain(
@@ -611,14 +743,35 @@ describe("createEksCluster options", () => {
   });
 
   it("propagates managed node-group EC2 instance tags through a launch template", () => {
-    create({
-      nodeGroupInstanceTags: { Name: "reyemtech-public-arm64", environment: "production" },
-    });
+    create(
+      {
+        nodeGroupInstanceTags: { Name: "reyemtech-public-arm64", environment: "production" },
+      },
+      network,
+      {
+        ...config,
+        tags: { Name: "cluster-name", environment: "cluster", owner: "platform" },
+      }
+    );
 
     expect(resourcesOf("ec2.LaunchTemplate")[0]?.args.tagSpecifications).toEqual([
       {
         resourceType: "instance",
-        tags: { Name: "reyemtech-public-arm64", environment: "production" },
+        tags: {
+          Name: "reyemtech-public-arm64",
+          environment: "production",
+          owner: "platform",
+          "nimbus:cluster": "us-east-1/prod",
+        },
+      },
+      {
+        resourceType: "volume",
+        tags: {
+          Name: "cluster-name",
+          environment: "cluster",
+          owner: "platform",
+          "nimbus:cluster": "us-east-1/prod",
+        },
       },
     ]);
     expect(resourcesOf("eks.NodeGroup")[0]?.args.launchTemplate).toBeDefined();
@@ -695,13 +848,23 @@ describe("createEksCluster options", () => {
         },
       ],
     });
-    expect(resourcesOf("autoscaling.Tag")).toHaveLength(2);
     expect(
-      resourcesOf("autoscaling.Tag").map(
-        ({ args }) => (args.autoscalingGroupName as { value: string }).value
+      resourcesOf("autoscaling.Tag").filter(({ args }) =>
+        (args.tag as { key?: string }).key?.startsWith("nimbus.dev/cluster-autoscaler/")
       )
+    ).toHaveLength(2);
+    expect(
+      resourcesOf("autoscaling.Tag")
+        .filter(({ args }) =>
+          (args.tag as { key?: string }).key?.startsWith("nimbus.dev/cluster-autoscaler/")
+        )
+        .map(({ args }) => (args.autoscalingGroupName as { value: string }).value)
     ).toEqual(["asg-prod-ng-steady", "asg-prod-ng-platform"]);
-    expect(resourcesOf("autoscaling.Tag").map(({ args }) => args.tag)).toEqual([
+    expect(
+      resourcesOf("autoscaling.Tag")
+        .map(({ args }) => args.tag as { key?: string })
+        .filter((tag) => tag.key?.startsWith("nimbus.dev/cluster-autoscaler/"))
+    ).toEqual([
       {
         key: "nimbus.dev/cluster-autoscaler/prod",
         value: "owned",
@@ -866,11 +1029,19 @@ describe("createEksCluster options", () => {
       ({ name }) => name === "prod-karpenter"
     );
     expect((karpenterRelease?.args.values as { replicas?: number } | undefined)?.replicas).toBe(1);
-    expect(resourcesOf("autoscaling.Tag")).toHaveLength(1);
     expect(
-      resourcesOf("autoscaling.Tag").every(({ args }) =>
-        (args.autoscalingGroupName as { value: string }).value.includes("steady")
+      resourcesOf("autoscaling.Tag").filter(({ args }) =>
+        (args.tag as { key?: string }).key?.startsWith("nimbus.dev/cluster-autoscaler/")
       )
+    ).toHaveLength(1);
+    expect(
+      resourcesOf("autoscaling.Tag")
+        .filter(({ args }) =>
+          (args.tag as { key?: string }).key?.startsWith("nimbus.dev/cluster-autoscaler/")
+        )
+        .every(({ args }) =>
+          (args.autoscalingGroupName as { value: string }).value.includes("steady")
+        )
     ).toBe(true);
     const karpenterPool = resourcesOf("k8s.CustomResource").find(({ name }) =>
       name.includes("pool-burst")
@@ -1007,7 +1178,7 @@ describe("createEksCluster options", () => {
       }
     );
     expect(resourcesOf("eks.NodeGroup")).toHaveLength(1);
-    expect(resourcesOf("autoscaling.Tag")).toHaveLength(0);
+    expect(resourcesOf("autoscaling.Tag")).toHaveLength(1);
     expect(resourcesOf("sqs.Queue")).toHaveLength(0);
     expect(resourcesOf("k8s.Chart").map(({ name }) => name)).not.toContain(
       "prod-cluster-autoscaler"

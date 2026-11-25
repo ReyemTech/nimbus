@@ -15,6 +15,7 @@ import {
   isKarpenterPool,
   validateEksNodePoolScaling,
 } from "./eks-autoscaling";
+import { createAwsClusterTags } from "./tagging";
 
 /** EKS community Metrics Server add-on configuration. */
 export interface IEksMetricsServerOptions {
@@ -158,7 +159,7 @@ export function createEksCluster(
   const cloud = Array.isArray(config.cloud) ? (config.cloud[0] ?? "aws") : config.cloud;
   const target = resolveCloudTarget(cloud);
 
-  const tags = config.tags ?? {};
+  const tags = createAwsClusterTags(aws.config.region ?? target.region, name, config.tags);
   const autoMode = options?.autoMode ?? config.autoMode ?? false;
   const addons = options?.addons ?? DEFAULT_ADDONS;
   const endpointAccess = options?.endpointAccess ?? "both";
@@ -332,9 +333,17 @@ export function createEksCluster(
                     },
                   ]
                 : undefined,
-              tagSpecifications: options?.nodeGroupInstanceTags
-                ? [{ resourceType: "instance", tags: options.nodeGroupInstanceTags }]
-                : undefined,
+              tagSpecifications: [
+                {
+                  resourceType: "instance",
+                  tags: {
+                    ...tags,
+                    ...options?.nodeGroupInstanceTags,
+                    "nimbus:cluster": tags["nimbus:cluster"] as string,
+                  },
+                },
+                { resourceType: "volume", tags },
+              ],
               tags: { ...tags, Name: `${name}-${np.name}-launch-template` },
             })
           : undefined;
@@ -386,8 +395,32 @@ export function createEksCluster(
       );
       nodeGroups.push(nodeGroup);
       nodeGroupsByPool.set(managedPool.name, nodeGroup);
+      new aws.autoscaling.Tag(
+        `${name}-node-pool-tag-${managedPool.name}`,
+        {
+          autoscalingGroupName: nodeGroup.resources.apply(
+            (items) => items[0]?.autoscalingGroups[0]?.name ?? ""
+          ),
+          tag: {
+            key: "nimbus:cluster",
+            value: tags["nimbus:cluster"] as string,
+            propagateAtLaunch: true,
+          },
+        },
+        { dependsOn: [nodeGroup] }
+      );
     }
   }
+
+  new aws.ec2.Tag(
+    `${name}-cluster-security-group-tag`,
+    {
+      resourceId: cluster.vpcConfig.apply((vpcConfig) => vpcConfig.clusterSecurityGroupId),
+      key: "nimbus:cluster",
+      value: tags["nimbus:cluster"] as string,
+    },
+    { dependsOn: [cluster] }
+  );
 
   // Grant the EBS CSI controller its AWS permissions through EKS Pod Identity.
   let ebsCsiRole: aws.iam.Role | undefined;
@@ -603,6 +636,7 @@ export function createEksCluster(
     provider,
     providerResources: podIdentityAgent ? { podIdentityAgent } : undefined,
     eksAddons: [...addonNames],
+    awsResourceTags: tags,
   };
 }
 

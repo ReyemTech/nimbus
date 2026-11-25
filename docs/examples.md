@@ -13,6 +13,7 @@ const network = (await createNetwork("prod", {
   cloud: "aws",
   cidr: "10.0.0.0/16",
   natStrategy: "fck-nat",
+  clusterNameForTags: "prod",
 })) as INetwork;
 
 // EKS cluster with Auto Mode
@@ -78,6 +79,46 @@ credentials; then enable it again with the prior domain filters and exact same
 `txtOwnerId`, and apply to create the add-on. This avoids two controllers
 writing the same records during replacement. Non-EKS Route 53 and other DNS
 providers continue to use the Helm path.
+
+### AWS cluster cost-allocation tags
+
+Nimbus tags EKS-owned resources with `nimbus:cluster=<region>/<cluster-name>` and
+preserves configured AWS resource tags. The generated identifier wins if caller
+tags contain the same key. Use the cluster output for AWS resources managed
+alongside Nimbus, including the AWS Load Balancer Controller's ALBs, NLBs,
+target groups, and controller-created security groups:
+
+```typescript
+import * as k8s from "@pulumi/kubernetes";
+
+const awsLoadBalancerControllerValues = {
+  clusterName: "prod",
+  defaultTags: cluster.awsResourceTags,
+};
+
+new k8s.helm.v3.Release("aws-load-balancer-controller", {
+  chart: "aws-load-balancer-controller",
+  repositoryOpts: { repo: "https://aws.github.io/eks-charts" },
+  namespace: "kube-system",
+  values: awsLoadBalancerControllerValues,
+});
+```
+
+For a dedicated Nimbus AWS network, set `clusterNameForTags` to the matching
+cluster name in `createNetwork`; this tags the VPC, subnets, gateways, route
+tables, NAT resources, and their supported EC2/Auto Scaling children. Leave it
+unset for shared networks so Nimbus does not assign exclusive cluster ownership.
+The ASG tag propagates to newly launched managed-node instances; it does not
+backfill running instances. Backfill those instances with a reviewed AWS tagging
+operation. When a managed node group does not already use a launch template,
+Nimbus does not create one solely for tagging; its EBS volumes therefore need a
+separate tagging operation. AWS resources that do not support user tags,
+caller-owned certificates, and infrastructure managed outside Nimbus remain
+outside Nimbus's ownership.
+
+Activate `nimbus:cluster` as a user-defined cost allocation tag in Billing and
+Cost Management before using it in Cost Explorer. Tag activation is account-wide
+and does not retroactively populate historical cost data.
 
 ### EKS with restricted access, encrypted node disks, and EBS CSI
 

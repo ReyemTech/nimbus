@@ -20,7 +20,7 @@ const mockProvider = (): any => ({});
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdReleases: Array<{ name: string; args: any; opts: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createdCustomResources: Array<{ name: string; args: any }>;
+let createdCustomResources: Array<{ name: string; args: any; opts?: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdSecrets: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -42,7 +42,7 @@ let createdConfigMaps: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdClusterRoles: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createdCustomResourcesForAssertions: Array<{ name: string; args: any }>;
+let createdCustomResourcesForAssertions: Array<{ name: string; args: any; opts?: any }>;
 
 // Mock @pulumi/aws
 vi.mock("@pulumi/aws", () => {
@@ -132,9 +132,9 @@ vi.mock("@pulumi/kubernetes", () => {
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockCustomResource = class {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    constructor(name: string, args: any, _opts?: any) {
-      createdCustomResources.push({ name, args });
-      createdCustomResourcesForAssertions.push({ name, args });
+    constructor(name: string, args: any, opts?: any) {
+      createdCustomResources.push({ name, args, opts });
+      createdCustomResourcesForAssertions.push({ name, args, opts });
     }
   };
 
@@ -661,6 +661,39 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
     expect(createdSecrets).toHaveLength(0);
     expect(result.providerResources?.["external-dns"]).toBeDefined();
   });
+
+  it("creates the Route 53 ClusterIssuer when cert-manager is an EKS add-on", () => {
+    const cluster = {
+      ...makeCluster("test"),
+      nativeResource: new aws.eks.Cluster("test", {
+        roleArn: "test-role",
+        vpcConfig: { subnetIds: [] },
+      }),
+      eksAddons: ["cert-manager"],
+    } as unknown as ICluster;
+
+    createPlatformStack("test", {
+      cluster,
+      domain: "example.com",
+      traefik: { enabled: false },
+      externalDns: { dnsProvider: "route53", hostedZoneIds: ["Z123"] },
+    });
+
+    expect(createdReleases.some((release) => release.name === "test-cert-manager")).toBe(false);
+    const issuer = createdCustomResources.find(
+      (resource) =>
+        resource.args.kind === "ClusterIssuer" && resource.args.metadata?.name === "letsencrypt-dns"
+    );
+    expect(issuer).toBeDefined();
+    expect(issuer?.opts?.dependsOn).toContain(cluster.provider);
+    expect(
+      createdCustomResources.some(
+        (resource) =>
+          resource.args.kind === "Certificate" && resource.args.metadata?.namespace === "traefik"
+      )
+    ).toBe(true);
+  });
+
   it("creates IAM user, policy, access key, and K8s secrets when route53 without manual credentials", () => {
     const cluster = makeCluster("test");
     createPlatformStack("test", {

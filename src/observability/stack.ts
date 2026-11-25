@@ -524,10 +524,10 @@ function deployKubePrometheusStack(
   // The EKS community add-ons own these agents when selected. Disable the
   // kube-prometheus-stack subcharts to prevent duplicate DaemonSets/Deployments.
   if (managedEksAddons?.includes("prometheus-node-exporter")) {
-    disableHelmSubchart(stackValues, "prometheus-node-exporter");
+    disableHelmSubchart(stackValues, "nodeExporter");
   }
   if (managedEksAddons?.includes("kube-state-metrics")) {
-    disableHelmSubchart(stackValues, "kube-state-metrics");
+    disableHelmSubchart(stackValues, "kubeStateMetrics");
   }
   return new k8s.helm.v3.Release(
     `${name}-kube-prometheus-stack`,

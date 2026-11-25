@@ -48,6 +48,16 @@ export interface IAwsProviderOptions {
   readonly nodeGroupAmiType?: pulumi.Input<string>;
   /** Opt in to the EKS community Metrics Server add-on. */
   readonly metricsServer?: boolean | IEksMetricsServerOptions;
+  /** Install/configure the shared Cluster Autoscaler for selected EKS pools. */
+  readonly clusterAutoscaler?: { readonly version?: pulumi.Input<string> };
+  /** Install/configure the shared Karpenter controller and Spot handling. */
+  readonly karpenter?: {
+    readonly version?: pulumi.Input<string>;
+    readonly namespace?: string;
+    readonly interruptionHandling?: boolean;
+  };
+  /** Stable on-demand pool that hosts EKS autoscaler controller pods. */
+  readonly autoscalerControllerNodePoolName?: string;
   /** KMS key ARN for state backend encryption. Uses AES256 if not provided. */
   readonly stateKmsKeyArn?: string;
   /** Allow Pulumi to destroy the state bucket (for dev/test). Default: false. */

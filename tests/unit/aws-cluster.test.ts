@@ -47,6 +47,40 @@ vi.mock("@pulumi/kubernetes", () => ({
       constructed.resources.push({ kind: "k8s.Provider", name, args, opts });
     }
   },
+  helm: {
+    v3: {
+      Chart: class {
+        readonly kind = "k8s.Chart";
+        constructor(name: string, args: Record<string, unknown>, opts?: unknown) {
+          constructed.resources.push({ kind: "k8s.Chart", name, args, opts });
+        }
+      },
+      Release: class {
+        readonly kind = "k8s.Release";
+        constructor(name: string, args: Record<string, unknown>, opts?: unknown) {
+          constructed.resources.push({ kind: "k8s.Release", name, args, opts });
+        }
+      },
+    },
+  },
+  apiextensions: {
+    CustomResource: class {
+      readonly kind = "k8s.CustomResource";
+      constructor(name: string, args: Record<string, unknown>, opts?: unknown) {
+        constructed.resources.push({ kind: "k8s.CustomResource", name, args, opts });
+      }
+    },
+  },
+  core: {
+    v1: {
+      Namespace: class {
+        readonly kind = "k8s.Namespace";
+        constructor(name: string, args: Record<string, unknown>, opts?: unknown) {
+          constructed.resources.push({ kind: "k8s.Namespace", name, args, opts });
+        }
+      },
+    },
+  },
 }));
 
 vi.mock("@pulumi/aws", () => {
@@ -70,6 +104,12 @@ vi.mock("@pulumi/aws", () => {
           record("iam.RolePolicyAttachment", name, args);
         }
       },
+      RolePolicy: class {
+        readonly kind = "iam.RolePolicy";
+        constructor(name: string, args: Record<string, unknown>) {
+          record("iam.RolePolicy", name, args);
+        }
+      },
     },
     ec2: {
       LaunchTemplate: class {
@@ -84,16 +124,20 @@ vi.mock("@pulumi/aws", () => {
       Cluster: class {
         readonly kind = "eks.Cluster";
         readonly name = output("prod");
+        readonly arn = output("arn:aws:eks:us-east-1:123456789012:cluster/prod");
         readonly endpoint = output("https://eks.example.com");
         readonly certificateAuthority = output({ data: "mock-ca" });
         readonly version = output("1.32");
+        readonly vpcConfig = output({ clusterSecurityGroupId: "sg-cluster" });
         constructor(name: string, args: Record<string, unknown>) {
           record("eks.Cluster", name, args);
         }
       },
       NodeGroup: class {
         readonly kind = "eks.NodeGroup";
+        readonly resources: ReturnType<typeof output>;
         constructor(name: string, args: Record<string, unknown>, opts?: unknown) {
+          this.resources = output([{ autoscalingGroups: [{ name: `asg-${name}` }] }]);
           record("eks.NodeGroup", name, args, opts);
         }
       },
@@ -115,16 +159,69 @@ vi.mock("@pulumi/aws", () => {
           record("eks.AccessPolicyAssociation", name, args, opts);
         }
       },
+      PodIdentityAssociation: class {
+        readonly kind = "eks.PodIdentityAssociation";
+        constructor(name: string, args: Record<string, unknown>, opts?: unknown) {
+          record("eks.PodIdentityAssociation", name, args, opts);
+        }
+      },
+    },
+    autoscaling: {
+      Tag: class {
+        readonly kind = "autoscaling.Tag";
+        constructor(name: string, args: Record<string, unknown>, opts?: unknown) {
+          record("autoscaling.Tag", name, args, opts);
+        }
+      },
+    },
+    sqs: {
+      Queue: class {
+        readonly arn = output("arn:aws:sqs:us-east-1:123456789012:prod-karpenter-interruption");
+        readonly name = output("prod-karpenter-interruption");
+        readonly url = output(
+          "https://sqs.us-east-1.amazonaws.com/123456789012/prod-karpenter-interruption"
+        );
+        constructor(name: string, args: Record<string, unknown>) {
+          record("sqs.Queue", name, args);
+        }
+      },
+      QueuePolicy: class {
+        readonly kind = "sqs.QueuePolicy";
+        constructor(name: string, args: Record<string, unknown>) {
+          record("sqs.QueuePolicy", name, args);
+        }
+      },
+    },
+    cloudwatch: {
+      EventRule: class {
+        readonly name = output("rule");
+        constructor(name: string, args: Record<string, unknown>) {
+          record("cloudwatch.EventRule", name, args);
+        }
+      },
+      EventTarget: class {
+        readonly kind = "cloudwatch.EventTarget";
+        constructor(name: string, args: Record<string, unknown>) {
+          record("cloudwatch.EventTarget", name, args);
+        }
+      },
     },
   };
 });
 
 import { createEksCluster } from "../../src/aws/cluster";
 
+const baseNodePool = {
+  name: "workers",
+  instanceType: "m7i.large",
+  minNodes: 1,
+  maxNodes: 3,
+} as const;
+
 const config = {
   cloud: "aws",
   version: "1.32",
-  nodePools: [{ name: "workers", instanceType: "m7i.large", minNodes: 1, maxNodes: 3 }],
+  nodePools: [baseNodePool],
 } satisfies IClusterConfig;
 
 const network = {
@@ -134,11 +231,15 @@ const network = {
   cidr: "10.0.0.0/16",
   publicSubnetIds: mockPulumi.output(["subnet-public"]),
   privateSubnetIds: mockPulumi.output(["subnet-private"]),
+  privateSubnetAvailabilityZones: mockPulumi.output(["us-east-1a"]),
   nativeResource: {} as INetwork["nativeResource"],
 } as unknown as INetwork;
 
-const create = (options?: IEksOptions, networkOverride: INetwork = network) =>
-  createEksCluster("prod", config, networkOverride, options);
+const create = (
+  options?: IEksOptions,
+  networkOverride: INetwork = network,
+  clusterConfig: IClusterConfig = config
+) => createEksCluster("prod", clusterConfig, networkOverride, options);
 
 const resourcesOf = (kind: string) => constructed.resources.filter((item) => item.kind === kind);
 
@@ -434,5 +535,234 @@ describe("createEksCluster options", () => {
     expect(() => create({ autoMode: true, nodeGroupRootDisk: { sizeGiB: 80 } })).toThrow(
       /only to EKS managed node groups/
     );
+  });
+
+  it("pins fixed managed pools to one desired capacity", () => {
+    create(undefined, network, {
+      ...config,
+      nodePools: [{ ...baseNodePool, desiredNodes: 2, scaling: { mode: "fixed" } }],
+    });
+    expect(resourcesOf("eks.NodeGroup")[0]?.args.scalingConfig).toEqual({
+      desiredSize: 2,
+      minSize: 2,
+      maxSize: 2,
+    });
+    expect(resourcesOf("k8s.Chart")).toHaveLength(0);
+  });
+
+  it("limits Cluster Autoscaler discovery to selected managed pools", () => {
+    create({ autoscalerControllerNodePoolName: "steady" }, network, {
+      ...config,
+      nodePools: [
+        {
+          name: "steady",
+          instanceType: "m7i.large",
+          minNodes: 1,
+          maxNodes: 4,
+          scaling: { mode: "cluster-autoscaler" },
+        },
+        {
+          name: "platform",
+          instanceType: "m7i.large",
+          minNodes: 1,
+          maxNodes: 2,
+          scaling: { mode: "cluster-autoscaler" },
+        },
+        {
+          name: "fixed",
+          instanceType: "m7i.large",
+          minNodes: 1,
+          maxNodes: 1,
+          scaling: { mode: "fixed" },
+        },
+      ],
+    });
+    expect(resourcesOf("autoscaling.Tag")).toHaveLength(4);
+    expect(
+      resourcesOf("autoscaling.Tag").map(
+        ({ args }) => (args.autoscalingGroupName as { value: string }).value
+      )
+    ).toEqual([
+      "asg-prod-ng-steady",
+      "asg-prod-ng-steady",
+      "asg-prod-ng-platform",
+      "asg-prod-ng-platform",
+    ]);
+    expect(resourcesOf("k8s.Chart").map(({ name }) => name)).toContain("prod-cluster-autoscaler");
+    expect(
+      resourcesOf("k8s.Chart").find(({ name }) => name === "prod-cluster-autoscaler")?.args.version
+    ).toMatchObject({ value: "9.46.6" });
+    expect(resourcesOf("eks.PodIdentityAssociation")).toHaveLength(1);
+    const caPolicy = resourcesOf("iam.RolePolicy").find(({ name }) =>
+      name.includes("cluster-autoscaler-policy")
+    );
+    const caPolicyDocument = JSON.parse((caPolicy?.args.policy as { value: string }).value) as {
+      Statement: Array<{
+        Action: string[];
+        Condition?: { StringEquals?: Record<string, string> };
+      }>;
+    };
+    const caWriteStatement = caPolicyDocument.Statement.find((statement) =>
+      statement.Action.includes("autoscaling:SetDesiredCapacity")
+    );
+    expect(caWriteStatement?.Condition?.StringEquals).toEqual({
+      "autoscaling:ResourceTag/k8s.io/cluster-autoscaler/prod": "owned",
+    });
+    expect(resourcesOf("eks.Addon").map(({ args }) => args.addonName)).toContain(
+      "eks-pod-identity-agent"
+    );
+  });
+
+  it("keeps Karpenter capacity separate from EKS managed groups and Cluster Autoscaler", () => {
+    const dualAzNetwork = {
+      ...network,
+      privateSubnetIds: mockPulumi.output(["subnet-private-a", "subnet-private-b"]),
+      privateSubnetAvailabilityZones: mockPulumi.output(["us-east-1a", "us-east-1b"]),
+    } as unknown as INetwork;
+    create({ autoscalerControllerNodePoolName: "steady" }, dualAzNetwork, {
+      ...config,
+      nodePools: [
+        {
+          name: "steady",
+          instanceType: "m7i.large",
+          minNodes: 1,
+          maxNodes: 4,
+          scaling: { mode: "cluster-autoscaler" },
+        },
+        {
+          name: "burst",
+          labels: { workload: "batch" },
+          scaling: {
+            mode: "karpenter",
+            instanceTypes: ["m7i.large", "m7i.xlarge"],
+            capacityTypes: ["spot"],
+            availabilityZones: ["us-east-1a"],
+            limits: { cpu: "100" },
+          },
+        },
+      ],
+    });
+    expect(resourcesOf("eks.NodeGroup")).toHaveLength(1);
+    expect(resourcesOf("autoscaling.Tag")).toHaveLength(2);
+    expect(
+      resourcesOf("autoscaling.Tag").every(({ args }) =>
+        (args.autoscalingGroupName as { value: string }).value.includes("steady")
+      )
+    ).toBe(true);
+    const karpenterPool = resourcesOf("k8s.CustomResource").find(({ name }) =>
+      name.includes("pool-burst")
+    );
+    expect(karpenterPool?.args.spec).toMatchObject({
+      template: {
+        spec: {
+          requirements: [
+            { key: "node.kubernetes.io/instance-type", values: ["m7i.large", "m7i.xlarge"] },
+            { key: "karpenter.sh/capacity-type", values: ["spot"] },
+            { key: "topology.kubernetes.io/zone", values: ["us-east-1a"] },
+          ],
+        },
+      },
+      limits: { cpu: "100" },
+    });
+    const nodeClass = resourcesOf("k8s.CustomResource").find(({ name }) =>
+      name.includes("nodeclass")
+    );
+    expect(
+      (nodeClass?.args.spec as { subnetSelectorTerms: { value: Array<{ id: string }> } })
+        .subnetSelectorTerms.value
+    ).toEqual([{ id: "subnet-private-a" }]);
+    expect(
+      (nodeClass?.args.spec as { securityGroupSelectorTerms: Array<{ id: { value: string } }> })
+        .securityGroupSelectorTerms[0]?.id.value
+    ).toBe("sg-cluster");
+    const karpenterPolicy = resourcesOf("iam.RolePolicy").find(({ name }) =>
+      name.includes("karpenter-controller-policy")
+    );
+    const karpenterPolicyDocument = JSON.parse(
+      (karpenterPolicy?.args.policy as { value: string }).value
+    ) as {
+      Statement: Array<{
+        Action: string | string[];
+        Resource: string | string[];
+        Condition?: Record<string, Record<string, unknown>>;
+      }>;
+    };
+    expect(JSON.stringify(karpenterPolicyDocument)).not.toContain("autoscaling:SetDesiredCapacity");
+    expect(
+      karpenterPolicyDocument.Statement.find((statement) => statement.Action === "iam:PassRole")
+        ?.Resource
+    ).toBe("arn:aws:iam::123456789012:role/mock-role");
+    const terminateStatement = karpenterPolicyDocument.Statement.find((statement) =>
+      (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes(
+        "ec2:TerminateInstances"
+      )
+    );
+    expect(terminateStatement?.Resource).toEqual(
+      expect.arrayContaining([
+        "arn:aws:ec2:us-east-1:*:instance/*",
+        "arn:aws:ec2:us-east-1:*:launch-template/*",
+      ])
+    );
+    expect(JSON.stringify(terminateStatement?.Condition)).toContain("karpenter.sh/nodepool");
+    const caPolicy = resourcesOf("iam.RolePolicy").find(({ name }) =>
+      name.includes("cluster-autoscaler-policy")
+    );
+    expect(JSON.stringify(caPolicy?.args.policy)).toContain("autoscaling:SetDesiredCapacity");
+    expect(resourcesOf("sqs.Queue")).toHaveLength(1);
+    expect(resourcesOf("cloudwatch.EventRule")).toHaveLength(5);
+    expect(
+      JSON.parse(resourcesOf("cloudwatch.EventRule")[0]?.args.eventPattern as string)
+    ).toHaveProperty("detail-type");
+    expect(resourcesOf("cloudwatch.EventTarget")).toHaveLength(5);
+    expect(JSON.stringify(karpenterPolicy?.args.policy)).toContain("sqs:ReceiveMessage");
+  });
+
+  it("supports Karpenter-only capacity and disables Spot interruption resources when requested", () => {
+    create(
+      { autoscalerControllerNodePoolName: "steady", karpenter: { interruptionHandling: false } },
+      network,
+      {
+        ...config,
+        nodePools: [
+          {
+            name: "steady",
+            instanceType: "m7i.large",
+            minNodes: 1,
+            maxNodes: 2,
+            scaling: { mode: "fixed" },
+          },
+          {
+            name: "burst",
+            scaling: { mode: "karpenter", instanceTypes: ["m7i.large"], capacityTypes: ["spot"] },
+          },
+        ],
+      }
+    );
+    expect(resourcesOf("eks.NodeGroup")).toHaveLength(1);
+    expect(resourcesOf("autoscaling.Tag")).toHaveLength(0);
+    expect(resourcesOf("sqs.Queue")).toHaveLength(0);
+    expect(resourcesOf("k8s.Chart").map(({ name }) => name)).not.toContain(
+      "prod-cluster-autoscaler"
+    );
+    expect(resourcesOf("k8s.CustomResource").map(({ args }) => args.kind)).toContain("NodePool");
+  });
+
+  it("rejects Karpenter AZs that are not present in Nimbus private subnets", () => {
+    expect(() =>
+      create({ autoscalerControllerNodePoolName: "steady" }, network, {
+        ...config,
+        nodePools: [
+          { name: "steady", instanceType: "m7i.large", minNodes: 1, maxNodes: 2 },
+          {
+            name: "burst",
+            scaling: {
+              mode: "karpenter",
+              instanceTypes: ["m7i.large"],
+              availabilityZones: ["us-west-2a"],
+            },
+          },
+        ],
+      })
+    ).toThrow(/outside Nimbus private subnets/);
   });
 });

@@ -10,8 +10,9 @@
 import * as azure from "@pulumi/azure-native";
 import * as k8s from "@pulumi/kubernetes";
 import type * as pulumi from "@pulumi/pulumi";
-import type { ICluster, IClusterConfig } from "../cluster";
+import type { ICluster, IClusterConfig, IManagedNodePool } from "../cluster";
 import type { INetwork } from "../network";
+import { validateUnsupportedPoolScaling } from "../cluster/scaling";
 import { resolveCloudTarget } from "../types";
 
 /** Maximum length for AKS node pool names. */
@@ -74,26 +75,31 @@ export function createAksCluster(
   const rgName = options.resourceGroupName;
   const dnsPrefix = options.dnsPrefix ?? name;
   const enableVirtualNodes = options.virtualNodes ?? config.virtualNodes ?? false;
+  validateUnsupportedPoolScaling("Azure AKS", config);
 
   // Build agent pool profiles from node pool config
-  const agentPoolProfiles = config.nodePools.map((np) => ({
-    name: np.name.substring(0, AKS_POOL_NAME_MAX_LENGTH),
-    vmSize: np.instanceType,
-    count: np.desiredNodes ?? np.minNodes,
-    minCount: np.minNodes,
-    maxCount: np.maxNodes,
-    enableAutoScaling: true,
-    mode: (np.mode ?? "User") as "System" | "User",
-    osType: "Linux" as const,
-    osDiskSizeGB: AKS_DEFAULT_OS_DISK_SIZE_GB,
-    vnetSubnetId: network.privateSubnetIds.apply((ids) => ids[0] ?? ""),
-    scaleSetPriority: np.spot ? ("Spot" as const) : ("Regular" as const),
-    scaleSetEvictionPolicy: np.spot ? ("Delete" as const) : undefined,
-    spotMaxPrice: np.spot ? SPOT_MAX_PRICE_ON_DEMAND : undefined,
-    nodeTaints: np.taints?.map((t) => `${t.key}=${t.value}:${t.effect}`) ?? [],
-    nodeLabels: np.labels ?? {},
-    type: "VirtualMachineScaleSets" as const,
-  }));
+  const agentPoolProfiles = config.nodePools.map((pool) => {
+    const np = pool as IManagedNodePool;
+    const fixedCount = np.scaling?.mode === "fixed" ? (np.desiredNodes ?? np.minNodes) : undefined;
+    return {
+      name: np.name.substring(0, AKS_POOL_NAME_MAX_LENGTH),
+      vmSize: np.instanceType,
+      count: fixedCount ?? np.desiredNodes ?? np.minNodes,
+      minCount: fixedCount === undefined ? np.minNodes : undefined,
+      maxCount: fixedCount === undefined ? np.maxNodes : undefined,
+      enableAutoScaling: fixedCount === undefined,
+      mode: (np.mode ?? "User") as "System" | "User",
+      osType: "Linux" as const,
+      osDiskSizeGB: AKS_DEFAULT_OS_DISK_SIZE_GB,
+      vnetSubnetId: network.privateSubnetIds.apply((ids) => ids[0] ?? ""),
+      scaleSetPriority: np.spot ? ("Spot" as const) : ("Regular" as const),
+      scaleSetEvictionPolicy: np.spot ? ("Delete" as const) : undefined,
+      spotMaxPrice: np.spot ? SPOT_MAX_PRICE_ON_DEMAND : undefined,
+      nodeTaints: np.taints?.map((t) => `${t.key}=${t.value}:${t.effect}`) ?? [],
+      nodeLabels: np.labels ?? {},
+      type: "VirtualMachineScaleSets" as const,
+    };
+  });
 
   // AKS add-on profiles
   const addonProfiles: Record<string, { enabled: boolean; config?: Record<string, string> }> = {};

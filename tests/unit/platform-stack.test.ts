@@ -18,7 +18,7 @@ const mockProvider = (): any => ({});
 
 // Track created resources
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createdReleases: Array<{ name: string; args: any; opts: any }>;
+let createdReleases: Array<{ name: string; args: any; opts: any; resource?: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdCustomResources: Array<{ name: string; args: any; opts?: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -126,7 +126,7 @@ vi.mock("@pulumi/kubernetes", () => {
     status: any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     constructor(name: string, args: any, opts?: any) {
-      createdReleases.push({ name, args, opts });
+      createdReleases.push({ name, args, opts, resource: this });
       this.status = mockOutput({ namespace: "mock-ns" });
     }
   };
@@ -249,6 +249,7 @@ vi.mock("@pulumi/kubernetes", () => {
 
 // Mock @pulumi/pulumi
 vi.mock("@pulumi/pulumi", () => ({
+  rootStackResource: {},
   output: (val: unknown) => mockOutput(val),
   all: (vals: unknown[]) => ({
     apply: (fn: (...args: unknown[]) => unknown) => mockOutput(fn(vals)),
@@ -259,6 +260,7 @@ vi.mock("@pulumi/pulumi", () => ({
 
 import { createPlatformStack } from "../../src/platform/stack";
 import type { ICluster } from "../../src/cluster";
+import type { IPlatformStack } from "../../src/platform";
 import * as aws from "@pulumi/aws";
 
 function makeCluster(name: string): ICluster {
@@ -332,6 +334,65 @@ describe("platform stack — ArgoCD values", () => {
     expect(values.configs.params["server.insecure"]).toBe(true);
     expect(values.configs.cm["resource.exclusions"]).toContain("aquasecurity.github.io");
     expect(values.server.ingress.hostname).toBe("argocd.example.com");
+  });
+});
+
+describe("platform stack — Headlamp dashboard", () => {
+  it("does not install Headlamp unless enabled", () => {
+    const platform = createPlatformStack("test", {
+      cluster: makeCluster("test"),
+      domain: "example.com",
+      certManager: { enabled: false },
+      traefik: { enabled: false },
+    });
+
+    expect(createdReleases.some((release) => release.name === "test-headlamp")).toBe(false);
+    expect((platform as IPlatformStack).components.headlamp).toBeUndefined();
+    expect((platform as IPlatformStack).exposedServices).toEqual([]);
+  });
+
+  it("infers installed plugins, orders after platform releases, and exposes Headlamp by default", () => {
+    const platform = createPlatformStack("test", {
+      cluster: makeCluster("test"),
+      domain: "example.com",
+      traefik: { enabled: false },
+      argocd: { enabled: true },
+      headlamp: { enabled: true },
+    });
+
+    const release = createdReleases.find((item) => item.name === "test-headlamp");
+    expect(release).toBeDefined();
+    const configContent = release?.args.values.pluginsManager.configContent as string;
+    expect(configContent).toContain("headlamp_cert-manager");
+    expect(configContent).toContain("headlamp-argocd");
+    expect(release?.opts.dependsOn).toContain(
+      createdReleases.find((item) => item.name === "test-cert-manager")?.resource
+    );
+    expect(release?.opts.dependsOn).toContain(
+      createdReleases.find((item) => item.name === "test-argocd")?.resource
+    );
+    expect((platform as IPlatformStack).exposedServices).toContainEqual({
+      name: "headlamp",
+      originalName: "headlamp",
+      namespace: "headlamp",
+      port: 80,
+      label: "headlamp",
+    });
+  });
+
+  it("keeps the service private and allows opting out of Tailscale exposure", () => {
+    const platform = createPlatformStack("test", {
+      cluster: makeCluster("test"),
+      domain: "example.com",
+      traefik: { enabled: false },
+      certManager: { enabled: false },
+      headlamp: { enabled: true, expose: false },
+    });
+
+    const release = createdReleases.find((item) => item.name === "test-headlamp");
+    expect(release?.args.values.service.type).toBe("ClusterIP");
+    expect(release?.args.values.ingress.enabled).toBe(false);
+    expect((platform as IPlatformStack).exposedServices).toEqual([]);
   });
 });
 

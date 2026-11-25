@@ -85,9 +85,12 @@ async function flushBehindAnchorRole(db: IDatabaseInstance): Promise<void> {
   );
 }
 
-/** Everything registered so far except the anchor's own resources. */
+/** Everything registered so far except the anchor and shared namespace setup. */
 function registeredWithoutAnchor(): string[] {
-  return registered.filter((name) => !name.includes(ANCHOR));
+  return registered.filter(
+    (name) =>
+      !name.includes(ANCHOR) && name !== "ensure-ns-app" && name !== "ensure-ns-app-default-limits"
+  );
 }
 
 /** Every logical name one call to `makeDatabase({ namespaces: ["app"] })` registers. */
@@ -324,7 +327,7 @@ describe("config.owner", () => {
       { provider }
     );
     await awaitRegistered("owner-guard-mariadb");
-    const before = [...registered];
+    const before = registeredWithoutAnchor();
 
     expect(() =>
       createSingleMariadbDatabaseInstance({
@@ -645,7 +648,7 @@ describe("addRole", () => {
   it("provisions nothing before rejecting the owner", async () => {
     const db = makeDatabase();
     await awaitRegistered(...OWNER_RESOURCES);
-    const before = [...registered];
+    const before = registeredWithoutAnchor();
 
     expect(() => addRoleOf(db)("analytics")).toThrow(AnyCloudError);
     await flushBehindAnchorRole(db);
@@ -935,7 +938,7 @@ describe("addRole", () => {
   it("provisions nothing before rejecting a blank role name", async () => {
     const db = makeDatabase();
     await awaitRegistered(...OWNER_RESOURCES);
-    const before = [...registered];
+    const before = registeredWithoutAnchor();
 
     expect(() => addRoleOf(db)("")).toThrow(AnyCloudError);
     await flushBehindAnchorRole(db);
@@ -946,7 +949,7 @@ describe("addRole", () => {
   it("provisions nothing before rejecting a privilege", async () => {
     const db = makeDatabase();
     await awaitRegistered(...OWNER_RESOURCES);
-    const before = [...registered];
+    const before = registeredWithoutAnchor();
 
     expect(() => addRoleOf(db)("reader", { grants: [{ privileges: ["SUPER"] }] })).toThrow(
       AnyCloudError

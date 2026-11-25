@@ -46,8 +46,9 @@ Full example: [`examples/single-cloud-aws/`](../examples/single-cloud-aws/)
 ### EKS ExternalDNS community add-on
 
 On AWS EKS with Route 53, Nimbus uses the EKS community add-on and Pod Identity.
-Supply hosted zone IDs for exact IAM scoping; domain filters are the fallback
-and must resolve to unique hosted zones. Keep any existing TXT owner ID when
+Supply hosted zone IDs to scope both IAM permissions and ExternalDNS zone
+discovery; domain filters are the fallback and must resolve to unique hosted
+zones. Keep any existing TXT owner ID when
 migrating from the Helm chart.
 
 ```typescript

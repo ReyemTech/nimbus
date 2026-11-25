@@ -8,6 +8,7 @@ const unwrap = (value: any): any =>
 
 vi.mock("@pulumi/pulumi", () => ({
   all: (values: any[]) => output(values.map(unwrap)),
+  output: (value: any) => output(unwrap(value)),
 }));
 
 vi.mock("@pulumi/aws", () => {
@@ -62,15 +63,16 @@ describe("EKS ExternalDNS add-on", () => {
       hostedZoneIds: ["Z123"],
       domainFilters: ["example.com"],
       addonVersion: "v1.0.0-eksbuild.1",
-      values: { txtOwnerId: "prod-cluster" },
+      values: { txtOwnerId: "prod-cluster", zoneIdFilters: ["UNAUTHORIZED"] },
     });
     const addon = records.find((r) => r.kind === "addon" && r.args.addonName === "external-dns")!;
     expect(addon.args.addonName).toBe("external-dns");
     expect(addon.args.addonVersion).toBe("v1.0.0-eksbuild.1");
     expect(addon.args.podIdentityAssociations[0].roleArn).toBe("role-arn");
     expect(addon.args.podIdentityAssociations[0].serviceAccount).toBe("external-dns");
-    expect(JSON.parse(addon.args.configurationValues)).toMatchObject({
+    expect(JSON.parse(unwrap(addon.args.configurationValues))).toMatchObject({
       domainFilters: ["example.com"],
+      zoneIdFilters: ["Z123"],
       registry: "txt",
       txtOwnerId: "prod-cluster",
       sources: ["ingress", "service", "traefik-proxy"],
@@ -111,10 +113,13 @@ describe("EKS ExternalDNS add-on", () => {
       domainFilters: ["example.com"],
     });
     const policy = records.find((r) => r.kind === "policy");
+    const addon = records.find((r) => r.kind === "addon" && r.args.addonName === "external-dns");
     expect(policy).toBeDefined();
     if (!policy) throw new Error("Route 53 IAM policy was not created");
     expect(JSON.parse(unwrap(policy.args.policy)).Statement[0].Resource).toEqual([
       "arn:aws:route53:::hostedzone/Z-ONE",
     ]);
+    if (!addon) throw new Error("ExternalDNS add-on was not created");
+    expect(JSON.parse(unwrap(addon.args.configurationValues)).zoneIdFilters).toEqual(["Z-ONE"]);
   });
 });

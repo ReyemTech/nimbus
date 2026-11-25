@@ -32,6 +32,8 @@ let createdIamPolicies: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdIamAccessKeys: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdPodIdentityAssociations: Array<{ name: string; args: any; opts: any; resource: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdDaemonSets: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdDeployments: Array<{ name: string; args: any }>;
@@ -55,8 +57,13 @@ vi.mock("@pulumi/aws", () => {
       this.name = mockOutput(name);
     }
   };
-  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
-  const mockIdentityAssociation = class {};
+  const mockIdentityAssociation = class {
+    associationId = mockOutput("association-id");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, args: any, opts: any) {
+      createdPodIdentityAssociations.push({ name, args, opts, resource: this });
+    }
+  };
   const mockIamRole = class {
     arn = mockOutput("arn:aws:iam::123456789012:role/external-dns");
     id = mockOutput("external-dns");
@@ -259,6 +266,7 @@ beforeEach(() => {
   createdIamUsers = [];
   createdIamPolicies = [];
   createdIamAccessKeys = [];
+  createdPodIdentityAssociations = [];
   createdDaemonSets = [];
   createdDeployments = [];
   createdConfigMaps = [];
@@ -582,6 +590,57 @@ describe("platform stack — wildcard cert and TLSStore", () => {
 });
 
 describe("platform stack — Route53 IAM auto-provisioning", () => {
+  it("uses the effective cert-manager service account and rolls pods after Pod Identity is ready", () => {
+    const cluster = {
+      ...makeCluster("test"),
+      nativeResource: new aws.eks.Cluster("test", {
+        roleArn: "test-role",
+        vpcConfig: { subnetIds: [] },
+      }),
+    } as unknown as ICluster;
+    createPlatformStack("test", {
+      cluster,
+      domain: "example.com",
+      traefik: { enabled: false },
+      certManager: {
+        values: { serviceAccount: { name: "cert-manager-custom" } },
+      },
+      externalDns: { dnsProvider: "route53", hostedZoneIds: ["Z123"] },
+    });
+    const association = createdPodIdentityAssociations.find(
+      (item) => item.args.namespace === "cert-manager"
+    );
+    const release = createdReleases.find((item) => item.name === "test-cert-manager");
+    expect(association?.args.serviceAccount).toBe("cert-manager-custom");
+    expect(release?.args.values.serviceAccount.name).toBe("cert-manager-custom");
+    expect(release?.opts.dependsOn).toContain(association?.resource);
+    expect(release?.args.values.podAnnotations["nimbus.dev/route53-pod-identity"]).toBe(
+      association?.resource.associationId
+    );
+  });
+
+  it("uses the stable default cert-manager service account for Route 53 Pod Identity", () => {
+    const cluster = {
+      ...makeCluster("test"),
+      nativeResource: new aws.eks.Cluster("test", {
+        roleArn: "test-role",
+        vpcConfig: { subnetIds: [] },
+      }),
+    } as unknown as ICluster;
+    createPlatformStack("test", {
+      cluster,
+      domain: "example.com",
+      traefik: { enabled: false },
+      externalDns: { dnsProvider: "route53", hostedZoneIds: ["Z123"] },
+    });
+    const association = createdPodIdentityAssociations.find(
+      (item) => item.args.namespace === "cert-manager"
+    );
+    const release = createdReleases.find((item) => item.name === "test-cert-manager");
+    expect(association?.args.serviceAccount).toBe("cert-manager");
+    expect(release?.args.values.serviceAccount.name).toBe("cert-manager");
+  });
+
   it("uses native EKS resources without static AWS users, access keys, or Kubernetes Secrets", () => {
     const cluster = {
       ...makeCluster("test"),

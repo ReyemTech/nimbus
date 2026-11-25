@@ -8,7 +8,7 @@
  */
 
 export { deployTraefik } from "./traefik";
-export { deployCertManager } from "./cert-manager";
+export { deployCertManager, certManagerServiceAccountName } from "./cert-manager";
 export { deployExternalDns } from "./external-dns";
 export { deployEksExternalDns } from "./external-dns-eks";
 export { deployArgocd } from "./argocd";

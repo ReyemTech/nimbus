@@ -84,8 +84,9 @@ Deploys Helm-based platform components to one or more clusters.
 | External Secrets | Disabled      | `external-secrets/external-secrets` v0.14.4 |
 
 For AWS EKS with Route 53, `externalDns` instead provisions the EKS community
-add-on. Configure `hostedZoneIds` to scope its Pod Identity role; if omitted,
-Nimbus resolves each `domainFilters` value to a hosted zone. Set `addonVersion`
+add-on. Configure `hostedZoneIds` to scope both its Pod Identity permissions
+and ExternalDNS zone discovery; if omitted, Nimbus resolves each `domainFilters`
+value to a hosted zone. Set `addonVersion`
 for the EKS add-on (`version` remains the Helm chart version for other
 clusters). `values` supplies add-on configuration such as `txtOwnerId`,
 `sources`, `registry`, and `policy`. EKS does not receive static AWS credentials.

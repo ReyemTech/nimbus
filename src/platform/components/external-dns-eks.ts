@@ -8,7 +8,8 @@ export function deployEksExternalDns(
   name: string,
   cluster: ICluster,
   config: IExternalDnsConfig,
-  awsProvider?: pulumi.ProviderResource
+  awsProvider?: pulumi.ProviderResource,
+  certManagerServiceAccountName: pulumi.Input<string> = "cert-manager"
 ): {
   addon: aws.eks.Addon;
   certManagerIdentity: aws.eks.PodIdentityAssociation;
@@ -23,7 +24,7 @@ export function deployEksExternalDns(
       { clusterName: eks.name, addonName: "eks-pod-identity-agent" },
       { ...opts, dependsOn: [eks] }
     );
-  const zones = resolveZoneArns(name, config, opts);
+  const zones = resolveZones(name, config, opts);
   const role = new aws.iam.Role(
     `${name}-external-dns-role`,
     {
@@ -52,14 +53,14 @@ export function deployEksExternalDns(
     `${name}-external-dns-policy`,
     {
       role: role.id,
-      policy: pulumi.all([zones]).apply(([zoneArns]) =>
+      policy: pulumi.output(zones).apply((resolvedZones) =>
         JSON.stringify({
           Version: "2012-10-17",
           Statement: [
             {
               Effect: "Allow",
               Action: ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"],
-              Resource: zoneArns,
+              Resource: resolvedZones.arns,
             },
             {
               Effect: "Allow",
@@ -77,20 +78,23 @@ export function deployEksExternalDns(
     },
     opts
   );
-  const addonConfig = {
-    domainFilters: config.domainFilters ?? [],
-    policy: "sync",
-    sources: ["ingress", "service", "traefik-proxy"],
-    registry: "txt",
-    ...config.values,
-  };
   const addon = new aws.eks.Addon(
     `${name}-external-dns-addon`,
     {
       clusterName: eks.name,
       addonName: "external-dns",
       addonVersion: config.addonVersion,
-      configurationValues: JSON.stringify(addonConfig),
+      configurationValues: pulumi.output(zones).apply((resolvedZones) =>
+        JSON.stringify({
+          domainFilters: config.domainFilters ?? [],
+          policy: "sync",
+          sources: ["ingress", "service", "traefik-proxy"],
+          registry: "txt",
+          ...config.values,
+          // Keep discovery aligned with the zone-scoped IAM policy.
+          zoneIdFilters: resolvedZones.ids,
+        })
+      ),
       podIdentityAssociations: [{ roleArn: role.arn, serviceAccount: "external-dns" }],
       resolveConflictsOnCreate: "OVERWRITE",
       resolveConflictsOnUpdate: "OVERWRITE",
@@ -105,7 +109,7 @@ export function deployEksExternalDns(
     {
       clusterName: eks.name,
       namespace: "cert-manager",
-      serviceAccount: "cert-manager",
+      serviceAccount: certManagerServiceAccountName,
       roleArn: role.arn,
     },
     { ...opts, dependsOn: [eks, podIdentityAgent, policy] }
@@ -113,21 +117,23 @@ export function deployEksExternalDns(
   return { addon, certManagerIdentity, podIdentityAgent };
 }
 
-function resolveZoneArns(
+interface IResolvedRoute53Zones {
+  readonly ids: string[];
+  readonly arns: string[];
+}
+
+function resolveZones(
   name: string,
   config: IExternalDnsConfig,
   opts: pulumi.InvokeOutputOptions
-): pulumi.Output<string[]> {
+): pulumi.Output<IResolvedRoute53Zones> {
   if (config.hostedZoneIds?.length) {
-    return pulumi
-      .all([...config.hostedZoneIds])
-      .apply((ids) =>
-        aws
-          .getPartitionOutput({}, opts)
-          .apply((partition) =>
-            ids.map((id) => `arn:${partition.partition}:route53:::hostedzone/${id}`)
-          )
-      );
+    return pulumi.all([...config.hostedZoneIds]).apply((ids) =>
+      aws.getPartitionOutput({}, opts).apply((partition) => ({
+        ids,
+        arns: ids.map((id) => `arn:${partition.partition}:route53:::hostedzone/${id}`),
+      }))
+    );
   }
   const filters = config.domainFilters ?? [];
   if (!filters.length)
@@ -144,6 +150,10 @@ function resolveZoneArns(
         throw new Error(
           `${name}: unable to resolve all Route 53 zones; set externalDns.hostedZoneIds explicitly`
         );
-      return zones.map((zone) => `arn:${partition.partition}:route53:::hostedzone/${zone.zoneId}`);
+      const ids = zones.map((zone) => zone.zoneId);
+      return {
+        ids,
+        arns: ids.map((id) => `arn:${partition.partition}:route53:::hostedzone/${id}`),
+      };
     });
 }

@@ -18,6 +18,7 @@ import { ensureNamespace } from "../utils/ensure-namespace";
 import {
   deployTraefik,
   deployCertManager,
+  certManagerServiceAccountName,
   deployExternalDns,
   deployEksExternalDns,
   deployArgocd,
@@ -106,30 +107,40 @@ function deployToCluster(
     );
   }
 
+  let eksDnsResources: ReturnType<typeof deployEksExternalDns> | undefined;
+  if (
+    config.externalDns?.enabled !== false &&
+    config.externalDns?.dnsProvider === "route53" &&
+    cluster.nativeResource instanceof aws.eks.Cluster
+  ) {
+    eksDnsResources = deployEksExternalDns(
+      name,
+      cluster,
+      config.externalDns,
+      config.externalDns.awsProvider as aws.Provider | undefined,
+      certManagerServiceAccountName(config.certManager)
+    );
+    providerResources["external-dns"] = eksDnsResources.addon;
+    providerResources["cert-manager-route53-identity"] = eksDnsResources.certManagerIdentity;
+    providerResources["pod-identity-agent"] = eksDnsResources.podIdentityAgent;
+  }
+
   // 2. cert-manager (TLS certificates) — enabled by default
   if (config.certManager?.enabled !== false) {
     components["cert-manager"] = deployCertManager(
       name,
       config.certManager,
       provider,
-      DEFAULT_VERSIONS.certManager
+      DEFAULT_VERSIONS.certManager,
+      eksDnsResources?.certManagerIdentity,
+      eksDnsResources?.certManagerIdentity.associationId
     );
   }
 
   // 3. External DNS — enabled if configured
   if (config.externalDns && config.externalDns.enabled !== false) {
     const dnsConfig = config.externalDns;
-    const isEks = cluster.nativeResource instanceof aws.eks.Cluster;
-    if (isEks && dnsConfig.dnsProvider === "route53") {
-      const eksDns = deployEksExternalDns(
-        name,
-        cluster,
-        dnsConfig,
-        dnsConfig.awsProvider as aws.Provider | undefined
-      );
-      providerResources["external-dns"] = eksDns.addon;
-      providerResources["cert-manager-route53-identity"] = eksDns.certManagerIdentity;
-      providerResources["pod-identity-agent"] = eksDns.podIdentityAgent;
+    if (eksDnsResources) {
       if (components["cert-manager"]) {
         new k8s.apiextensions.CustomResource(
           `${name}-clusterissuer-dns`,
@@ -146,7 +157,10 @@ function deployToCluster(
               },
             },
           },
-          { provider, dependsOn: [components["cert-manager"], eksDns.certManagerIdentity] }
+          {
+            provider,
+            dependsOn: [components["cert-manager"], eksDnsResources.certManagerIdentity],
+          }
         );
       }
     } else {

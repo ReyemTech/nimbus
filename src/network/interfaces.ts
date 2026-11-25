@@ -85,6 +85,8 @@ export interface INetwork {
   readonly privateSubnetIds: pulumi.Output<ReadonlyArray<string>>;
   /** NAT gateway ID, if a NAT strategy was applied. */
   readonly natGatewayId?: pulumi.Output<string>;
+  /** Resolves only after the NAT default route is active; private subnet outputs depend on it. */
+  readonly natReady?: pulumi.Output<boolean>;
 
   /** Escape hatch: cloud-native network resource. */
   readonly nativeResource: pulumi.Resource;

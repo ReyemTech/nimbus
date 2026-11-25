@@ -17,7 +17,7 @@ Creates a VPC (AWS) or VNet (Azure) with subnets and NAT.
 | `name`                   | `string`           | Resource name prefix                                      |
 | `config.cloud`           | `CloudArg`         | `"aws"`, `"azure"`, or `["aws", "azure"]` for multi-cloud |
 | `config.cidr`            | `string`           | CIDR block (auto-offset for multi-cloud)                  |
-| `config.natStrategy`     | `NatStrategy`      | `"managed"`, `"fck-nat"`, or `"none"`                     |
+| `config.natStrategy`     | `NatStrategy`      | `"managed"`, `"fck-nat"`, or `"none"`. On AWS, private subnet outputs wait for the default route to report active. |
 | `config.providerOptions` | `IProviderOptions` | Provider-specific options (see below)                     |
 
 Returns: `Promise<INetwork>` (single cloud) or `Promise<INetwork[]>` (multi-cloud)
@@ -443,9 +443,16 @@ aws: ... }})`.
 | Option | Description |
 | --- | --- |
 | `publicAccessCidrs` | CIDRs allowed to reach the public API endpoint. Applies when public endpoint access is enabled. |
-| `clusterAdminRoleArn` | IAM role ARN granted `AmazonEKSClusterAdminPolicy` through an EKS access entry. |
+| `clusterAdminRoleArn` | IAM principal ARN (role or user) granted `AmazonEKSClusterAdminPolicy` through an EKS access entry. |
+| `kubernetesProviderRoleArn` | Optional IAM role assumed by the Kubernetes provider's `aws eks get-token` command. Use it when the provider must authenticate as a role different from the deployment credentials; that role must have EKS access. |
 | `nodeGroupRootDisk` | Enables an encrypted gp3 root disk launch template for managed node groups. `sizeGiB` defaults to 20 and `deleteOnTermination` defaults to `true`. Omit the option to preserve EKS defaults. |
+| `nodeGroupAmiType` | AMI family for managed node groups, such as `AL2023_ARM_64_STANDARD`. |
+| `nodeGroupInstanceTags` | EC2 instance tags propagated through managed node-group launch-template `tagSpecifications`. |
 | `ebsCsiDriver` | Installs the EBS CSI add-on and Pod Identity agent, with a dedicated role attached to `AmazonEBSCSIDriverPolicyV2`. Defaults to `false`. |
+| `authenticationMode` / `bootstrapClusterCreatorAdminPermissions` | EKS access configuration. Defaults preserve Nimbus's existing `API_AND_CONFIG_MAP` mode and AWS's creator-admin behavior. When creator admin is disabled, use API authentication and provide `clusterAdminRoleArn` so Nimbus can grant access before Kubernetes resources run. |
+| `upgradePolicy` | Sets `supportType` to `STANDARD` or `EXTENDED`. Omitted preserves AWS's current `EXTENDED` default. `STANDARD` avoids extended-support charges but AWS automatically upgrades the control plane at end of standard support; `EXTENDED` keeps the version longer at additional cost. See [AWS upgrade policy](https://docs.aws.amazon.com/eks/latest/userguide/view-upgrade-policy.html). |
+
+On AWS networks, `privateSubnetIds` resolves after route-table associations and the NAT default route report `active`. The fck-nat Auto Scaling Group waits up to 15 minutes for one healthy in-service instance before creating the private default route. If the route remains `blackhole`, the network output fails and dependent node groups are not created. Use `natStrategy: "managed"` for AWS-managed NAT gateways.
 
 The EBS CSI option is not supported with EKS Auto Mode, which has built-in block
 storage. Nimbus does not create or change a StorageClass; create one with

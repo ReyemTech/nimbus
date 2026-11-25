@@ -57,12 +57,18 @@ const cluster = createCluster(
   "prod",
   {
     cloud: "aws",
-    nodePools: [{ name: "workers", instanceType: "m7i.large", minNodes: 2, maxNodes: 5 }],
+    nodePools: [{ name: "workers", instanceType: "t4g.large", minNodes: 2, maxNodes: 5 }],
     providerOptions: {
       aws: {
         endpointAccess: "both",
         publicAccessCidrs: config.requireObject<string[]>("eksPublicAccessCidrs"),
         clusterAdminRoleArn: config.require("eksAdminRoleArn"),
+        kubernetesProviderRoleArn: config.require("eksAdminRoleArn"),
+        authenticationMode: "API",
+        bootstrapClusterCreatorAdminPermissions: false,
+        upgradePolicy: { supportType: "STANDARD" },
+        nodeGroupAmiType: "AL2023_ARM_64_STANDARD",
+        nodeGroupInstanceTags: { Name: "reyemtech-public-arm64" },
         nodeGroupRootDisk: { sizeGiB: 80, deleteOnTermination: true },
         ebsCsiDriver: true,
       },
@@ -78,9 +84,14 @@ creates the IAM association for `ebs-csi-controller-sa`. Create a Kubernetes
 StorageClass with `provisioner: ebs.csi.aws.com` and `parameters.type: gp3` for
 gp3 PVCs; Nimbus does not change your cluster's default StorageClass.
 
+`upgradePolicy: { supportType: "STANDARD" }` avoids extended-support charges,
+but AWS automatically upgrades the control plane at the end of standard support.
+Choose `EXTENDED` if you need to stay on a version longer and accept the additional
+cost; review the [EKS upgrade policy](https://docs.aws.amazon.com/eks/latest/userguide/view-upgrade-policy.html).
+
 EKS Auto Mode already provides block storage and does not use the standard EBS
-CSI add-on. Nimbus rejects `ebsCsiDriver` and `nodeGroupRootDisk` when Auto Mode
-is enabled.
+CSI add-on. Nimbus rejects `ebsCsiDriver`, `nodeGroupRootDisk`, `nodeGroupAmiType`,
+and `nodeGroupInstanceTags` when Auto Mode is enabled.
 
 ### Shared private Traefik ALB for multiple app hostnames
 

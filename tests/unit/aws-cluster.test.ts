@@ -13,8 +13,10 @@ const mockPulumi = vi.hoisted(() => {
   });
 
   const allCalls: ReadonlyArray<unknown>[] = [];
+  const clusterArn = { value: "arn:aws:eks:us-east-1:123456789012:cluster/prod" };
   return {
     allCalls,
+    clusterArn,
     output,
     all: (values: ReadonlyArray<unknown>) => {
       allCalls.push(values);
@@ -124,7 +126,7 @@ vi.mock("@pulumi/aws", () => {
       Cluster: class {
         readonly kind = "eks.Cluster";
         readonly name = output("prod");
-        readonly arn = output("arn:aws:eks:us-east-1:123456789012:cluster/prod");
+        readonly arn = output(mockPulumi.clusterArn.value);
         readonly endpoint = output("https://eks.example.com");
         readonly certificateAuthority = output({ data: "mock-ca" });
         readonly version = output("1.32");
@@ -246,6 +248,7 @@ const resourcesOf = (kind: string) => constructed.resources.filter((item) => ite
 beforeEach(() => {
   constructed.resources.length = 0;
   mockPulumi.allCalls.length = 0;
+  mockPulumi.clusterArn.value = "arn:aws:eks:us-east-1:123456789012:cluster/prod";
 });
 
 describe("createEksCluster options", () => {
@@ -760,6 +763,44 @@ describe("createEksCluster options", () => {
     ).toHaveProperty("detail-type");
     expect(resourcesOf("cloudwatch.EventTarget")).toHaveLength(5);
     expect(JSON.stringify(karpenterPolicy?.args.policy)).toContain("sqs:ReceiveMessage");
+  });
+
+  it("uses the deployed cluster region for autoscaler configuration and IAM", () => {
+    mockPulumi.clusterArn.value = "arn:aws:eks:ca-central-1:123456789012:cluster/prod";
+    create({ autoscalerControllerNodePoolName: "steady" }, network, {
+      ...config,
+      nodePools: [
+        {
+          name: "steady",
+          instanceType: "m7i.large",
+          minNodes: 1,
+          maxNodes: 2,
+          scaling: { mode: "cluster-autoscaler" },
+        },
+        {
+          name: "burst",
+          scaling: { mode: "karpenter", instanceTypes: ["m7i.large"] },
+        },
+      ],
+    });
+
+    const clusterAutoscaler = resourcesOf("k8s.Chart").find(
+      ({ name }) => name === "prod-cluster-autoscaler"
+    );
+    expect(
+      (clusterAutoscaler?.args.values as { awsRegion?: { value: string } }).awsRegion?.value
+    ).toBe("ca-central-1");
+    const karpenter = resourcesOf("k8s.Release").find(({ name }) => name === "prod-karpenter");
+    expect(
+      (karpenter?.args.values as { controller: { env: Array<{ value: { value: string } }> } })
+        .controller.env[0]?.value.value
+    ).toBe("ca-central-1");
+    const karpenterPolicy = resourcesOf("iam.RolePolicy").find(({ name }) =>
+      name.includes("karpenter-controller-policy")
+    );
+    expect((karpenterPolicy?.args.policy as { value: string }).value).toContain(
+      "arn:aws:ec2:ca-central-1:"
+    );
   });
 
   it("supports Karpenter-only capacity and disables Spot interruption resources when requested", () => {

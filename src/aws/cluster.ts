@@ -455,7 +455,6 @@ export function createEksCluster(
     options ?? {},
     nodeGroupsByPool,
     podIdentityAgent,
-    target.region ?? network.cloud.region ?? "us-east-1",
     cluster.version,
     tags
   );

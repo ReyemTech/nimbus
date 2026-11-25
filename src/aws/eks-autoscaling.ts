@@ -69,9 +69,15 @@ export function validateEksNodePoolScaling(config: IClusterConfig, options: IEks
     const stable = config.nodePools.find(
       (pool) => pool.name === options.autoscalerControllerNodePoolName
     );
-    if (!stable || !isManagedPool(stable) || stable.minNodes < 1 || stable.spot === true) {
+    const stableGuaranteedNodes =
+      stable && isManagedPool(stable)
+        ? stable.scaling?.mode === "fixed"
+          ? (stable.desiredNodes ?? stable.minNodes)
+          : stable.minNodes
+        : 0;
+    if (!stable || !isManagedPool(stable) || stableGuaranteedNodes < 1 || stable.spot === true) {
       throw new Error(
-        "autoscalerControllerNodePoolName must name an on-demand managed node pool with minNodes >= 1."
+        "autoscalerControllerNodePoolName must name an on-demand managed node pool with at least one guaranteed node."
       );
     }
   }
@@ -87,11 +93,11 @@ export function createEksAutoscaling(
   options: IEksOptions,
   nodeGroupsByPool: ReadonlyMap<string, aws.eks.NodeGroup>,
   podIdentityAgent: aws.eks.Addon | undefined,
-  region: string,
   kubernetesVersion: pulumi.Input<string>,
   tags: Readonly<Record<string, string>>
 ): pulumi.Resource[] {
   const resources: pulumi.Resource[] = [];
+  const clusterRegion = cluster.arn.apply((arn) => arn.split(":")[3] ?? "us-east-1");
   const caPools = pools.filter((pool) => pool.scaling?.mode === "cluster-autoscaler");
   const karpenterPools = pools.filter(isKarpenterPool);
   const stablePool = options.autoscalerControllerNodePoolName;
@@ -195,7 +201,7 @@ export function createEksAutoscaling(
             clusterName: name,
             tags: [`nimbus.dev/cluster-autoscaler/${name}`],
           },
-          awsRegion: region,
+          awsRegion: clusterRegion,
           rbac: { serviceAccount: { create: true, name: "cluster-autoscaler" } },
           nodeSelector: stableSelector.matchLabels,
           extraArgs: {
@@ -300,7 +306,6 @@ export function createEksAutoscaling(
             workerRoleArn,
             queueArn,
             name,
-            region,
             interruptionEnabled
           )
         ),
@@ -353,7 +358,7 @@ export function createEksAutoscaling(
           serviceAccount: { create: true, name: "karpenter" },
           nodeSelector: stableSelector.matchLabels,
           controller: {
-            env: [{ name: "AWS_REGION", value: region }],
+            env: [{ name: "AWS_REGION", value: clusterRegion }],
           },
           replicas: controllerReplicas,
         },
@@ -517,10 +522,9 @@ function buildKarpenterControllerPolicy(
   workerRoleArn: string,
   queueArn: string,
   clusterName: string,
-  region: string,
   interruptionEnabled: boolean
 ): string {
-  const [, partition = "aws", , , account = "*"] = clusterArn.split(":");
+  const [, partition = "aws", , region = "us-east-1", account = "*"] = clusterArn.split(":");
   const ec2Arn = `arn:${partition}:ec2:${region}:`;
   const instanceProfileArn = `arn:${partition}:iam::${account}:instance-profile/*`;
   const nodePoolTag = "karpenter.sh/nodepool";

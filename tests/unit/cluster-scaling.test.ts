@@ -87,6 +87,19 @@ describe("EKS node pool scaling validation", () => {
     ).toThrow(/on-demand/);
   });
 
+  it("rejects a fixed controller pool whose effective desired count is zero", () => {
+    const config = {
+      ...base,
+      nodePools: [
+        { ...legacyPool, desiredNodes: 0, scaling: { mode: "fixed" } },
+        { name: "burst", scaling: { mode: "karpenter", instanceTypes: ["m7i.large"] } },
+      ],
+    } satisfies IClusterConfig;
+    expect(() =>
+      validateEksNodePoolScaling(config, { autoscalerControllerNodePoolName: "steady" })
+    ).toThrow(/autoscalerControllerNodePoolName/);
+  });
+
   it("rejects duplicate names and reserved label collisions", () => {
     expect(() =>
       validateEksNodePoolScaling(

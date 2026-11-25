@@ -1,3 +1,15 @@
+# [3.11.0](https://github.com/ReyemTech/nimbus/compare/v3.10.1...v3.11.0) (2026-11-25)
+
+
+### Bug Fixes
+
+* align EKS DNS Pod Identity configuration ([3ba2d5f](https://github.com/ReyemTech/nimbus/commit/3ba2d5fde6458fec08f0ed34629129e050562245))
+
+
+### Features
+
+* **eks:** add Route53 ExternalDNS community add-on ([5d814bb](https://github.com/ReyemTech/nimbus/commit/5d814bb31cfc9c9338ab83f8122da306a02c36d0))
+
 ## [3.10.1](https://github.com/ReyemTech/nimbus/compare/v3.10.0...v3.10.1) (2026-11-25)
 
 

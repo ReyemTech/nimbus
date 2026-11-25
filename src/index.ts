@@ -63,6 +63,8 @@ export type {
 export type {
   INodeTaint,
   INodePool,
+  IManagedNodePool,
+  IKarpenterNodePool,
   IClusterConfig,
   ICluster,
   IEksClusterExtensions,

@@ -13,8 +13,10 @@ import * as pulumi from "@pulumi/pulumi";
 import * as spot from "@reyemtech/pulumi-rackspace-spot";
 import { parse as parseYaml } from "yaml";
 import type { ICluster, IClusterConfig } from "../cluster";
+import type { IManagedNodePool } from "../cluster";
 import type { IRackspaceProviderOptions } from "../factories/types";
 import { resolveCloudTarget } from "../types";
+import { validateUnsupportedPoolScaling } from "../cluster/scaling";
 
 /**
  * Create a Rackspace Spot cluster via the native Pulumi provider.
@@ -40,6 +42,7 @@ export function createRackspaceSpotCluster(
 ): ICluster {
   const cloud = Array.isArray(config.cloud) ? (config.cloud[0] ?? "rackspace") : config.cloud;
   const target = resolveCloudTarget(cloud);
+  validateUnsupportedPoolScaling("Rackspace Spot", config);
   if (options.kubeconfig !== undefined && options.useInClusterConfig) {
     throw new Error('Set either "kubeconfig" or "useInClusterConfig", not both.');
   }
@@ -87,25 +90,33 @@ export function createRackspaceSpotCluster(
 
   // Spot node pools
   for (const np of config.nodePools) {
-    const bidPrice = np.bidPrice ?? options.defaultBidPrice;
+    const managedPool = np as IManagedNodePool;
+    const bidPrice = managedPool.bidPrice ?? options.defaultBidPrice;
     if (bidPrice === undefined) {
       throw new Error(
-        `Node pool "${np.name}" has no bidPrice and no defaultBidPrice was set in provider options.`
+        `Node pool "${managedPool.name}" has no bidPrice and no defaultBidPrice was set in provider options.`
       );
     }
 
-    const hasAutoscaling = np.minNodes !== np.maxNodes;
-    const importId = options.importIds?.nodePoolIds?.[np.name];
+    const fixedCount =
+      managedPool.scaling?.mode === "fixed"
+        ? (managedPool.desiredNodes ?? managedPool.minNodes)
+        : undefined;
+    const hasAutoscaling =
+      fixedCount === undefined && managedPool.minNodes !== managedPool.maxNodes;
+    const importId = options.importIds?.nodePoolIds?.[managedPool.name];
 
     new spot.SpotNodePool(
-      `${name}-np-${np.name}`,
+      `${name}-np-${managedPool.name}`,
       {
         cloudspaceName: options.cloudspaceName,
-        serverClass: np.instanceType,
+        serverClass: managedPool.instanceType,
         bidPrice,
-        desiredCount: np.desiredNodes ?? np.minNodes,
-        autoscaling: hasAutoscaling ? { minNodes: np.minNodes, maxNodes: np.maxNodes } : undefined,
-        labels: np.labels,
+        desiredCount: fixedCount ?? managedPool.desiredNodes ?? managedPool.minNodes,
+        autoscaling: hasAutoscaling
+          ? { minNodes: managedPool.minNodes, maxNodes: managedPool.maxNodes }
+          : undefined,
+        labels: managedPool.labels,
       },
       importId ? { import: importId } : undefined
     );

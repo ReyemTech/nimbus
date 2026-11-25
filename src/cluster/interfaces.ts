@@ -38,7 +38,7 @@ export interface INodeTaint {
  * };
  * ```
  */
-export interface INodePool {
+export interface IManagedNodePool {
   /** Node pool name (e.g., "workers", "system"). */
   readonly name: string;
   /** Compute instance type (e.g., "c6a.large", "Standard_D2s_v3"). */
@@ -59,7 +59,27 @@ export interface INodePool {
   readonly mode?: "system" | "user";
   /** Max bid price in USD for spot/preemptible instances. Used by Rackspace Spot, optional for AWS Spot. */
   readonly bidPrice?: number;
+  /** Explicit EKS capacity ownership. Omitted preserves managed-pool defaults. */
+  readonly scaling?: { readonly mode: "fixed" | "cluster-autoscaler" };
 }
+
+/** Karpenter-provisioned EKS capacity, without managed-node-group counts. */
+export interface IKarpenterNodePool {
+  readonly name: string;
+  readonly labels?: Readonly<Record<string, string>>;
+  readonly taints?: ReadonlyArray<INodeTaint>;
+  readonly mode?: "system" | "user";
+  readonly bidPrice?: number;
+  readonly scaling: {
+    readonly mode: "karpenter";
+    readonly instanceTypes: ReadonlyArray<string>;
+    readonly capacityTypes?: ReadonlyArray<"spot" | "on-demand">;
+    readonly availabilityZones?: ReadonlyArray<string>;
+    readonly limits?: { readonly cpu?: string; readonly memory?: string };
+  };
+}
+
+export type INodePool = IManagedNodePool | IKarpenterNodePool;
 
 /**
  * Cluster configuration input.

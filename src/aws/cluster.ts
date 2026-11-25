@@ -7,9 +7,24 @@
 import * as aws from "@pulumi/aws";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
-import type { ICluster, IClusterConfig } from "../cluster";
+import type { ICluster, IClusterConfig, IManagedNodePool } from "../cluster";
 import type { INetwork } from "../network";
 import { resolveCloudTarget } from "../types";
+import {
+  createEksAutoscaling,
+  isKarpenterPool,
+  validateEksNodePoolScaling,
+} from "./eks-autoscaling";
+
+/** EKS community Metrics Server add-on configuration. */
+export interface IEksMetricsServerOptions {
+  /** Create the add-on. Defaults to `true` when an options object is provided. */
+  readonly enabled?: boolean;
+  /** EKS add-on version. AWS validates compatibility with the cluster version. */
+  readonly addonVersion?: pulumi.Input<string>;
+  /** JSON add-on configuration values. */
+  readonly configurationValues?: pulumi.Input<string>;
+}
 
 /** AWS-specific EKS options beyond the base config. */
 export interface IEksOptions {
@@ -44,6 +59,22 @@ export interface IEksOptions {
   readonly nodeGroupInstanceTags?: Readonly<Record<string, string>>;
   /** Managed node-group AMI family, for example AL2023_ARM_64_STANDARD. */
   readonly nodeGroupAmiType?: pulumi.Input<string>;
+  /** Opt in to the EKS community Metrics Server add-on. */
+  readonly metricsServer?: boolean | IEksMetricsServerOptions;
+  /** Shared Cluster Autoscaler Helm chart options; enabled by CA-managed pools. */
+  readonly clusterAutoscaler?: {
+    readonly version?: pulumi.Input<string>;
+    /** Existing cluster OIDC provider ARN; Nimbus creates one when omitted. */
+    readonly oidcProviderArn?: pulumi.Input<string>;
+  };
+  /** Shared Karpenter Helm chart and interruption handling options. */
+  readonly karpenter?: {
+    readonly version?: pulumi.Input<string>;
+    readonly namespace?: string;
+    readonly interruptionHandling?: boolean;
+  };
+  /** Stable on-demand managed pool that hosts autoscaler controller pods. */
+  readonly autoscalerControllerNodePoolName?: string;
 }
 
 const DEFAULT_ADDONS = ["vpc-cni", "coredns", "kube-proxy"];
@@ -77,6 +108,11 @@ export function createEksCluster(
   const endpointAccess = options?.endpointAccess ?? "both";
   const authenticationMode = options?.authenticationMode ?? "API_AND_CONFIG_MAP";
   const ebsCsiDriver = options?.ebsCsiDriver === true || addons.includes("aws-ebs-csi-driver");
+
+  validateEksNodePoolScaling(config, { ...options, autoMode });
+  const controllerPlacementEnabled = config.nodePools.some(
+    (pool) => pool.scaling?.mode === "cluster-autoscaler" || isKarpenterPool(pool)
+  );
 
   if (autoMode && options?.nodeGroupRootDisk) {
     throw new Error("nodeGroupRootDisk applies only to EKS managed node groups, not Auto Mode.");
@@ -158,13 +194,19 @@ export function createEksCluster(
 
   // Node pools — Auto Mode delegates to EKS, standard uses managed node groups
   const nodeGroups: aws.eks.NodeGroup[] = [];
+  const nodeGroupsByPool = new Map<string, aws.eks.NodeGroup>();
 
   if (!autoMode) {
     for (const np of config.nodePools) {
-      const nodeRole = createNodeRole(`${name}-${np.name}`, tags);
+      if (isKarpenterPool(np)) {
+        continue;
+      }
+      const managedPool = np as IManagedNodePool;
+      const desiredNodes = managedPool.desiredNodes ?? managedPool.minNodes;
+      const nodeRole = createNodeRole(`${name}-${managedPool.name}`, tags);
       const launchTemplate =
         options?.nodeGroupRootDisk || options?.nodeGroupInstanceTags
-          ? new aws.ec2.LaunchTemplate(`${name}-lt-${np.name}`, {
+          ? new aws.ec2.LaunchTemplate(`${name}-lt-${managedPool.name}`, {
               blockDeviceMappings: options?.nodeGroupRootDisk
                 ? [
                     {
@@ -186,38 +228,54 @@ export function createEksCluster(
               tags: { ...tags, Name: `${name}-${np.name}-launch-template` },
             })
           : undefined;
-      nodeGroups.push(
-        new aws.eks.NodeGroup(
-          `${name}-ng-${np.name}`,
-          {
-            clusterName: cluster.name,
-            nodeGroupName: `${name}-${np.name}`,
-            nodeRoleArn: nodeRole.role.arn,
-            instanceTypes: [np.instanceType],
-            capacityType: np.spot ? "SPOT" : "ON_DEMAND",
-            amiType: options?.nodeGroupAmiType,
-            scalingConfig: {
-              desiredSize: np.desiredNodes ?? np.minNodes,
-              minSize: np.minNodes,
-              maxSize: np.maxNodes,
-            },
-            subnetIds: (network.natReady
-              ? pulumi
-                  .all([network.privateSubnetIds, network.natReady])
-                  .apply(([subnetIds]) => subnetIds)
-              : network.privateSubnetIds) as pulumi.Output<string[]>,
-            labels: np.labels,
-            launchTemplate: launchTemplate
+      const nodeGroup = new aws.eks.NodeGroup(
+        `${name}-ng-${managedPool.name}`,
+        {
+          clusterName: cluster.name,
+          nodeGroupName: `${name}-${managedPool.name}`,
+          nodeRoleArn: nodeRole.role.arn,
+          instanceTypes: [managedPool.instanceType],
+          capacityType: managedPool.spot ? "SPOT" : "ON_DEMAND",
+          amiType: options?.nodeGroupAmiType,
+          scalingConfig:
+            managedPool.scaling?.mode === "fixed"
               ? {
-                  id: launchTemplate.id,
-                  version: launchTemplate.latestVersion.apply((version) => String(version)),
+                  desiredSize: desiredNodes,
+                  minSize: desiredNodes,
+                  maxSize: Math.max(1, desiredNodes),
                 }
-              : undefined,
-            tags: { ...tags, Name: `${name}-${np.name}` },
+              : {
+                  desiredSize: desiredNodes,
+                  minSize: managedPool.minNodes,
+                  maxSize: managedPool.maxNodes,
+                },
+          subnetIds: (network.natReady
+            ? pulumi
+                .all([network.privateSubnetIds, network.natReady])
+                .apply(([subnetIds]) => subnetIds)
+            : network.privateSubnetIds) as pulumi.Output<string[]>,
+          labels: {
+            ...(managedPool.labels ?? {}),
+            ...(controllerPlacementEnabled ? { "nimbus.dev/node-pool": managedPool.name } : {}),
           },
-          { dependsOn: [cluster, ...nodeRole.policyAttachments] }
-        )
+          launchTemplate: launchTemplate
+            ? {
+                id: launchTemplate.id,
+                version: launchTemplate.latestVersion.apply((version) => String(version)),
+              }
+            : undefined,
+          tags: { ...tags, Name: `${name}-${managedPool.name}` },
+        },
+        {
+          dependsOn: [cluster, ...nodeRole.policyAttachments],
+          ignoreChanges:
+            managedPool.scaling?.mode === "cluster-autoscaler"
+              ? ["scalingConfig.desiredSize"]
+              : undefined,
+        }
       );
+      nodeGroups.push(nodeGroup);
+      nodeGroupsByPool.set(managedPool.name, nodeGroup);
     }
   }
 
@@ -245,9 +303,21 @@ export function createEksCluster(
     });
   }
 
+  const needsPodIdentityAgent = config.nodePools.some(isKarpenterPool);
+
   // Add-on names are deduplicated so the explicit add-on list can include the
   // EBS driver without creating a second copy of it or its Pod Identity agent.
   const addonNames = new Set(addons);
+  const metricsServerOption = options?.metricsServer;
+  const metricsServerEnabled =
+    typeof metricsServerOption === "boolean"
+      ? metricsServerOption
+      : (metricsServerOption?.enabled ?? metricsServerOption !== undefined);
+  if (metricsServerEnabled) {
+    addonNames.add("metrics-server");
+  } else if (metricsServerOption !== undefined) {
+    addonNames.delete("metrics-server");
+  }
   if (ebsCsiDriver) {
     addonNames.add("eks-pod-identity-agent");
     // Ensure callers that explicitly listed the CSI add-on still get its
@@ -255,6 +325,7 @@ export function createEksCluster(
     addonNames.delete("aws-ebs-csi-driver");
     addonNames.add("aws-ebs-csi-driver");
   }
+  if (needsPodIdentityAgent) addonNames.add("eks-pod-identity-agent");
 
   // EKS Add-ons
   let podIdentityAgent: aws.eks.Addon | undefined;
@@ -272,6 +343,14 @@ export function createEksCluster(
       {
         clusterName: cluster.name,
         addonName: addon,
+        addonVersion:
+          addon === "metrics-server" && typeof metricsServerOption === "object"
+            ? metricsServerOption.addonVersion
+            : undefined,
+        configurationValues:
+          addon === "metrics-server" && typeof metricsServerOption === "object"
+            ? metricsServerOption.configurationValues
+            : undefined,
         resolveConflictsOnCreate: "OVERWRITE",
         resolveConflictsOnUpdate: "OVERWRITE",
         podIdentityAssociations:
@@ -368,6 +447,19 @@ export function createEksCluster(
         ...(clusterAdminAssociation ? [clusterAdminAssociation] : []),
       ],
     }
+  );
+
+  createEksAutoscaling(
+    name,
+    cluster,
+    provider,
+    network,
+    config.nodePools,
+    options ?? {},
+    nodeGroupsByPool,
+    podIdentityAgent,
+    cluster.version,
+    tags
   );
 
   return {

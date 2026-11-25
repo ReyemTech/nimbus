@@ -193,6 +193,7 @@ export function createAwsNetwork(
       pulumi.all(s.map((sub) => sub.id))
     ) as pulumi.Output<ReadonlyArray<string>>,
     privateSubnetIds: readyPrivateSubnetIds as pulumi.Output<ReadonlyArray<string>>,
+    privateSubnetAvailabilityZones: azNames as pulumi.Output<ReadonlyArray<string>>,
     natGatewayId,
     natReady,
     nativeResource: vpc,

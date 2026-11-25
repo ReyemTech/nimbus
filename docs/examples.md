@@ -129,6 +129,48 @@ EKS Auto Mode already provides block storage and does not use the standard EBS
 CSI add-on. Nimbus rejects `ebsCsiDriver`, `nodeGroupRootDisk`, `nodeGroupAmiType`,
 and `nodeGroupInstanceTags` when Auto Mode is enabled.
 
+### EKS Metrics Server
+
+Metrics Server is an opt-in EKS community add-on, separate from Prometheus. The
+example pins an add-on version and supplies its add-on configuration; omit either
+value to use the EKS default behavior.
+
+```typescript
+import { createCluster } from "@reyemtech/nimbus";
+
+const cluster = createCluster(
+  "prod",
+  {
+    cloud: "aws",
+    nodePools: [{ name: "workers", instanceType: "m7i.large", minNodes: 2, maxNodes: 5 }],
+    providerOptions: {
+      aws: {
+        metricsServer: {
+          enabled: true,
+          addonVersion: "v0.7.2-eksbuild.1",
+          configurationValues: JSON.stringify({ replicas: 2 }),
+        },
+      },
+    },
+  },
+  network
+);
+```
+
+After the add-on has started and completed an initial sampling interval, verify
+the Kubernetes Metrics API and current CPU/memory readings:
+
+```sh
+kubectl get apiservice v1beta1.metrics.k8s.io
+kubectl top nodes
+kubectl top pods -A
+```
+
+`metrics.k8s.io` should be `Available=True`. Metrics Server is EKS-specific and
+provides current resource metrics; it does not replace Prometheus for history,
+dashboards, or alerting. EKS checks explicitly requested add-on versions against
+the cluster Kubernetes version.
+
 ### Shared private Traefik ALB for multiple app hostnames
 
 Use one internal ALB from the existing EKS Traefik ingress. The example reads its ARN and

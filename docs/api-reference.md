@@ -459,6 +459,7 @@ aws: ... }})`.
 | `nodeGroupAmiType` | AMI family for managed node groups, such as `AL2023_ARM_64_STANDARD`. |
 | `nodeGroupInstanceTags` | EC2 instance tags propagated through managed node-group launch-template `tagSpecifications`. |
 | `ebsCsiDriver` | Installs the EBS CSI add-on and Pod Identity agent, with a dedicated role attached to `AmazonEBSCSIDriverPolicyV2`. Defaults to `false`. |
+| `metricsServer` | Opt-in EKS community add-on providing the Kubernetes Resource Metrics API. Set `true` to use the EKS-compatible default, or pass `{ enabled?, addonVersion?, configurationValues? }`. EKS validates version compatibility. This is separate from Prometheus and is EKS-only. |
 | `authenticationMode` / `bootstrapClusterCreatorAdminPermissions` | EKS access configuration. Defaults preserve Nimbus's existing `API_AND_CONFIG_MAP` mode and AWS's creator-admin behavior. When creator admin is disabled, use API authentication and provide `clusterAdminRoleArn` so Nimbus can grant access before Kubernetes resources run. |
 | `upgradePolicy` | Sets `supportType` to `STANDARD` or `EXTENDED`. Omitted preserves AWS's current `EXTENDED` default. `STANDARD` avoids extended-support charges but AWS automatically upgrades the control plane at end of standard support; `EXTENDED` keeps the version longer at additional cost. See [AWS upgrade policy](https://docs.aws.amazon.com/eks/latest/userguide/view-upgrade-policy.html). |
 
@@ -486,6 +487,43 @@ createCluster(
   network
 );
 ```
+
+Enable Metrics Server independently of Prometheus when `kubectl top` or
+resource-metrics consumers need recent CPU and memory readings:
+
+```typescript
+createCluster(
+  "prod",
+  {
+    cloud: "aws",
+    nodePools: [{ name: "workers", instanceType: "m7i.large", minNodes: 2, maxNodes: 5 }],
+    providerOptions: {
+      aws: {
+        metricsServer: {
+          enabled: true,
+          addonVersion: "v0.7.2-eksbuild.1",
+          configurationValues: JSON.stringify({ replicas: 2 }),
+        },
+      },
+    },
+  },
+  network
+);
+```
+
+Omit `addonVersion` to let EKS select its compatible default. After deployment,
+allow Metrics Server an initial sampling interval, then check the API and query
+current usage:
+
+```sh
+kubectl get apiservice v1beta1.metrics.k8s.io
+kubectl top nodes
+kubectl top pods -A
+```
+
+The APIService should report `Available=True`. Metrics Server serves short-lived
+resource metrics for commands such as `kubectl top` and resource-based autoscaling;
+Prometheus remains the separate system for historical monitoring and alerting.
 
 For a complete Pulumi config example, see [EKS with restricted access, encrypted node disks, and EBS CSI](./examples.md#eks-with-restricted-access-encrypted-node-disks-and-ebs-csi).
 

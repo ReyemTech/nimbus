@@ -1,3 +1,16 @@
+# [3.16.0](https://github.com/ReyemTech/nimbus/compare/v3.15.0...v3.16.0) (2026-11-26)
+
+
+### Bug Fixes
+
+* decode ServiceAccount token Secret data ([7a9bd92](https://github.com/ReyemTech/nimbus/commit/7a9bd920b92abdc2511d778d67c8249036c08c90))
+* reject empty namespaced access scopes ([343b279](https://github.com/ReyemTech/nimbus/commit/343b279b1bf8c90c1d7a1c14ebd239c82f80e8e8))
+
+
+### Features
+
+* add portable ServiceAccount cluster access ([25951a6](https://github.com/ReyemTech/nimbus/commit/25951a6d1be818b11546acb5776049d26ebebf8c))
+
 # [3.15.0](https://github.com/ReyemTech/nimbus/compare/v3.14.1...v3.15.0) (2026-11-25)
 
 

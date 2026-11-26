@@ -15,7 +15,7 @@ beforeAll(() => {
     newResource: (args: pulumi.runtime.MockResourceArgs) => {
       const state: Record<string, unknown> = { ...args.inputs };
       if (args.name.endsWith("-access-token")) {
-        state.data = { token: "test-token", "ca.crt": "test-ca" };
+        state.data = { token: Buffer.from("test-token").toString("base64"), "ca.crt": "test-ca" };
       }
       return { id: `${args.name}-id`, state };
     },

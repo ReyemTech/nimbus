@@ -105,6 +105,12 @@ export function createServiceAccountAccess(
           `ServiceAccount token Secret ${namespace}/${name}-token has no ca.crt data; ensure the Kubernetes controller populated it before exporting kubeconfig.`
         );
       }
+      const bearerToken = Buffer.from(token, "base64").toString("utf8");
+      if (!bearerToken) {
+        throw new Error(
+          `ServiceAccount token Secret ${namespace}/${name}-token contains invalid base64 token data.`
+        );
+      }
       if (typeof resolvedServer !== "string" || resolvedServer.length === 0) {
         throw new Error(
           "Kubernetes API endpoint is required to generate a ServiceAccount kubeconfig"
@@ -124,7 +130,7 @@ export function createServiceAccountAccess(
               },
             },
           ],
-          users: [{ name, user: { token } }],
+          users: [{ name, user: { token: bearerToken } }],
           contexts: [
             {
               name: context,

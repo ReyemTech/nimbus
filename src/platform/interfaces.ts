@@ -12,6 +12,7 @@ import type * as pulumi from "@pulumi/pulumi";
 import type * as k8s from "@pulumi/kubernetes";
 import type { ICluster } from "../cluster";
 import type { IExposedService } from "../types";
+import type { IPodDisruptionBudgetConfig, IPodSchedulingConfig } from "../availability";
 
 /** DNS provider for External DNS integration. */
 export type DnsProvider =
@@ -30,6 +31,8 @@ export const DNS_PROVIDERS = {
 
 /** Individual platform component configuration. */
 export interface IPlatformComponentConfig {
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  readonly scheduling?: IPodSchedulingConfig;
   /** Enable or disable this component. Default: true for core components. */
   readonly enabled?: boolean;
   /** Expose via access gateway (Tailscale). Default: true. */

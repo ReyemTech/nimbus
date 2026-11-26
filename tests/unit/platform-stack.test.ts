@@ -198,6 +198,9 @@ vi.mock("@pulumi/kubernetes", () => {
   };
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockPodDisruptionBudget = class {};
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockNamespace = class {};
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
@@ -222,6 +225,7 @@ vi.mock("@pulumi/kubernetes", () => {
 
   return {
     helm: { v3: { Release: mockRelease } },
+    policy: { v1: { PodDisruptionBudget: mockPodDisruptionBudget } },
     apiextensions: { CustomResource: mockCustomResource },
     apps: {
       v1: {

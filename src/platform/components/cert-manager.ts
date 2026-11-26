@@ -7,7 +7,59 @@
 import * as k8s from "@pulumi/kubernetes";
 import type * as pulumi from "@pulumi/pulumi";
 import type { IPlatformComponentConfig } from "../interfaces";
+import { resolvePodDisruptionBudget } from "../../availability";
 import { ensureNamespace } from "../../utils/ensure-namespace";
+
+function nativeBudget(
+  config: IPlatformComponentConfig,
+  replicas: number,
+  rawBudget?: unknown
+): Record<string, unknown> {
+  if (rawBudget !== undefined) {
+    if (config.podDisruptionBudget !== undefined) {
+      throw new Error("podDisruptionBudget conflicts with Helm chart PDB values");
+    }
+    return rawBudget as Record<string, unknown>;
+  }
+  const budget = resolvePodDisruptionBudget(config.podDisruptionBudget ?? {}, replicas);
+  return budget ? { enabled: true, ...budget } : { enabled: false };
+}
+
+function topologySpread(
+  config: IPlatformComponentConfig,
+  selector: Record<string, string>
+): Record<string, unknown> {
+  const spread = config.scheduling?.spread;
+  if (!spread) return {};
+  return {
+    topologySpreadConstraints: [
+      {
+        maxSkew: 1,
+        topologyKey: spread.topologyKey ?? "kubernetes.io/hostname",
+        whenUnsatisfiable: spread.mode === "required" ? "DoNotSchedule" : "ScheduleAnyway",
+        labelSelector: { matchLabels: selector },
+      },
+    ],
+  };
+}
+
+function desiredReplicas(
+  typed: number | undefined,
+  raw: unknown,
+  fallback: number,
+  path: string
+): number {
+  const rawCount =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string" && /^\d+$/.test(raw)
+        ? Number(raw)
+        : undefined;
+  if (typed !== undefined && rawCount !== undefined && typed !== rawCount) {
+    throw new Error(`scheduling.replicas conflicts with Helm values.${path}`);
+  }
+  return typed ?? rawCount ?? fallback;
+}
 
 export function deployCertManager(
   name: string,
@@ -38,7 +90,86 @@ export function deployCertManager(
       ]
     : undefined;
 
-  return new k8s.helm.v3.Release(
+  const instance = `${name}-cert-manager`;
+  const selector = {
+    "app.kubernetes.io/name": "cert-manager",
+    "app.kubernetes.io/instance": instance,
+  };
+  const rawValues = config?.values ?? {};
+  const rawWebhook = rawValues.webhook as Record<string, unknown> | undefined;
+  const rawCainjector = rawValues.cainjector as Record<string, unknown> | undefined;
+  const replicaCount = desiredReplicas(
+    config?.scheduling?.replicas,
+    rawValues.replicaCount,
+    1,
+    "replicaCount"
+  );
+  const webhookReplicas = desiredReplicas(
+    config?.scheduling?.replicas,
+    rawWebhook?.replicaCount,
+    1,
+    "webhook.replicaCount"
+  );
+  const cainjectorReplicas = desiredReplicas(
+    config?.scheduling?.replicas,
+    rawCainjector?.replicaCount,
+    1,
+    "cainjector.replicaCount"
+  );
+  const values = {
+    crds: { enabled: true },
+    ...rawValues,
+    ...(extraArgs ? { extraArgs } : {}),
+    ...(config?.scheduling?.replicas !== undefined
+      ? { replicaCount: config.scheduling.replicas }
+      : {}),
+    podDisruptionBudget: nativeBudget(
+      config ?? {},
+      replicaCount,
+      config?.values?.podDisruptionBudget
+    ),
+    ...topologySpread(config ?? {}, selector),
+    webhook: {
+      ...(rawWebhook ?? {}),
+      ...(config?.scheduling?.replicas !== undefined
+        ? { replicaCount: config.scheduling.replicas }
+        : {}),
+      podDisruptionBudget: nativeBudget(
+        config ?? {},
+        webhookReplicas,
+        rawWebhook?.podDisruptionBudget
+      ),
+      ...topologySpread(config ?? {}, {
+        "app.kubernetes.io/name": "webhook",
+        "app.kubernetes.io/instance": instance,
+      }),
+    },
+    cainjector: {
+      ...(rawCainjector ?? {}),
+      ...(config?.scheduling?.replicas !== undefined
+        ? { replicaCount: config.scheduling.replicas }
+        : {}),
+      podDisruptionBudget: nativeBudget(
+        config ?? {},
+        cainjectorReplicas,
+        rawCainjector?.podDisruptionBudget
+      ),
+      ...topologySpread(config ?? {}, {
+        "app.kubernetes.io/name": "cainjector",
+        "app.kubernetes.io/instance": instance,
+      }),
+    },
+    ...(podIdentityAssociation && {
+      serviceAccount: { name: certManagerServiceAccountName(config), ...serviceAccountValues },
+    }),
+    ...(podIdentityAssociationId && {
+      podAnnotations: {
+        ...podAnnotations,
+        "nimbus.dev/route53-pod-identity": podIdentityAssociationId,
+      },
+    }),
+  };
+  const release = new k8s.helm.v3.Release(
     `${name}-cert-manager`,
     {
       chart: "cert-manager",
@@ -46,26 +177,11 @@ export function deployCertManager(
       version: config?.version ?? defaultVersion,
       namespace: "cert-manager",
       createNamespace: false,
-      values: {
-        crds: { enabled: true },
-        ...config?.values,
-        ...(extraArgs ? { extraArgs } : {}),
-        ...(podIdentityAssociation && {
-          serviceAccount: {
-            name: certManagerServiceAccountName(config),
-            ...serviceAccountValues,
-          },
-        }),
-        ...(podIdentityAssociationId && {
-          podAnnotations: {
-            ...podAnnotations,
-            "nimbus.dev/route53-pod-identity": podIdentityAssociationId,
-          },
-        }),
-      },
+      values,
     },
     { provider, dependsOn: podIdentityAssociation ? [podIdentityAssociation] : undefined }
   );
+  return release;
 }
 
 /** Return the service account name shared by the Helm chart and EKS Pod Identity. */

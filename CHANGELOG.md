@@ -1,3 +1,10 @@
+## [3.16.2](https://github.com/ReyemTech/nimbus/compare/v3.16.1...v3.16.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* **headlamp:** grant comprehensive read-only API access ([8a2bab9](https://github.com/ReyemTech/nimbus/commit/8a2bab96e5b39d0bd0772b8e8d5ef216ed9aed19))
+
 ## [3.16.1](https://github.com/ReyemTech/nimbus/compare/v3.16.0...v3.16.1) (2026-11-26)
 
 

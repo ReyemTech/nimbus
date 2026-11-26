@@ -14,7 +14,7 @@
 
 - Headlamp is opt-in; `headlamp.enabled` defaults to `false`.
 - The Kubernetes Service defaults to `ClusterIP`; ingress is disabled.
-- Headlamp uses its managed read-only pod ServiceAccount by default for automatic access; `authentication: "user-token"` keeps per-user token auth available. Shared ServiceAccount auth must stay behind a trusted access proxy or private network.
+- Headlamp uses its managed pod ServiceAccount and a Nimbus ClusterRole with `get`, `list`, and `watch` on all API resources by default; this includes Secret contents and custom resources. `authentication: "user-token"` keeps per-user token auth available and uses the built-in `view` role for the pod. Shared ServiceAccount auth must stay behind a trusted access proxy or private network.
 - The upstream chart's default `cluster-admin` binding is replaced with read-only `view` by default.
 - `headlamp.expose` defaults to `true` when Headlamp is enabled and only adds an `IExposedService` for the separate access gateway to consume.
 - Auto-detected and caller-added plugins use explicit pinned versions; plugin watch/reload remains disabled.
@@ -101,7 +101,7 @@ Expected: PASS for every plugin selection and validation case.
 
 - [x] **Step 1: Write Helm-release tests for secure defaults**
 
-Assert the release uses the upstream `headlamp` chart/repository, configured/default namespace, private `ClusterIP`, disabled chart ingress, automatic pod ServiceAccount authentication by default, per-user token mode when selected, no plugin watch/reload, plugin manager config for selected plugins, and a read-only `view` ClusterRole binding rather than upstream `cluster-admin`.
+Assert the release uses the upstream `headlamp` chart/repository, configured/default namespace, private `ClusterIP`, disabled chart ingress, automatic pod ServiceAccount authentication by default, an all-resource read-only ClusterRole, per-user token mode with built-in `view` when selected, no plugin watch/reload, and plugin manager config for selected plugins.
 
 - [x] **Step 2: Run focused tests to verify the expected failures**
 
@@ -110,7 +110,7 @@ Expected: FAIL because no Helm release is created.
 
 - [x] **Step 3: Implement `deployHeadlamp`**
 
-Create a Helm v3 release with chart repository `https://kubernetes-sigs.github.io/headlamp/`, `fullnameOverride: "headlamp"`, namespace default `headlamp`, service type `ClusterIP`, and ingress disabled. Ensure the namespace through `ensureNamespace` and make the release depend on it. Render plugin-manager config as YAML with explicit versions. Deep-merge Nimbus defaults with caller `values`, then re-apply Nimbus-owned service type, ingress, unsafe-auth, plugin-watch, plugin-manager, and ServiceAccount RoleBinding settings so chart overrides cannot weaken them. Allow caller values to disable the non-security static Prometheus plugin. Set the role to `config.serviceAccountClusterRoleName ?? "view"`.
+Create a Helm v3 release with chart repository `https://kubernetes-sigs.github.io/headlamp/`, `fullnameOverride: "headlamp"`, namespace default `headlamp`, service type `ClusterIP`, and ingress disabled. Ensure the namespace through `ensureNamespace` and make the release depend on it. In automatic ServiceAccount mode, create a unique Nimbus ClusterRole with read-only access to all API resources and make the Helm release depend on it. Disable the chart-managed ClusterRoleBinding and create a separate Pulumi ClusterRoleBinding after the Helm release because Kubernetes roleRefs are immutable. In `user-token` mode, use the built-in `view` role without creating the broad role. Render plugin-manager config as YAML with explicit versions. Deep-merge Nimbus defaults with caller `values`, then re-apply Nimbus-owned service type, ingress, auth mode, plugin-watch, plugin-manager, and ServiceAccount RoleBinding settings so chart overrides cannot weaken them. Allow caller values to disable the non-security static Prometheus plugin. Honor `config.serviceAccountClusterRoleName` when provided.
 
 - [x] **Step 4: Write platform-stack integration tests**
 

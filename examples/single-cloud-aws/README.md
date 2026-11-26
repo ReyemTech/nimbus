@@ -58,11 +58,14 @@ Headlamp installs as a private `ClusterIP` service and is included in
 `platform.exposedServices`. The example only creates the Tailscale access
 gateway when `enableTailscaleAccess` is true. Set the `tailscaleOAuthClientId`
 and secret `tailscaleOAuthClientSecret` Pulumi config values to enable it.
-Headlamp uses its managed pod ServiceAccount by default, bound to the read-only
-`view` role, so users do not need to create or paste a token. All viewers share
-that identity, so keep the endpoint behind the access-controlled Tailscale
-gateway. Set `headlamp.authentication` to `"user-token"` to require individual
-Kubernetes tokens instead.
+Headlamp uses its managed pod ServiceAccount by default, bound to a Nimbus
+ClusterRole that reads all API resources, including Secrets, custom resources,
+Gateway API types, DeviceClasses, and LeaderWorkerSets.
+Users do not need to create or paste a token, and all viewers share that identity.
+Keep the endpoint behind the access-controlled Tailscale gateway. Set
+`headlamp.authentication` to `"user-token"` to require individual Kubernetes
+tokens instead. EKS CPU and memory usage also requires the opt-in `metricsServer`
+add-on in the cluster's AWS provider options.
 
 For local access without Tailscale:
 

@@ -68,8 +68,8 @@ Automatic plugins use pinned Artifact Hub package versions, including the third-
 ## Deployment and security
 
 - Deploy Headlamp through the upstream Helm chart, after the cluster provider is ready. Set the Service type to `ClusterIP`; keep chart ingress disabled.
-- Default to automatic in-cluster authentication through Headlamp's managed Pod ServiceAccount, bound to read-only `view`, so no token has to be created or pasted. This shares one identity across viewers and must only be exposed behind a trusted authentication proxy or private network. `authentication: "user-token"` retains per-user Kubernetes credentials.
-- Override the upstream chart's default `cluster-admin` binding with a read-only `view` binding for the dashboard Pod ServiceAccount. User-supplied Kubernetes credentials remain governed by their own Kubernetes RBAC. `serviceAccountClusterRoleName` allows a caller to select another existing ClusterRole by name for clusters with reviewed needs.
+- Default to automatic in-cluster authentication through Headlamp's managed Pod ServiceAccount, bound to a Nimbus read-only ClusterRole with `get`, `list`, and `watch` on all API resources. This includes Secrets and custom resources to support complete dashboards. This shares one identity across viewers and must only be exposed behind a trusted authentication proxy or private network. `authentication: "user-token"` retains per-user Kubernetes credentials and the built-in `view` role for the pod.
+- `serviceAccountClusterRoleName` allows a caller to select another existing ClusterRole by name. The default shared role is read-only at the Kubernetes verb level, but Secret contents are sensitive.
 - Set a stable service name/namespace so the returned `IExposedService` can be passed to `createAccessGateway`. If `expose: false`, omit it from `exposedServices`; the service stays private in-cluster.
 - Headlamp has no Nimbus-managed ingress or public Service path. The caller may use `kubectl port-forward` or the existing Tailscale gateway.
 

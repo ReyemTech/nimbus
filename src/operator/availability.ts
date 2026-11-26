@@ -78,7 +78,7 @@ export function helmMap(value: unknown): Record<string, unknown> {
 }
 
 function validateReplicaOverride(typed: number | undefined, raw: unknown, path: string): void {
-  if (typed !== undefined && raw !== undefined && raw !== typed) {
+  if (typed !== undefined && raw !== undefined && chartReplicaCount(raw, NaN) !== typed) {
     throw new Error(`scheduling.replicas conflicts with Helm values.${path}`);
   }
 }
@@ -122,6 +122,26 @@ function controllerPlacement(
       },
     },
   };
+}
+
+/** Convert a minimum to the MariaDB chart's only supported PDB bound. */
+function mariadbControllerMaxUnavailable(
+  budget: ResolvedPodDisruptionBudget,
+  replicas: number
+): number | string {
+  if ("maxUnavailable" in budget) return budget.maxUnavailable;
+  if (typeof budget.minAvailable === "string") {
+    const percent = Number(budget.minAvailable.slice(0, -1));
+    if (percent === 0) return "100%";
+    if (percent === 100) return 0;
+  }
+  if (typeof budget.minAvailable === "number" && budget.minAvailable <= replicas) {
+    return replicas - budget.minAvailable;
+  }
+  throw new Error(
+    "MariaDB controller minAvailable must be 0%, 100%, or an integer no greater than replicas. " +
+      "Use maxUnavailable for other budgets."
+  );
 }
 
 /** Resolve each controller's verified Helm paths, default replica count and PDB ownership. */
@@ -170,7 +190,7 @@ export function controllerAvailability(
   );
   const replicaValue = typedReplicas === undefined ? {} : { replicaCount: typedReplicas };
 
-  let standaloneBudget = budget;
+  const standaloneBudget = mariadb ? undefined : budget;
   if (minio) {
     if (typedReplicas !== undefined || config.scheduling?.spread) {
       values.operator = { ...controllerValues, ...replicaValue, ...placement };
@@ -184,14 +204,10 @@ export function controllerAvailability(
       if (config.podDisruptionBudget !== undefined) {
         throw new Error("podDisruptionBudget conflicts with Helm values.pdb");
       }
-      // A low-level chart override already declares the PDB policy.
-      standaloneBudget = undefined;
-    } else if (budget && "maxUnavailable" in budget) {
-      values.pdb = { enabled: true, maxUnavailable: budget.maxUnavailable };
-      standaloneBudget = undefined;
     } else {
-      // This chart's native PDB only supports maxUnavailable.
-      values.pdb = { enabled: false };
+      values.pdb = budget
+        ? { enabled: true, maxUnavailable: mariadbControllerMaxUnavailable(budget, replicas) }
+        : { enabled: false };
     }
   } else {
     Object.assign(values, replicaValue, placement);

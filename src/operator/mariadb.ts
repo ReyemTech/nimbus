@@ -31,7 +31,8 @@ import {
 } from "./mariadb-common.js";
 import { createSingleMariadbDatabaseInstance } from "./mariadb-database.js";
 import { resolvePodDisruptionBudget } from "../availability";
-import { buildPodPlacement, HOSTNAME_TOPOLOGY_KEY } from "./availability.js";
+import { buildPodPlacement } from "./availability.js";
+import { syncMariadbPodDisruptionBudget } from "./mariadb-pdb.js";
 
 const DEFAULT_MARIADB_VERSION = "11.7";
 const DEFAULT_REPLICAS = 1;
@@ -49,7 +50,11 @@ function createSingleMariadbCluster(
   storageTiers?: StorageTierMap
 ): IClusterInstance {
   const replicas = config?.replicas ?? DEFAULT_REPLICAS;
-  const budget = resolvePodDisruptionBudget(config?.podDisruptionBudget, replicas);
+  // An omitted policy triggers MariaDB's native HA default. Zero allows
+  // evictions while keeping the budget under the operator's ownership.
+  const budget = resolvePodDisruptionBudget(config?.podDisruptionBudget, replicas) ?? {
+    minAvailable: 0,
+  };
   const spread = config?.scheduling?.spread;
   const namespace = ensureNamespace(DATA_NAMESPACE, provider);
   const storageGb = config?.storageGb ?? DEFAULT_STORAGE_GB;
@@ -67,9 +72,7 @@ function createSingleMariadbCluster(
   // MariaDB CRD spec
   const mariadbSpec: Record<string, unknown> = {
     image,
-    // MariaDB creates an HA PDB when the field is omitted. Zero allows evictions
-    // while keeping the operator as the resource owner.
-    podDisruptionBudget: budget ?? { minAvailable: 0 },
+    podDisruptionBudget: budget,
     rootPasswordSecretKeyRef: {
       name: `${name}-root`,
       key: "password",
@@ -87,21 +90,13 @@ function createSingleMariadbCluster(
   };
 
   if (spread) {
-    const useNativeAntiAffinity =
-      spread.strategy !== "topology-spread" &&
-      spread.mode === "required" &&
-      (spread.topologyKey ?? HOSTNAME_TOPOLOGY_KEY) === HOSTNAME_TOPOLOGY_KEY;
-    if (useNativeAntiAffinity) {
-      mariadbSpec["affinity"] = { antiAffinityEnabled: true };
-    } else {
-      Object.assign(
-        mariadbSpec,
-        buildPodPlacement(spread, {
-          "app.kubernetes.io/name": "mariadb",
-          "app.kubernetes.io/instance": name,
-        })
-      );
-    }
+    Object.assign(
+      mariadbSpec,
+      buildPodPlacement(spread, {
+        "app.kubernetes.io/name": "mariadb",
+        "app.kubernetes.io/instance": name,
+      })
+    );
   }
 
   if (config?.resources) {
@@ -163,6 +158,8 @@ function createSingleMariadbCluster(
     },
     { provider, dependsOn }
   );
+
+  syncMariadbPodDisruptionBudget(name, budget, mariadb, provider);
 
   // Per-cluster Grafana dashboard
   createMariadbClusterDashboard(name, "observability", provider, [mariadb]);

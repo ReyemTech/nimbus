@@ -115,21 +115,49 @@ describe("database operator controllers", () => {
     expect(budgets()).toEqual([]);
   });
 
-  it("uses a MariaDB controller selector for minAvailable when the chart cannot render it", async () => {
-    createOperator("mariadb-operator", config());
+  it.each([
+    [undefined, undefined, { enabled: true, maxUnavailable: 0 }],
+    [3, { minAvailable: 2 }, { enabled: true, maxUnavailable: 1 }],
+    [3, { enabled: false }, { enabled: false }],
+    [3, { minAvailable: "100%" }, { enabled: true, maxUnavailable: 0 }],
+    [3, { minAvailable: "0%" }, { enabled: true, maxUnavailable: "100%" }],
+  ] as const)(
+    "keeps the MariaDB controller budget Helm-owned with %s replicas",
+    async (replicas, policy, expected) => {
+      createOperator(
+        "mariadb-operator",
+        config({
+          scheduling: { replicas },
+          podDisruptionBudget: policy,
+        })
+      );
+      await pulumi.runtime.disconnect();
+
+      expect(inputs("mariadb-operator-operator", HELM_RELEASE)?.values).toMatchObject({
+        pdb: expected,
+      });
+      expect(budgets()).toEqual([]);
+    }
+  );
+
+  it("rejects MariaDB controller minima that the chart cannot represent", async () => {
+    for (const minAvailable of ["50%", 2]) {
+      expect(() =>
+        createOperator("mariadb-operator", config({ podDisruptionBudget: { minAvailable } }))
+      ).toThrow(/MariaDB.*minAvailable/);
+    }
+    await pulumi.runtime.disconnect();
+  });
+
+  it("accepts equivalent numeric and string Helm replica values", async () => {
+    createOperator(
+      "cloudnative-pg",
+      config({ scheduling: { replicas: 2 }, values: { replicaCount: "2" } })
+    );
     await pulumi.runtime.disconnect();
 
-    expect(inputs("mariadb-operator-operator", HELM_RELEASE)?.values).toMatchObject({
-      pdb: { enabled: false },
-    });
-    expect(inputs("mariadb-operator-operator-pdb", PDB)?.spec).toEqual({
-      minAvailable: 1,
-      selector: {
-        matchLabels: {
-          "app.kubernetes.io/name": "mariadb-operator",
-          "app.kubernetes.io/instance": "mariadb-operator-operator-actual",
-        },
-      },
+    expect(inputs("cloudnative-pg-operator", HELM_RELEASE)?.values).toMatchObject({
+      replicaCount: 2,
     });
   });
 
@@ -238,7 +266,41 @@ describe("database workload availability", () => {
 
     expect(inputs("maria-test-mariadb")?.spec).toMatchObject({
       podDisruptionBudget: { maxUnavailable: 1 },
-      affinity: { antiAffinityEnabled: true },
+      affinity: {
+        podAntiAffinity: {
+          requiredDuringSchedulingIgnoredDuringExecution: [
+            {
+              topologyKey: "kubernetes.io/hostname",
+              labelSelector: {
+                matchLabels: {
+                  "app.kubernetes.io/name": "mariadb",
+                  "app.kubernetes.io/instance": "maria-test",
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+    expect(inputs("maria-test-mariadb")?.spec).not.toHaveProperty("affinity.antiAffinityEnabled");
+    expect(inputs("maria-test-mariadb-pdb-sync-role")?.rules).toEqual([
+      {
+        apiGroups: ["policy"],
+        resources: ["poddisruptionbudgets"],
+        resourceNames: ["maria-test"],
+        verbs: ["get", "patch"],
+      },
+      {
+        apiGroups: ["k8s.mariadb.com"],
+        resources: ["mariadbs"],
+        resourceNames: ["maria-test"],
+        verbs: ["get"],
+      },
+    ]);
+    expect(inputs("maria-test-mariadb-pdb-sync")?.spec).toMatchObject({
+      activeDeadlineSeconds: 300,
+      backoffLimit: 0,
+      template: { metadata: { annotations: { "nimbus/pdb-policy": '{"maxUnavailable":1}' } } },
     });
     expect(budgets()).toEqual([]);
   });
@@ -257,7 +319,40 @@ describe("database workload availability", () => {
     expect(inputs("maria-disable-mariadb")?.spec).toMatchObject({
       podDisruptionBudget: { minAvailable: 0 },
     });
+    expect(inputs("maria-disable-mariadb-pdb-sync")?.spec).toMatchObject({
+      template: { metadata: { annotations: { "nimbus/pdb-policy": '{"minAvailable":0}' } } },
+    });
     expect(budgets()).toEqual([]);
+  });
+
+  it("uses explicit podAntiAffinity for MariaDB preferred placement", async () => {
+    createOperator("mariadb-operator", config()).createCluster("maria-preferred", {
+      scheduling: { spread: { mode: "preferred" } },
+    });
+    await pulumi.runtime.disconnect();
+
+    expect(inputs("maria-preferred-mariadb")?.spec).toMatchObject({
+      affinity: {
+        podAntiAffinity: {
+          preferredDuringSchedulingIgnoredDuringExecution: [
+            {
+              weight: 100,
+              podAffinityTerm: {
+                labelSelector: {
+                  matchLabels: {
+                    "app.kubernetes.io/name": "mariadb",
+                    "app.kubernetes.io/instance": "maria-preferred",
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+    expect(inputs("maria-preferred-mariadb")?.spec).not.toHaveProperty(
+      "affinity.antiAffinityEnabled"
+    );
   });
 
   it("serializes MariaDB's autoFailover field for replicated workloads", async () => {

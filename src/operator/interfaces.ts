@@ -206,9 +206,8 @@ export interface IOperatorClusterConfig {
   /**
    * Voluntary disruption policy for database pods.
    *
-   * CloudNativePG supports only the enable switch. MariaDB Operator 26.6.0
-   * reads this policy when it creates a PDB. Changing the policy on a MariaDB
-   * resource with an existing PDB requires updating or recreating that PDB.
+   * CloudNativePG supports only the enable switch. Nimbus synchronizes MariaDB
+   * policy changes on the PDB owned by the MariaDB operator.
    */
   readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
   /** Placement settings for database pods. Set the replica count with `replicas`. */

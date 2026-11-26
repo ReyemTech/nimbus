@@ -29,6 +29,7 @@ import {
   createCnpgRoleRegistry,
 } from "./cnpg-common.js";
 import { createSingleCnpgDatabaseInstance } from "./cnpg-database.js";
+import { buildPodPlacement, HOSTNAME_TOPOLOGY_KEY } from "./availability.js";
 
 const DEFAULT_REPLICAS = 1;
 const DEFAULT_STORAGE_GB = 10;
@@ -44,6 +45,11 @@ function createSingleCnpgCluster(
   operatorRelease: k8s.helm.v3.Release,
   storageTiers?: StorageTierMap
 ): IClusterInstance {
+  const budget = config?.podDisruptionBudget;
+  if (budget?.minAvailable !== undefined || budget?.maxUnavailable !== undefined) {
+    throw new Error("CloudNativePG workload PDB policy supports only the enablePDB switch");
+  }
+  const spread = config?.scheduling?.spread;
   const namespace = ensureNamespace(DATA_NAMESPACE, provider);
   const version = config?.version ?? DEFAULT_PG_VERSION;
   const replicas = config?.replicas ?? DEFAULT_REPLICAS;
@@ -82,6 +88,7 @@ function createSingleCnpgCluster(
   // Build CNPG Cluster CRD spec
   const clusterSpec: Record<string, unknown> = {
     instances: replicas,
+    enablePDB: budget?.enabled !== false,
     imageName: `ghcr.io/cloudnative-pg/postgresql:${version}`,
     // Off by default: databases and roles are provisioned by the operator's own
     // Database/DatabaseRole controllers, which run inside the instance manager
@@ -99,6 +106,23 @@ function createSingleCnpgCluster(
         : {}),
     },
   };
+
+  if (spread?.strategy === "topology-spread") {
+    clusterSpec["affinity"] = { enablePodAntiAffinity: false };
+    Object.assign(
+      clusterSpec,
+      buildPodPlacement(spread, {
+        "cnpg.io/cluster": name,
+        "cnpg.io/podRole": "instance",
+      })
+    );
+  } else if (spread) {
+    clusterSpec["affinity"] = {
+      enablePodAntiAffinity: true,
+      topologyKey: spread.topologyKey ?? HOSTNAME_TOPOLOGY_KEY,
+      podAntiAffinityType: spread.mode ?? "preferred",
+    };
+  }
 
   if (config?.resources) {
     clusterSpec["resources"] = config.resources;

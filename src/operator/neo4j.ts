@@ -35,9 +35,15 @@ import {
   createNeo4jRoleRegistry,
 } from "./neo4j-common.js";
 import { assertNoEnvironments, createSingleNeo4jDatabaseInstance } from "./neo4j-database.js";
+import { resolvePodDisruptionBudget } from "../availability";
+import type { IOperatorClusterConfig } from "./interfaces";
+import { buildPodPlacement, helmMap } from "./availability.js";
 
 /** Neo4j-specific cluster config. */
-export interface INeo4jClusterConfig {
+export interface INeo4jClusterConfig extends Pick<
+  IOperatorClusterConfig,
+  "podDisruptionBudget" | "scheduling"
+> {
   /** Neo4j password for the built-in neo4j user. Auto-generated if omitted. */
   readonly password?: pulumi.Input<string>;
   /** Storage size in GB. Default: 10. */
@@ -128,7 +134,44 @@ function buildNeo4jHelmValues(
     };
   }
 
-  return { ...values, ...(config?.values ?? {}) };
+  const chartValues = { ...values, ...config?.values };
+  if (chartValues.podDisruptionBudget !== undefined) {
+    if (config?.podDisruptionBudget !== undefined) {
+      throw new Error("podDisruptionBudget conflicts with Neo4j Helm values.podDisruptionBudget");
+    }
+  } else {
+    const budget = resolvePodDisruptionBudget(config?.podDisruptionBudget, 1);
+    if (!budget) {
+      chartValues.podDisruptionBudget = { enabled: false };
+    } else {
+      // The template skips falsey values. A string "0" passes its guard and renders as integer 0.
+      chartValues.podDisruptionBudget = {
+        enabled: true,
+        ...("minAvailable" in budget
+          ? { minAvailable: budget.minAvailable === 0 ? "0" : budget.minAvailable }
+          : { maxUnavailable: budget.maxUnavailable === 0 ? "0" : budget.maxUnavailable }),
+      };
+    }
+  }
+
+  const spread = config?.scheduling?.spread;
+  if (spread) {
+    const podSpec = helmMap(chartValues.podSpec);
+    if (podSpec.podAntiAffinity !== undefined || podSpec.topologySpreadConstraints !== undefined) {
+      throw new Error("scheduling.spread conflicts with Neo4j Helm pod spread values");
+    }
+    const neo4j = helmMap(chartValues.neo4j);
+    const placement = buildPodPlacement(spread, {
+      app: typeof neo4j.name === "string" ? neo4j.name : name,
+      "helm.neo4j.com/pod_category": "neo4j-instance",
+    });
+    chartValues.podSpec = {
+      ...podSpec,
+      ...("affinity" in placement ? placement.affinity : { ...placement, podAntiAffinity: false }),
+    };
+  }
+
+  return chartValues;
 }
 
 /**
@@ -145,6 +188,7 @@ export function createNeo4jCluster(
   operatorRelease: k8s.helm.v3.Release,
   storageTiers?: StorageTierMap
 ): IClusterInstance {
+  const helmValues = buildNeo4jHelmValues(name, config, storageTiers);
   const namespace = ensureNamespace(DATA_NAMESPACE, provider);
   const neo4jPassword = config?.password
     ? pulumi.output(config.password)
@@ -173,7 +217,6 @@ export function createNeo4jCluster(
   // -------------------------------------------------------------------------
   // 2. Helm deployment
   // -------------------------------------------------------------------------
-  const helmValues = buildNeo4jHelmValues(name, config, storageTiers);
   const neo4jValues = (helmValues as Record<string, Record<string, unknown>>)["neo4j"] ?? {};
   neo4jValues["password"] = neo4jPassword;
   (helmValues as Record<string, unknown>)["neo4j"] = neo4jValues;

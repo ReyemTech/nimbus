@@ -14,6 +14,7 @@ import type { ICluster } from "../cluster";
 import type { IBackupTarget } from "../backup";
 import type { StorageTier } from "../types/storage-tiers";
 import type { IExposedService } from "../types";
+import type { IPodDisruptionBudgetConfig, IPodSchedulingConfig } from "../availability";
 
 /** Per-environment config overrides. Keys are environment names (e.g. "dev", "prod"). */
 export type EnvironmentOverrides<T> = Record<string, Partial<T>>;
@@ -186,6 +187,12 @@ export interface IOperatorConfig {
   readonly version?: string;
   /** Additional Helm values to merge. */
   readonly values?: Record<string, unknown>;
+  /** Voluntary disruption policy for the operator controller Deployment. */
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  /** Replica and placement settings for the operator controller Deployment. */
+  readonly scheduling?: IPodSchedulingConfig;
+  /** Availability settings for the MinIO Tenant pool. Applies only to the MinIO operator. */
+  readonly tenant?: Pick<IOperatorClusterConfig, "podDisruptionBudget" | "scheduling">;
   /** Default backup configuration for clusters created by this operator. */
   readonly backup?: IBackupDefaults;
 }
@@ -196,6 +203,16 @@ export interface IOperatorClusterConfig {
   readonly version?: string;
   /** Number of instances/replicas. Default: 1. */
   readonly replicas?: number;
+  /**
+   * Voluntary disruption policy for database pods.
+   *
+   * CloudNativePG supports only the enable switch. MariaDB Operator 26.6.0
+   * reads this policy when it creates a PDB. Changing the policy on a MariaDB
+   * resource with an existing PDB requires updating or recreating that PDB.
+   */
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  /** Placement settings for database pods. Set the replica count with `replicas`. */
+  readonly scheduling?: Pick<IPodSchedulingConfig, "spread">;
   /** Storage size in GB. Default: 10. */
   readonly storageGb?: number;
   /** Storage tier for PVC storage class selection. */

@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-extraneous-class -- Pulumi resource constructors are test doubles. */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as PulumiModule from "@pulumi/pulumi";
 
 interface IConstructedResource {
   readonly name: string;
@@ -118,7 +119,10 @@ vi.mock("@aws-sdk/client-elastic-load-balancing-v2", () => ({
   },
 }));
 
-vi.mock("@pulumi/pulumi", () => mockPulumi);
+vi.mock("@pulumi/pulumi", async (importOriginal) => ({
+  ...(await importOriginal<typeof PulumiModule>()),
+  ...mockPulumi,
+}));
 
 vi.mock("@pulumi/aws", () => ({
   lb: {

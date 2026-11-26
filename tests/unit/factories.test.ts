@@ -5,9 +5,9 @@
  * and error handling without requiring cloud provider SDKs.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, expectTypeOf, vi, beforeEach } from "vitest";
 import type { INetwork } from "../../src/network";
-import type { ICluster } from "../../src/cluster";
+import type { ICluster, IClusterWithFluentOperations } from "../../src/cluster";
 import type { IDns } from "../../src/dns";
 import type { ISecrets } from "../../src/secrets";
 
@@ -241,6 +241,11 @@ describe("createNetwork factory", () => {
 });
 
 describe("createCluster factory", () => {
+  it("types single-provider results with cluster fluent methods", () => {
+    const result = createCluster("typed", { cloud: "aws", nodePools }, makeNetwork("typed", "aws"));
+    expectTypeOf(result).toMatchTypeOf<IClusterWithFluentOperations>();
+  });
+
   const nodePools = [{ name: "system", instanceType: "t4g.small", minNodes: 2, maxNodes: 3 }];
 
   const awsNetwork = makeNetwork("prod", "aws");
@@ -349,7 +354,8 @@ describe("createCluster factory", () => {
     );
 
     expect(Array.isArray(result)).toBe(true);
-    expect((result as ICluster[]).length).toBe(2);
+    expectTypeOf(result).toMatchTypeOf<IClusterWithFluentOperations[]>();
+    expect((result as IClusterWithFluentOperations[]).length).toBe(2);
     expect(createEksCluster).toHaveBeenCalledTimes(1);
     expect(createAksCluster).toHaveBeenCalledTimes(1);
   });

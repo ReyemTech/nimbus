@@ -7,7 +7,8 @@
  * @module factories/cluster
  */
 
-import type { ICluster, IClusterConfig } from "../cluster";
+import type { CloudArg } from "../types";
+import type { IClusterConfig, IClusterWithFluentOperations } from "../cluster";
 import type { INetwork } from "../network";
 import { resolveCloudTarget, UnsupportedFeatureError } from "../types";
 import type { ResolvedCloudTarget } from "../types";
@@ -22,13 +23,20 @@ export type ICreateClusterConfig = IClusterConfig & {
   readonly providerOptions?: IProviderOptions;
 };
 
+type SingleCloudClusterConfig = ICreateClusterConfig & {
+  readonly cloud: Exclude<CloudArg, ReadonlyArray<unknown>>;
+};
+type MultiCloudClusterConfig = ICreateClusterConfig & {
+  readonly cloud: Extract<CloudArg, ReadonlyArray<unknown>>;
+};
+
 /**
  * Create a Kubernetes cluster (EKS/AKS) for one or more cloud providers.
  *
  * @param name - Resource name prefix
  * @param config - Cluster configuration with cloud target and optional providerOptions
  * @param networks - Network(s) to deploy into. For multi-cloud, pass an array matched by provider.
- * @returns Single ICluster for a single cloud target, array for multi-cloud
+ * @returns A fluent cluster for one cloud target, or an array for multi-cloud
  * @throws {UnsupportedFeatureError} If the cloud provider is not supported, Azure options are missing, or no matching network is found
  *
  * @example
@@ -53,9 +61,25 @@ export type ICreateClusterConfig = IClusterConfig & {
  */
 export function createCluster(
   name: string,
+  config: SingleCloudClusterConfig,
+  networks?: INetwork | INetwork[]
+): IClusterWithFluentOperations;
+export function createCluster(
+  name: string,
+  config: MultiCloudClusterConfig,
+  networks: INetwork | INetwork[]
+): IClusterWithFluentOperations[];
+/** Fallback overload for callers whose cloud target is typed as the full CloudArg union. */
+export function createCluster(
+  name: string,
   config: ICreateClusterConfig,
   networks?: INetwork | INetwork[]
-): ICluster | ICluster[] {
+): IClusterWithFluentOperations | IClusterWithFluentOperations[];
+export function createCluster(
+  name: string,
+  config: ICreateClusterConfig,
+  networks?: INetwork | INetwork[]
+): IClusterWithFluentOperations | IClusterWithFluentOperations[] {
   if (!isMultiCloud(config.cloud)) {
     const target = resolveCloudTarget(config.cloud);
 
@@ -119,7 +143,7 @@ function dispatchCluster(
   target: ResolvedCloudTarget,
   network: INetwork,
   opts?: IProviderOptions
-): ICluster {
+): IClusterWithFluentOperations {
   const targetConfig = { ...config, cloud: { provider: target.provider, region: target.region } };
 
   switch (target.provider) {

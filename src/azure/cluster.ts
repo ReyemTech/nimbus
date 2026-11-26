@@ -10,7 +10,8 @@
 import * as azure from "@pulumi/azure-native";
 import * as k8s from "@pulumi/kubernetes";
 import type * as pulumi from "@pulumi/pulumi";
-import type { ICluster, IClusterConfig, IManagedNodePool } from "../cluster";
+import type { IClusterConfig, IManagedNodePool, IClusterWithFluentOperations } from "../cluster";
+import { withClusterFluentOperations } from "../cluster/fluent";
 import type { INetwork } from "../network";
 import { validateUnsupportedPoolScaling } from "../cluster/scaling";
 import { resolveCloudTarget } from "../types";
@@ -67,7 +68,7 @@ export function createAksCluster(
   config: IClusterConfig,
   network: INetwork,
   options: IAksOptions
-): ICluster {
+): IClusterWithFluentOperations {
   const cloud = Array.isArray(config.cloud) ? (config.cloud[0] ?? "azure") : config.cloud;
   const target = resolveCloudTarget(cloud);
 
@@ -147,7 +148,7 @@ export function createAksCluster(
     kubeconfig,
   });
 
-  return {
+  return withClusterFluentOperations({
     name,
     cloud: target,
     endpoint: cluster.fqdn.apply((fqdn) => `https://${fqdn ?? ""}`),
@@ -156,5 +157,5 @@ export function createAksCluster(
     nodePools: config.nodePools,
     nativeResource: cluster,
     provider,
-  };
+  });
 }

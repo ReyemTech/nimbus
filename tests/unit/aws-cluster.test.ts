@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as PulumiModule from "@pulumi/pulumi";
 import type { IClusterConfig } from "../../src/cluster";
 import type { INetwork } from "../../src/network";
 import type { IEksOptions } from "../../src/aws/cluster";
@@ -46,7 +47,10 @@ const constructed = vi.hoisted(() => ({
 
 const mockAwsConfig = vi.hoisted(() => ({ region: undefined as string | undefined }));
 
-vi.mock("@pulumi/pulumi", () => mockPulumi);
+vi.mock("@pulumi/pulumi", async (importOriginal) => ({
+  ...(await importOriginal<typeof PulumiModule>()),
+  ...mockPulumi,
+}));
 
 vi.mock("@pulumi/kubernetes", () => ({
   Provider: class {

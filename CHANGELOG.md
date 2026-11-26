@@ -1,3 +1,16 @@
+# [3.17.0](https://github.com/ReyemTech/nimbus/compare/v3.16.2...v3.17.0) (2026-11-26)
+
+
+### Bug Fixes
+
+* **aws:** handle split DNS cert-manager challenges ([d03f2f2](https://github.com/ReyemTech/nimbus/commit/d03f2f226164f90d5bfb4ad6f0c319757a4d385d))
+* **aws:** scope split DNS ownership safely ([760faa8](https://github.com/ReyemTech/nimbus/commit/760faa88dec4aeeb65a323fc0b5ab0a6c31af38d))
+
+
+### Features
+
+* **aws:** add private Route 53 DNS visibility ([a8d3a6e](https://github.com/ReyemTech/nimbus/commit/a8d3a6e85b10adfcea0ca798202e5277219aff78))
+
 ## [3.16.2](https://github.com/ReyemTech/nimbus/compare/v3.16.1...v3.16.2) (2026-11-26)
 
 

@@ -144,7 +144,7 @@ interface IResolvedPrivateZone {
 }
 
 export interface IEksExternalDnsSplitResources {
-  readonly releases: readonly [k8s.helm.v3.Release, k8s.helm.v3.Release, k8s.helm.v3.Release];
+  readonly releases: readonly [k8s.helm.v3.Release, k8s.helm.v3.Release];
   readonly privateZones: ReadonlyArray<aws.route53.Zone | aws.route53.ZoneAssociation>;
   readonly identities: ReadonlyArray<aws.eks.PodIdentityAssociation>;
   readonly certManagerIdentity: aws.eks.PodIdentityAssociation;
@@ -222,15 +222,11 @@ export function deployEksExternalDnsSplit(
       { ...opts, dependsOn: [eks] }
     );
 
-  const legacyOwnerId = stringValue(config.values?.txtOwnerId) ?? "default";
-  const publicOwnerId = stringValue(config.values?.txtOwnerId) ?? legacyOwnerId;
+  const publicOwnerId = stringValue(config.values?.txtOwnerId) ?? "default";
   const privateOwnerId = route53Config?.privateTxtOwnerId ?? `${name}-external-dns-private`;
-  const servicesOwnerId = `${publicOwnerId}-services`;
-  const ownerIds = [publicOwnerId, privateOwnerId, servicesOwnerId];
+  const ownerIds = [publicOwnerId, privateOwnerId];
   if (new Set(ownerIds).size !== ownerIds.length) {
-    throw new Error(
-      "Public, private, and service ExternalDNS controllers require distinct TXT owner IDs"
-    );
+    throw new Error("Public and private ExternalDNS controllers require distinct TXT owner IDs");
   }
   const configuredPolicy = stringValue(config.values?.policy);
   const publicPolicy = configuredPolicy ?? "upsert-only";
@@ -241,14 +237,11 @@ export function deployEksExternalDnsSplit(
   }
   const privatePolicy = route53Config?.privatePolicy ?? "upsert-only";
   const controllerIds = {
-    public: route53Config?.publicControllerId ?? `${name}-external-dns-public-ingress`,
-    private: route53Config?.privateControllerId ?? `${name}-external-dns-private-ingress`,
-    services: route53Config?.servicesControllerId ?? `${name}-external-dns-public-services`,
+    public: route53Config?.publicControllerId ?? `${name}-external-dns-public`,
+    private: route53Config?.privateControllerId ?? `${name}-external-dns-private`,
   };
-  if (new Set(Object.values(controllerIds)).size !== 3) {
-    throw new Error(
-      "Public, private, and service ExternalDNS controllers require distinct controller IDs"
-    );
+  if (new Set(Object.values(controllerIds)).size !== 2) {
+    throw new Error("Public and private ExternalDNS controllers require distinct controller IDs");
   }
 
   const createIdentity = (
@@ -330,33 +323,22 @@ export function deployEksExternalDnsSplit(
     return { role, policy, identity };
   };
 
-  const namespaceNames: [string, string, string] = [
-    "external-dns-public-ingress",
-    "external-dns-private-ingress",
-    "external-dns-public-services",
-  ];
-  const namespaces: [pulumi.Resource, pulumi.Resource, pulumi.Resource] = [
+  const namespaceNames: [string, string] = ["external-dns-public", "external-dns-private"];
+  const namespaces: [pulumi.Resource, pulumi.Resource] = [
     ensureNamespace(namespaceNames[0], k8sProvider),
     ensureNamespace(namespaceNames[1], k8sProvider),
-    ensureNamespace(namespaceNames[2], k8sProvider),
   ];
-  const publicIngressIdentity = createIdentity(
-    `${name}-external-dns-public-ingress`,
+  const publicIdentity = createIdentity(
+    `${name}-external-dns-public`,
     namespaceNames[0],
     namespaceNames[0],
     publicZoneIds
   );
-  const privateIngressIdentity = createIdentity(
-    `${name}-external-dns-private-ingress`,
+  const privateIdentity = createIdentity(
+    `${name}-external-dns-private`,
     namespaceNames[1],
     namespaceNames[1],
     resolvedPrivateZones.map((zone) => zone.id)
-  );
-  const servicesIdentity = createIdentity(
-    `${name}-external-dns-public-services`,
-    namespaceNames[2],
-    namespaceNames[2],
-    publicZoneIds
   );
   const certManagerIdentity = new aws.eks.PodIdentityAssociation(
     `${name}-cert-manager-route53-identity`,
@@ -364,10 +346,10 @@ export function deployEksExternalDnsSplit(
       clusterName: eks.name,
       namespace: "cert-manager",
       serviceAccount: certManagerServiceAccountName,
-      roleArn: publicIngressIdentity.role.arn,
+      roleArn: publicIdentity.role.arn,
       tags,
     },
-    { ...opts, dependsOn: [eks, podIdentityAgent, publicIngressIdentity.policy] }
+    { ...opts, dependsOn: [eks, podIdentityAgent, publicIdentity.policy] }
   );
 
   const baseValues = Object.fromEntries(
@@ -394,11 +376,11 @@ export function deployEksExternalDnsSplit(
     : [];
   const awsRegion = config.awsRegion ?? clusterRegion;
   const makeRelease = (
-    controller: "public" | "private" | "services",
+    controller: "public" | "private",
     releaseName: string,
     namespace: string,
     namespaceResource: pulumi.Resource,
-    identity: typeof publicIngressIdentity,
+    identity: ReturnType<typeof createIdentity>,
     zoneIds: ReadonlyArray<pulumi.Input<string>>,
     domainFilters: ReadonlyArray<string>,
     sources: ReadonlyArray<string>,
@@ -409,13 +391,11 @@ export function deployEksExternalDnsSplit(
   ) => {
     const controllerId = controllerIds[controller];
     const extraArgs: Record<string, unknown> = {
-      controller: controllerId,
       "aws-zone-type": zoneType,
       "zone-id-filter": pulumi
         .all([...zoneIds])
         .apply((ids) => ids.map((id) => `/hostedzone/${id}`)),
     };
-    if (controller !== "private") extraArgs["migrate-from-txt-owner"] = legacyOwnerId;
     return new k8s.helm.v3.Release(
       releaseName,
       {
@@ -449,13 +429,13 @@ export function deployEksExternalDnsSplit(
   const releases = [
     makeRelease(
       "public",
-      `${name}-external-dns-public-ingress`,
+      `${name}-external-dns-public`,
       namespaceNames[0],
       namespaces[0],
-      publicIngressIdentity,
+      publicIdentity,
       publicZoneIds,
       publicDomainFilters,
-      ["ingress"],
+      ["ingress", "service", "traefik-proxy"],
       publicOwnerId,
       publicPolicy,
       "public",
@@ -463,10 +443,10 @@ export function deployEksExternalDnsSplit(
     ),
     makeRelease(
       "private",
-      `${name}-external-dns-private-ingress`,
+      `${name}-external-dns-private`,
       namespaceNames[1],
       namespaces[1],
-      privateIngressIdentity,
+      privateIdentity,
       resolvedPrivateZones.map((zone) => zone.id),
       privateFilters,
       ["ingress"],
@@ -475,29 +455,12 @@ export function deployEksExternalDnsSplit(
       "private",
       externalDnsVisibilityFilter(annotation, "private")
     ),
-    makeRelease(
-      "services",
-      `${name}-external-dns-public-services`,
-      namespaceNames[2],
-      namespaces[2],
-      servicesIdentity,
-      publicZoneIds,
-      publicDomainFilters,
-      ["service", "traefik-proxy"],
-      servicesOwnerId,
-      publicPolicy,
-      "public"
-    ),
   ] as const;
 
   return {
     releases,
     privateZones,
-    identities: [
-      publicIngressIdentity.identity,
-      privateIngressIdentity.identity,
-      servicesIdentity.identity,
-    ],
+    identities: [publicIdentity.identity, privateIdentity.identity],
     certManagerIdentity,
     podIdentityAgent,
   };

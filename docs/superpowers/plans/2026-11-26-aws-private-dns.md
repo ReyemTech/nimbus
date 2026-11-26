@@ -4,7 +4,7 @@
 
 **Goal:** Add optional AWS EKS private Route 53 zones and per-Ingress DNS visibility with a selectable zone prefix defaulting to `internal`.
 
-**Architecture:** Keep legacy ExternalDNS untouched when private zones are absent. When configured for EKS, create or associate private zones and deploy distinct Helm ExternalDNS controllers with source-specific filters and zone-scoped Pod Identity roles.
+**Architecture:** Keep legacy ExternalDNS untouched when private zones are absent. When configured for EKS, create or associate private zones and deploy one public Helm controller for all existing public sources plus one Ingress-only private controller, each with zone-scoped Pod Identity roles.
 
 **Tech Stack:** TypeScript, Pulumi AWS, Pulumi Kubernetes Helm, Vitest, Markdown.
 

@@ -141,11 +141,9 @@ function deployToCluster(
       eksDnsResources.releases.forEach((release, index) => {
         providerResources[`external-dns-${index}`] = release;
       });
-      const [publicIngressRelease, privateIngressRelease, publicServicesRelease] =
-        eksDnsResources.releases;
-      components["external-dns-public-ingress"] = publicIngressRelease;
-      components["external-dns-private-ingress"] = privateIngressRelease;
-      components["external-dns-public-services"] = publicServicesRelease;
+      const [publicRelease, privateRelease] = eksDnsResources.releases;
+      components["external-dns-public"] = publicRelease;
+      components["external-dns-private"] = privateRelease;
       eksDnsResources.privateZones.forEach((zone, index) => {
         providerResources[`route53-private-zone-${index}`] = zone;
       });

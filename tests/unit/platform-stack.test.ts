@@ -699,20 +699,15 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
     }) as IPlatformStack;
 
     expect(createdReleases.filter((release) => release.name.includes("external-dns"))).toHaveLength(
-      3
+      2
     );
-    expect(platform.components["external-dns-public-ingress"]).toBeDefined();
-    expect(platform.components["external-dns-private-ingress"]).toBeDefined();
-    expect(platform.components["external-dns-public-services"]).toBeDefined();
+    expect(platform.components["external-dns-public"]).toBeDefined();
+    expect(platform.components["external-dns-private"]).toBeDefined();
     expect(platform.providerResources?.["external-dns"]).toBeUndefined();
     expect(platform.providerResources?.["external-dns-0"]).toBeDefined();
     expect(platform.providerResources?.["route53-private-zone-0"]).toBeDefined();
     expect(createdPodIdentityAssociations.map((identity) => identity.args.namespace)).toEqual(
-      expect.arrayContaining([
-        "external-dns-public-ingress",
-        "external-dns-private-ingress",
-        "external-dns-public-services",
-      ])
+      expect.arrayContaining(["external-dns-public", "external-dns-private"])
     );
   });
 

@@ -238,11 +238,12 @@ Available functions:
 Private DNS is opt-in and applies to AWS EKS with Route 53. Without
 `externalDns.route53.privateHostedZones`, Nimbus keeps the existing EKS
 ExternalDNS community add-on and its current behavior. When private zones are
-configured, Nimbus creates separate ExternalDNS controllers for public
-Ingresses, private Ingresses, and public Service/Traefik records. Each
-controller has its own Pod Identity role, service account, controller ID, and
-TXT owner ID. IAM record-change permissions are limited to the zone IDs assigned
-to that controller.
+configured, Nimbus creates two Helm ExternalDNS controllers: the public
+controller covers Ingress, Service, and Traefik records under the existing
+public TXT owner, while the private controller covers only Ingresses explicitly
+marked private. Each controller has its own Pod Identity role, ServiceAccount,
+Nimbus identity label, and TXT owner ID. IAM record-change permissions are
+limited to the zone IDs assigned to that controller.
 
 Configure created zones with a selectable one-label prefix. If omitted, the
 private zone is `internal.<platform-domain>`; for multiple clusters, use a

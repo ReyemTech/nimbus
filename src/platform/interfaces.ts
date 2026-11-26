@@ -100,8 +100,6 @@ export interface IRoute53ExternalDnsConfig {
   readonly publicControllerId?: string;
   /** Stable Nimbus deployment identity for the private Ingress controller. */
   readonly privateControllerId?: string;
-  /** Stable Nimbus deployment identity for the Service/Traefik controller. */
-  readonly servicesControllerId?: string;
 }
 
 /** Headlamp integrations Nimbus can infer from its cluster and platform configuration. */

@@ -155,10 +155,10 @@ describe("split EKS Route 53 ExternalDNS", () => {
     expect(fixtures.resources.some((resource) => resource.kind === "zone")).toBe(false);
   });
 
-  it("creates public Ingress, private Ingress, and public service controllers", () => {
+  it("keeps all public sources under one owner and isolates private Ingress records", () => {
     deploy();
     const releases = fixtures.resources.filter((resource) => resource.kind === "release");
-    expect(releases).toHaveLength(3);
+    expect(releases).toHaveLength(2);
 
     const valuesByName = Object.fromEntries(
       releases.map((release) => {
@@ -175,11 +175,10 @@ describe("split EKS Route 53 ExternalDNS", () => {
         ];
       })
     );
-    const publicIngress = valuesByName["prod-external-dns-public-ingress"];
-    const privateIngress = valuesByName["prod-external-dns-private-ingress"];
-    const services = valuesByName["prod-external-dns-public-services"];
+    const publicIngress = valuesByName["prod-external-dns-public"];
+    const privateIngress = valuesByName["prod-external-dns-private"];
     expect(publicIngress).toMatchObject({
-      sources: ["ingress"],
+      sources: ["ingress", "service", "traefik-proxy"],
       annotationFilter: "nimbus.dev/dns-visibility!=private",
       domainFilters: ["example.com"],
       policy: "upsert-only",
@@ -193,23 +192,41 @@ describe("split EKS Route 53 ExternalDNS", () => {
       policy: "upsert-only",
       extraArgs: { "aws-zone-type": "private", "zone-id-filter": ["/hostedzone/Z-CREATED"] },
     });
-    expect(services).toMatchObject({ sources: ["service", "traefik-proxy"] });
-    expect(new Set(releases.map((release) => release.args.values.txtOwnerId)).size).toBe(3);
-    expect(new Set(releases.map((release) => release.args.values.extraArgs.controller)).size).toBe(
-      3
+    expect(new Set(releases.map((release) => release.args.values.txtOwnerId)).size).toBe(2);
+    expect(
+      new Set(
+        releases.map((release) => release.args.values.commonLabels["nimbus.dev/dns-controller"])
+      ).size
+    ).toBe(2);
+    expect(releases.every((release) => !("controller" in release.args.values.extraArgs))).toBe(
+      true
     );
     expect(releases.map((release) => release.args.values.serviceAccount.name)).toEqual([
-      "external-dns-public-ingress",
-      "external-dns-private-ingress",
-      "external-dns-public-services",
+      "external-dns-public",
+      "external-dns-private",
     ]);
+  });
+
+  it("keeps all public sources represented when public records use sync policy", () => {
+    deploy(
+      { privateHostedZones: [{ mode: "create", prefix: "cac-1" }] },
+      { txtOwnerId: "prod-eks", policy: "sync" }
+    );
+    const publicController = fixtures.resources.find(
+      (resource) => resource.kind === "release" && resource.name === "prod-external-dns-public"
+    );
+    expect(publicController?.args.values).toMatchObject({
+      policy: "sync",
+      sources: ["ingress", "service", "traefik-proxy"],
+      txtOwnerId: "prod-eks",
+    });
+    expect(publicController?.args.values.extraArgs).not.toHaveProperty("migrate-from-txt-owner");
   });
 
   it("retains the legacy default TXT owner for public records during split migration", () => {
     deploy({ privateHostedZones: [{ mode: "create" }] }, {});
     const publicRelease = fixtures.resources.find(
-      (resource) =>
-        resource.kind === "release" && resource.name === "prod-external-dns-public-ingress"
+      (resource) => resource.kind === "release" && resource.name === "prod-external-dns-public"
     );
     expect(publicRelease?.args.values.txtOwnerId).toBe("default");
   });

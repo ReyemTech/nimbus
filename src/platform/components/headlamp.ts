@@ -5,6 +5,7 @@
  */
 
 import type { ICluster } from "../../cluster";
+import { createHash } from "node:crypto";
 import * as k8s from "@pulumi/kubernetes";
 import type * as pulumi from "@pulumi/pulumi";
 import { stringify as stringifyYaml } from "yaml";
@@ -36,7 +37,7 @@ function mergeValues(
   return merged;
 }
 
-/** Deploy the in-cluster Headlamp Helm release with private and least-privilege defaults. */
+/** Deploy Headlamp with a private service and a cluster-wide read-only identity. */
 export function deployHeadlamp(
   name: string,
   config: IHeadlampConfig,
@@ -52,11 +53,31 @@ export function deployHeadlamp(
     installOptions: { parallel: true, maxConcurrent: 2 },
   };
   const useServiceAccountToken = config.authentication !== "user-token";
+  const serviceAccountClusterRoleName =
+    config.serviceAccountClusterRoleName ??
+    (useServiceAccountToken ? getHeadlampReaderRoleName(name) : "view");
+  const readerRole =
+    useServiceAccountToken && !config.serviceAccountClusterRoleName
+      ? new k8s.rbac.v1.ClusterRole(
+          `${name}-headlamp-reader-role`,
+          {
+            metadata: { name: serviceAccountClusterRoleName },
+            rules: [
+              {
+                apiGroups: ["*"],
+                resources: ["*"],
+                verbs: ["get", "list", "watch"],
+              },
+            ],
+          },
+          { provider }
+        )
+      : undefined;
 
   const mergedValues = mergeValues(
     {
       fullnameOverride: "headlamp",
-      serviceAccount: { create: true },
+      serviceAccount: { create: true, name: "headlamp" },
       automountServiceAccountToken: true,
       service: { type: "ClusterIP", port: 80 },
       ingress: { enabled: false },
@@ -67,15 +88,15 @@ export function deployHeadlamp(
         staticPlugins: { enabled: true },
       },
       clusterRoleBinding: {
-        create: true,
-        clusterRoleName: config.serviceAccountClusterRoleName ?? "view",
+        create: !useServiceAccountToken,
+        clusterRoleName: serviceAccountClusterRoleName,
       },
     },
     config.values
   );
   const values = mergeValues(mergedValues, {
     fullnameOverride: "headlamp",
-    serviceAccount: { create: true },
+    serviceAccount: { create: true, name: "headlamp" },
     automountServiceAccountToken: true,
     service: { type: "ClusterIP", port: 80 },
     ingress: { enabled: false },
@@ -85,8 +106,8 @@ export function deployHeadlamp(
       watchPlugins: false,
     },
     clusterRoleBinding: {
-      create: true,
-      clusterRoleName: config.serviceAccountClusterRoleName ?? "view",
+      create: !useServiceAccountToken,
+      clusterRoleName: serviceAccountClusterRoleName,
     },
     pluginsManager: plugins.length
       ? {
@@ -97,7 +118,7 @@ export function deployHeadlamp(
       : { enabled: false },
   });
 
-  return new k8s.helm.v3.Release(
+  const release = new k8s.helm.v3.Release(
     `${name}-headlamp`,
     {
       chart: "headlamp",
@@ -107,8 +128,41 @@ export function deployHeadlamp(
       createNamespace: false,
       values,
     },
-    { provider, dependsOn: [namespaceResource, ...dependsOn] }
+    {
+      provider,
+      dependsOn: [namespaceResource, ...(readerRole ? [readerRole] : []), ...dependsOn],
+    }
   );
+
+  if (useServiceAccountToken) {
+    // The chart's default RoleBinding has an immutable roleRef. Keep this binding
+    // outside Helm and give each role target a distinct name for safe upgrades.
+    new k8s.rbac.v1.ClusterRoleBinding(
+      `${name}-headlamp-reader-binding`,
+      {
+        metadata: { name: getHeadlampBindingName(name, serviceAccountClusterRoleName) },
+        roleRef: {
+          apiGroup: "rbac.authorization.k8s.io",
+          kind: "ClusterRole",
+          name: serviceAccountClusterRoleName,
+        },
+        subjects: [{ kind: "ServiceAccount", name: "headlamp", namespace, apiGroup: "" }],
+      },
+      { provider, dependsOn: [release, ...(readerRole ? [readerRole] : [])] }
+    );
+  }
+
+  return release;
+}
+
+function getHeadlampReaderRoleName(name: string): string {
+  const suffix = createHash("sha256").update(name).digest("hex").slice(0, 8);
+  return `nimbus-headlamp-reader-${suffix}`;
+}
+
+function getHeadlampBindingName(name: string, roleName: string): string {
+  const suffix = createHash("sha256").update(`${name}:${roleName}`).digest("hex").slice(0, 8);
+  return `nimbus-headlamp-binding-${suffix}`;
 }
 
 const INFERRED_PLUGINS: Readonly<Record<IHeadlampPluginId, IHeadlampPluginConfig>> = {

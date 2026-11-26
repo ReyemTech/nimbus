@@ -65,22 +65,28 @@ createAccessGateway("prod-access", {
 
 Full example: [`examples/single-cloud-aws/`](../../examples/single-cloud-aws/)
 
-Headlamp uses its managed ServiceAccount by default, bound to Kubernetes'
-read-only `view` role, so it opens without a pasted token. Every viewer shares
-that identity. Keep it behind the configured, access-controlled Tailscale
-gateway or another trusted authentication proxy. Do not expose the service
-publicly without an authentication layer. To require individual Kubernetes
-credentials instead, set `headlamp: { enabled: true, authentication: "user-token" }`.
+Headlamp uses its managed ServiceAccount by default, bound to a Nimbus ClusterRole
+that can read all API resources, so it opens without a pasted token. It can list
+PVs, StorageClasses, VolumeAttributesClasses, Gateway API resources and policies,
+Roles, RoleBindings, Secrets, PriorityClasses, RuntimeClasses, Leases, webhook
+configurations, DeviceClasses, LeaderWorkerSets, and custom resources. Every
+viewer shares that identity. Keep it behind the configured, access-controlled
+Tailscale gateway or another trusted authentication proxy. Do not expose the
+service publicly without an authentication layer. To require individual
+Kubernetes credentials instead, set
+`headlamp: { enabled: true, authentication: "user-token" }`.
+For CPU and memory usage, also enable the EKS `metricsServer` add-on on the
+cluster; the Headlamp role has Metrics API access, but it cannot supply metrics
+when the API is not installed. See [EKS Metrics Server](#eks-metrics-server).
 To access it directly for local troubleshooting, run:
 
 ```bash
 kubectl port-forward -n headlamp svc/headlamp 8080:80
 ```
 
-The Headlamp pod ServiceAccount can be given a different existing ClusterRole
-through `serviceAccountClusterRoleName`. Use a restrictive role: permissions are
-shared by every viewer when the default ServiceAccount authentication mode is
-active.
+Set `serviceAccountClusterRoleName` to bind Headlamp's ServiceAccount to a
+different existing ClusterRole. In `user-token` mode, Headlamp uses Kubernetes'
+built-in `view` role by default.
 
 ### EKS ExternalDNS community add-on
 

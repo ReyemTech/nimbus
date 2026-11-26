@@ -97,7 +97,12 @@ export interface IHeadlampConfig extends IPlatformComponentConfig {
   readonly namespace?: string;
   /** Plugin integrations. Nimbus infers supported plugins by default. */
   readonly plugins?: IHeadlampPluginsConfig;
-  /** Existing ClusterRole name for Headlamp's pod ServiceAccount. Defaults to read-only `view`. */
+  /**
+   * Use an existing ClusterRole for the Headlamp pod ServiceAccount. By default,
+   * Nimbus creates a cluster-wide read-only role (get/list/watch on all API
+   * resources) for automatic ServiceAccount authentication, or uses `view`
+   * when `authentication` is `user-token`. This includes read access to Secrets.
+   */
   readonly serviceAccountClusterRoleName?: string;
 }
 

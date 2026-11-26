@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ICluster } from "../../src/cluster";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockCreatedReleases: Array<{ name: string; args: any; opts?: any }> = [];
+const mockCreatedReleases: any[] = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockCreatedRoles: any[] = [];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockCreatedBindings: any[] = [];
 const mockNamespace = {};
 
 vi.mock("@pulumi/kubernetes", () => ({
@@ -11,7 +15,26 @@ vi.mock("@pulumi/kubernetes", () => ({
       // eslint-disable-next-line @typescript-eslint/no-extraneous-class
       Release: class {
         constructor(name: string, args: unknown, opts?: unknown) {
-          mockCreatedReleases.push({ name, args, opts });
+          Object.assign(this, { name, args, opts });
+          mockCreatedReleases.push(this);
+        }
+      },
+    },
+  },
+  rbac: {
+    v1: {
+      // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+      ClusterRole: class {
+        constructor(name: string, args: unknown, opts?: unknown) {
+          Object.assign(this, { name, args, opts });
+          mockCreatedRoles.push(this);
+        }
+      },
+      // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+      ClusterRoleBinding: class {
+        constructor(name: string, args: unknown, opts?: unknown) {
+          Object.assign(this, { name, args, opts });
+          mockCreatedBindings.push(this);
         }
       },
     },
@@ -177,6 +200,8 @@ describe("resolveHeadlampPlugins", () => {
 describe("deployHeadlamp", () => {
   beforeEach(() => {
     mockCreatedReleases.length = 0;
+    mockCreatedRoles.length = 0;
+    mockCreatedBindings.length = 0;
   });
 
   it("creates a private Headlamp release that authenticates with its read-only pod identity", () => {
@@ -185,6 +210,7 @@ describe("deployHeadlamp", () => {
 
     expect(mockCreatedReleases).toHaveLength(1);
     const release = mockCreatedReleases[0];
+    const managedRoleName = mockCreatedRoles[0]?.args.metadata.name;
     expect(release?.name).toBe("prod-headlamp");
     expect(release?.args).toMatchObject({
       chart: "headlamp",
@@ -203,10 +229,30 @@ describe("deployHeadlamp", () => {
           watchPlugins: false,
           staticPlugins: { enabled: true },
         },
-        clusterRoleBinding: { create: true, clusterRoleName: "view" },
+        clusterRoleBinding: { create: false, clusterRoleName: managedRoleName },
       },
     });
-    expect(release?.opts?.dependsOn).toEqual([mockNamespace, prerequisite]);
+    expect(mockCreatedRoles).toHaveLength(1);
+    expect(mockCreatedRoles[0]?.args.metadata.name).toMatch(/^nimbus-headlamp-reader-[a-f0-9]{8}$/);
+    expect(mockCreatedRoles[0]?.args.rules).toEqual([
+      { apiGroups: ["*"], resources: ["*"], verbs: ["get", "list", "watch"] },
+    ]);
+    expect(release?.args.values.clusterRoleBinding.clusterRoleName).toBe(
+      mockCreatedRoles[0]?.args.metadata.name
+    );
+    expect(release?.opts?.dependsOn).toContain(mockNamespace);
+    expect(release?.opts?.dependsOn).toContain(prerequisite);
+    expect(release?.opts?.dependsOn).toContain(mockCreatedRoles[0]);
+    expect(mockCreatedBindings).toHaveLength(1);
+    expect(mockCreatedBindings[0]?.args.roleRef).toEqual({
+      apiGroup: "rbac.authorization.k8s.io",
+      kind: "ClusterRole",
+      name: managedRoleName,
+    });
+    expect(mockCreatedBindings[0]?.args.subjects).toEqual([
+      { kind: "ServiceAccount", name: "headlamp", namespace: "headlamp", apiGroup: "" },
+    ]);
+    expect(mockCreatedBindings[0]?.opts.dependsOn).toContain(release);
   });
 
   it("pins plugin-manager entries and keeps Nimbus security values over caller overrides", () => {
@@ -241,6 +287,9 @@ describe("deployHeadlamp", () => {
     );
 
     const values = mockCreatedReleases[0]?.args.values;
+    expect(mockCreatedRoles).toHaveLength(0);
+    expect(mockCreatedBindings).toHaveLength(1);
+    expect(mockCreatedBindings[0]?.args.roleRef.name).toBe("headlamp-observer");
     expect(values).toMatchObject({
       replicaCount: 2,
       serviceAccount: { create: true },
@@ -252,7 +301,7 @@ describe("deployHeadlamp", () => {
         watchPlugins: false,
         staticPlugins: { enabled: true },
       },
-      clusterRoleBinding: { create: true, clusterRoleName: "headlamp-observer" },
+      clusterRoleBinding: { create: false, clusterRoleName: "headlamp-observer" },
       pluginsManager: {
         enabled: true,
         version: "0.1.1",
@@ -280,6 +329,10 @@ describe("deployHeadlamp", () => {
     );
 
     expect(mockCreatedReleases[0]?.args.values.config.unsafeUseServiceAccountToken).toBe(false);
+    expect(mockCreatedRoles).toHaveLength(0);
+    expect(mockCreatedBindings).toHaveLength(0);
+    expect(mockCreatedReleases[0]?.args.values.clusterRoleBinding.create).toBe(true);
+    expect(mockCreatedReleases[0]?.args.values.clusterRoleBinding.clusterRoleName).toBe("view");
   });
 
   it("does not start the plugin manager when no dynamic plugins are selected", () => {

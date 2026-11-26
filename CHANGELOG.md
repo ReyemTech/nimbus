@@ -1,3 +1,10 @@
+## [3.16.1](https://github.com/ReyemTech/nimbus/compare/v3.16.0...v3.16.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **headlamp:** bootstrap dashboard service account auth ([bf33932](https://github.com/ReyemTech/nimbus/commit/bf33932150906d06668d54588af210bd7103b0d9))
+
 # [3.16.0](https://github.com/ReyemTech/nimbus/compare/v3.15.0...v3.16.0) (2026-11-26)
 
 

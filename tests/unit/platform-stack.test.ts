@@ -52,6 +52,11 @@ vi.mock("@pulumi/aws", () => {
     name = mockOutput("test-cluster");
     arn = mockOutput("arn:aws:eks:us-east-1:123456789012:cluster/test-cluster");
   };
+  const mockRoute53Zone = class {
+    zoneId = mockOutput("Z-CREATED");
+  };
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockRoute53ZoneAssociation = class {};
   const mockAddon = class {
     name: ReturnType<typeof mockOutput>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -115,7 +120,11 @@ vi.mock("@pulumi/aws", () => {
     },
     getPartitionOutput: () => mockOutput({ partition: "aws" }),
     getCallerIdentityOutput: () => mockOutput({ accountId: "123456789012" }),
-    route53: { getZoneOutput: () => mockOutput({ zoneId: "Z123" }) },
+    route53: {
+      getZoneOutput: () => mockOutput({ zoneId: "Z123" }),
+      Zone: mockRoute53Zone,
+      ZoneAssociation: mockRoute53ZoneAssociation,
+    },
   };
 });
 
@@ -668,6 +677,45 @@ describe("platform stack — wildcard cert and TLSStore", () => {
 });
 
 describe("platform stack — Route53 IAM auto-provisioning", () => {
+  it("switches to isolated Helm controllers and registers private-zone resources when configured", () => {
+    const cluster = {
+      ...makeCluster("test"),
+      nativeResource: new aws.eks.Cluster("test", {} as aws.eks.ClusterArgs),
+      awsVpcId: mockOutput("vpc-123"),
+      awsRegion: "us-east-1",
+      providerResources: { podIdentityAgent: {} as pulumi.Resource },
+    } as unknown as ICluster;
+    const platform = createPlatformStack("test", {
+      cluster,
+      domain: "example.com",
+      traefik: { enabled: false },
+      certManager: { enabled: false },
+      externalDns: {
+        dnsProvider: "route53",
+        hostedZoneIds: ["Z-PUBLIC"],
+        domainFilters: ["example.com"],
+        route53: { privateHostedZones: [{ mode: "create", prefix: "cac-1" }] },
+      },
+    }) as IPlatformStack;
+
+    expect(createdReleases.filter((release) => release.name.includes("external-dns"))).toHaveLength(
+      3
+    );
+    expect(platform.components["external-dns-public-ingress"]).toBeDefined();
+    expect(platform.components["external-dns-private-ingress"]).toBeDefined();
+    expect(platform.components["external-dns-public-services"]).toBeDefined();
+    expect(platform.providerResources?.["external-dns"]).toBeUndefined();
+    expect(platform.providerResources?.["external-dns-0"]).toBeDefined();
+    expect(platform.providerResources?.["route53-private-zone-0"]).toBeDefined();
+    expect(createdPodIdentityAssociations.map((identity) => identity.args.namespace)).toEqual(
+      expect.arrayContaining([
+        "external-dns-public-ingress",
+        "external-dns-private-ingress",
+        "external-dns-public-services",
+      ])
+    );
+  });
+
   it("uses the effective cert-manager service account and rolls pods after Pod Identity is ready", () => {
     const cluster = {
       ...makeCluster("test"),

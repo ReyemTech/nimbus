@@ -294,6 +294,14 @@ describe("createEksCluster options", () => {
     expect(cluster.awsResourceTags?.["nimbus:cluster"]).toBe("ca-central-1/prod");
   });
 
+  it("exposes the EKS VPC ID and region for private DNS components", () => {
+    mockAwsConfig.region = "ca-central-1";
+    const cluster = create();
+
+    expect(cluster.awsVpcId).toBe(network.vpcId);
+    expect(cluster.awsRegion).toBe("ca-central-1");
+  });
+
   it("applies the protected cluster tag to EKS resources and the EKS cluster security group", () => {
     const cluster = create(undefined, network, {
       ...config,

@@ -111,6 +111,19 @@ describe("createServiceAccountAccess", () => {
     expect(access.binding).toBeInstanceOf(k8s.rbac.v1.ClusterRoleBinding);
   });
 
+  it("rejects an explicitly empty namespace for a custom ClusterRole", () => {
+    expect(() =>
+      createServiceAccountAccess("empty-target", {
+        cluster: makeCluster(),
+        scope: {
+          type: "custom",
+          namespace: "",
+          roleRef: { kind: "ClusterRole", name: "auditor" },
+        },
+      })
+    ).toThrow(/namespace/i);
+  });
+
   it("uses a caller-supplied API server endpoint override", async () => {
     const access = createServiceAccountAccess("override", {
       cluster: makeCluster(),

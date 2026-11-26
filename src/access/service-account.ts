@@ -32,6 +32,9 @@ export function createServiceAccountAccess(
   }
   if (scope.type === "custom") {
     if (!scope.roleRef.name.trim()) throw new Error("Custom role reference name must not be empty");
+    if (scope.namespace !== undefined && !scope.namespace.trim()) {
+      throw new Error("A custom namespace must not be empty");
+    }
     if (scope.roleRef.kind === "Role" && !scope.namespace?.trim()) {
       throw new Error("A custom Role reference requires a namespace");
     }

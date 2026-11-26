@@ -11,6 +11,13 @@ import type { IAccessGatewayConfig, IAccessGateway } from "./interfaces";
 import { deployTailscale } from "./tailscale";
 import { deployWireGuard } from "./wireguard";
 import { assertNever } from "../types";
+export type {
+  IServiceAccountAccess,
+  IServiceAccountAccessConfig,
+  IServiceAccountAccessScope,
+  ServiceAccountBuiltinRole,
+} from "./interfaces";
+export { createServiceAccountAccess } from "./service-account";
 
 export type {
   AccessGatewayProvider,

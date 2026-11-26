@@ -11,6 +11,8 @@ export type {
   IKarpenterNodePool,
   IClusterConfig,
   ICluster,
+  IClusterFluentOperations,
+  IClusterWithFluentOperations,
   IEksClusterExtensions,
   IAksClusterExtensions,
   IGkeClusterExtensions,

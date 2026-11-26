@@ -67,6 +67,8 @@ export type {
   IKarpenterNodePool,
   IClusterConfig,
   ICluster,
+  IClusterFluentOperations,
+  IClusterWithFluentOperations,
   IEksClusterExtensions,
   IAksClusterExtensions,
   IGkeClusterExtensions,
@@ -222,7 +224,12 @@ export {
   type IWireGuardGatewayConfig,
   type IAccessGatewayConfig,
   type IAccessGateway,
+  type IServiceAccountAccess,
+  type IServiceAccountAccessConfig,
+  type IServiceAccountAccessScope,
+  type ServiceAccountBuiltinRole,
   createAccessGateway,
+  createServiceAccountAccess,
   ACCESS_GATEWAY_PROVIDERS,
 } from "./access";
 

@@ -7,7 +7,8 @@
 import * as aws from "@pulumi/aws";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
-import type { ICluster, IClusterConfig, IManagedNodePool } from "../cluster";
+import type { IClusterConfig, IManagedNodePool, IClusterWithFluentOperations } from "../cluster";
+import { withClusterFluentOperations } from "../cluster/fluent";
 import type { INetwork } from "../network";
 import { resolveCloudTarget } from "../types";
 import {
@@ -155,7 +156,7 @@ export function createEksCluster(
   config: IClusterConfig,
   network: INetwork,
   options?: IEksOptions
-): ICluster {
+): IClusterWithFluentOperations {
   const cloud = Array.isArray(config.cloud) ? (config.cloud[0] ?? "aws") : config.cloud;
   const target = resolveCloudTarget(cloud);
 
@@ -624,7 +625,7 @@ export function createEksCluster(
     tags
   );
 
-  return {
+  return withClusterFluentOperations({
     name,
     cloud: target,
     endpoint: cluster.endpoint,
@@ -637,7 +638,7 @@ export function createEksCluster(
     providerResources: podIdentityAgent ? { podIdentityAgent } : undefined,
     eksAddons: [...addonNames],
     awsResourceTags: tags,
-  };
+  });
 }
 
 function createNodeRole(

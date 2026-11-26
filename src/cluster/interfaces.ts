@@ -166,6 +166,50 @@ export interface ICluster {
   readonly eksAddons?: ReadonlyArray<string>;
 }
 
+import type {
+  IServiceAccountAccess,
+  IServiceAccountAccessConfig,
+  IAccessGateway,
+  IAccessGatewayConfig,
+} from "../access/interfaces";
+import type { IPlatformStack, IPlatformStackConfig } from "../platform/interfaces";
+import type { IObservabilityStack, IObservabilityStackConfig } from "../observability/interfaces";
+import type {
+  IOperator,
+  IMinIOOperator,
+  IOperatorConfig,
+  OperatorType,
+} from "../operator/interfaces";
+import type { ArgoCD } from "../argocd/argocd";
+import type { IArgoCDConfig } from "../argocd/interfaces";
+
+type WithoutCluster<T> = T extends unknown ? Omit<T, "cluster"> : never;
+
+/** Convenience wrappers for Nimbus's high-level cluster factories. */
+export interface IClusterFluentOperations {
+  createServiceAccountAccess(
+    name: string,
+    config: WithoutCluster<IServiceAccountAccessConfig>
+  ): IServiceAccountAccess;
+  createAccessGateway(name: string, config: WithoutCluster<IAccessGatewayConfig>): IAccessGateway;
+  createPlatformStack(
+    name: string,
+    config: Omit<IPlatformStackConfig, "cluster">
+  ): IPlatformStack | IPlatformStack[];
+  createObservabilityStack(
+    name: string,
+    config: Omit<IObservabilityStackConfig, "cluster">
+  ): IObservabilityStack;
+  createOperator(
+    type: OperatorType,
+    config: Omit<IOperatorConfig, "cluster">
+  ): IOperator | IMinIOOperator;
+  createArgoCD(name: string, config: Omit<IArgoCDConfig, "cluster">): ArgoCD;
+}
+
+/** Cluster result from Nimbus factories, including high-level fluent methods. */
+export type IClusterWithFluentOperations = ICluster & IClusterFluentOperations;
+
 /** AWS-specific cluster extensions for EKS. */
 export interface IEksClusterExtensions {
   /** Discriminant identifying this as AWS. */

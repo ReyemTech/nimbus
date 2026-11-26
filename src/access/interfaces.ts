@@ -12,6 +12,44 @@ import type * as k8s from "@pulumi/kubernetes";
 import type { ICluster } from "../cluster";
 import type { IExposedService } from "../types";
 
+/** Built-in Kubernetes roles supported by the access factory. */
+export type ServiceAccountBuiltinRole = "cluster-admin" | "admin" | "edit" | "view";
+
+/** Permission scope bound to a generated ServiceAccount. */
+export type IServiceAccountAccessScope =
+  | { readonly type: "cluster"; readonly role: "cluster-admin" | "view" }
+  | {
+      readonly type: "namespace";
+      readonly namespace: string;
+      readonly role: "admin" | "edit" | "view";
+    }
+  | {
+      readonly type: "custom";
+      readonly namespace?: string;
+      readonly roleRef: { readonly kind: "Role" | "ClusterRole"; readonly name: string };
+    };
+
+/** Configuration for a portable ServiceAccount kubeconfig. */
+export interface IServiceAccountAccessConfig {
+  readonly cluster: ICluster;
+  readonly scope: IServiceAccountAccessScope;
+  /** Namespace in which to create the ServiceAccount. Default: nimbus-access. */
+  readonly namespace?: string;
+  /** API endpoint override for attached clusters without a known endpoint. */
+  readonly server?: pulumi.Input<string>;
+}
+
+/** Resources and kubeconfig created for a ServiceAccount identity. */
+export interface IServiceAccountAccess {
+  readonly name: string;
+  readonly namespace: string;
+  readonly serviceAccount: k8s.core.v1.ServiceAccount;
+  readonly tokenSecret: k8s.core.v1.Secret;
+  readonly binding: k8s.rbac.v1.RoleBinding | k8s.rbac.v1.ClusterRoleBinding;
+  /** Secret output; export using Pulumi's secret-output mechanism. */
+  readonly kubeconfig: pulumi.Output<string>;
+}
+
 /** Access gateway provider type. */
 export type AccessGatewayProvider = "tailscale" | "wireguard";
 

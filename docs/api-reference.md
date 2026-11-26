@@ -1,154 +1,59 @@
-# API Reference
+# API reference
 
-Full reference for all nimbus factory functions, provider options, and escape hatches.
+Nimbus exports provider-agnostic factories from `@reyemtech/nimbus`, plus provider-specific factories through `@reyemtech/nimbus/aws` and `@reyemtech/nimbus/azure`.
 
-## Factory Functions (Primary API)
+## High-level factories
 
-The factory functions are the recommended way to use this library. They dispatch to the correct cloud-specific implementation based on the `cloud` parameter. Provider-specific options are passed via `providerOptions`.
+| Factory | Purpose |
+| --- | --- |
+| `createNetwork(name, config)` | Create or attach provider networking. |
+| `createCluster(name, config, network?)` | Create EKS, AKS, or Rackspace Spot cluster; multi-cloud targets return one cluster per provider. |
+| `createDns(name, config)` | Create DNS zones and records. |
+| `createSecrets(name, config)` | Create a provider-backed secrets store. |
+| `createPlatformStack(name, config)` | Install cluster platform services, including ingress, DNS automation, cert-manager, and optional Headlamp. |
+| `createObservabilityStack(name, config)` | Install monitoring, logging, dashboards, and alerting. |
+| `createAccessGateway(name, config)` | Install a Tailscale or WireGuard access gateway. |
+| `createServiceAccountAccess(name, config)` | Create scoped Kubernetes ServiceAccount access and a secret portable kubeconfig. |
+| `createOperator(type, config)` | Install a database operator. |
+| `createArgoCD(name, config)` | Configure Argo CD on an existing cluster. |
+| `createGlobalLoadBalancer(name, config)` | Configure global traffic distribution. |
+| `createStateBackend(name, config)` | Configure cloud object storage and locking for Pulumi state. |
 
-All factory functions are **async** and use dynamic imports internally — the provider SDK is only loaded when the function is called with that cloud target.
+See provider guides for cloud-specific options: [AWS](providers/aws.md), [Azure](providers/azure.md), and [Rackspace](providers/rackspace.md).
 
-### `createNetwork(name, config)`
+## Cluster results and fluent conveniences
 
-Creates a VPC (AWS) or VNet (Azure) with subnets and NAT.
-
-| Parameter                | Type               | Description                                                                                                        |
-| ------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `name`                   | `string`           | Resource name prefix                                                                                               |
-| `config.cloud`           | `CloudArg`         | `"aws"`, `"azure"`, or `["aws", "azure"]` for multi-cloud                                                          |
-| `config.cidr`            | `string`           | CIDR block (auto-offset for multi-cloud)                                                                           |
-| `config.natStrategy`     | `NatStrategy`      | `"managed"`, `"fck-nat"`, or `"none"`. On AWS, private subnet outputs wait for the default route to report active. |
-| `config.clusterNameForTags` | `string` | AWS-only cluster association for a dedicated network; generates `nimbus:cluster=<region>/<cluster-name>`. Omit for shared networks. |
-| `config.providerOptions` | `IProviderOptions` | Provider-specific options (see below)                                                                              |
-
-Returns: `Promise<INetwork>` (single cloud) or `Promise<INetwork[]>` (multi-cloud)
-
-### `createCluster(name, config, networks)`
-
-Creates an EKS (AWS) or AKS (Azure) cluster.
-
-| Parameter                | Type                     | Description                                           |
-| ------------------------ | ------------------------ | ----------------------------------------------------- |
-| `config.nodePools`       | `INodePool[]`            | Node pool definitions                                 |
-| `config.version`         | `string`                 | Kubernetes version                                    |
-| `config.providerOptions` | `IProviderOptions`       | Provider-specific options                             |
-| `networks`               | `INetwork \| INetwork[]` | Network(s) — auto-matched by provider for multi-cloud |
-
-Returns: `Promise<ICluster>` (single cloud) or `Promise<ICluster[]>` (multi-cloud)
-
-AWS EKS clusters expose `ICluster.awsResourceTags`, the resolved AWS tag map
-including the protected `nimbus:cluster=<region>/<cluster-name>` identifier.
-Pass it to caller-managed AWS integrations such as the AWS Load Balancer
-Controller Helm chart's `defaultTags` value so its load balancers, target groups,
-and security groups use the same Cost Explorer dimension.
-
-### `createDns(name, config)`
-
-Creates a Route 53 (AWS) or Azure DNS zone.
-
-Returns: `Promise<IDns>` (single cloud) or `Promise<IDns[]>` (multi-cloud)
-
-### `createSecrets(name, config)`
-
-Creates an AWS Secrets Manager or Azure Key Vault store.
+Nimbus cluster factories return `IClusterWithFluentOperations`, which extends the structurally compatible `ICluster` contract with convenience wrappers for high-level cluster factories:
 
 ```typescript
-const secrets = (await createSecrets("prod", { cloud: "aws" })) as ISecrets;
-secrets.putSecret("database", { host: "db.example.com", password: dbPassword });
-const pw = secrets.getSecretRef({ path: "database", key: "password" });
+const access = cluster.createServiceAccountAccess("ci", {
+  scope: { type: "namespace", namespace: "apps", role: "view" },
+});
+
+const platform = cluster.createPlatformStack("platform", { domain: "example.test" });
 ```
 
-Returns: `Promise<ISecrets>` (single cloud) or `Promise<ISecrets[]>` (multi-cloud)
+The available methods are `createServiceAccountAccess`, `createAccessGateway`, `createPlatformStack`, `createObservabilityStack`, `createOperator`, and `createArgoCD`. Each delegates to its standalone factory. Resource-level helpers remain composable without a cluster fluent method. Caller-created `ICluster` objects do not need to implement the fluent methods.
 
-### `createStateBackend(name, config)`
+## Platform and cluster services
 
-Creates an S3 bucket (AWS) or Azure Storage Account for Pulumi state with BCDR features.
+`createPlatformStack` can install core ingress, cert-manager, and DNS automation, with optional components such as Headlamp. Headlamp is installed as a private ClusterIP service by default; the caller chooses how to expose it, including a tailnet path through Tailscale. `createAccessGateway` supports Tailscale and WireGuard. `createObservabilityStack` is separate from the cluster-scoped EKS Metrics Server add-on.
 
-| Parameter            | Type                 | Description                                              |
-| -------------------- | -------------------- | -------------------------------------------------------- |
-| `config.versioning`  | `boolean`            | Enable bucket/container versioning. Default: `true`      |
-| `config.encryption`  | `boolean`            | Enable server-side encryption. Default: `true`           |
-| `config.locking`     | `IStateLockConfig`   | State locking config (DynamoDB on AWS). Default: enabled |
-| `config.replication` | `IReplicationConfig` | Cross-region replication. Default: disabled              |
+## ServiceAccount access
 
-Returns: `Promise<IStateBackend>` (single cloud) or `Promise<IStateBackend[]>` (multi-cloud)
+`createServiceAccountAccess(name, config)` accepts an `IServiceAccountAccessConfig` with a cluster, a typed `scope`, and optional ServiceAccount namespace and API endpoint override. Scopes support cluster `cluster-admin`/`view`, namespace `admin`/`edit`/`view`, and custom Role or ClusterRole references. The returned `IServiceAccountAccess` includes the ServiceAccount, token Secret, RBAC binding, and secret `kubeconfig` output.
 
-**AWS features:** S3 BucketV2, public access block, versioning, SSE (AES256 or KMS), DynamoDB locking, cross-region replication with IAM.
+See [Kubernetes access](guides/kubernetes-access.md) for RBAC semantics, token lifecycle, export commands, and examples.
 
-**Azure features:** StorageAccount (StorageV2, HTTPS-only, TLS 1.2), BlobContainer, versioning, GRS for geo-replication. Azure blob leases handle locking natively.
+## Shared cloud target model
 
-### `createPlatformStack(name, config)`
+Factories accept provider shorthand (`"aws"`), an explicit target (`{ provider: "aws", region: "ca-central-1" }`), or a multi-provider target array (`["aws", "azure"]`) where supported. Region defaults are defined by `DEFAULT_REGIONS`. Provider-specific requirements remain explicit; for example, Azure cluster and resource creation requires an Azure resource group.
 
-Deploys Helm-based platform components to one or more clusters.
+## Escape hatches
 
-| Component        | Default       | Chart                                       |
-| ---------------- | ------------- | ------------------------------------------- |
-| Traefik          | Enabled       | `traefik/traefik` v34.3.0                   |
-| cert-manager     | Enabled       | `jetstack/cert-manager` v1.17.2             |
-| External DNS     | If configured | `kubernetes-sigs/external-dns` v1.16.1      |
-| ArgoCD           | Disabled      | `argoproj/argo-cd` v7.8.26                  |
-| Vault            | Disabled      | `hashicorp/vault` v0.29.1                   |
-| External Secrets | Disabled      | `external-secrets/external-secrets` v0.14.4 |
-| Headlamp         | Disabled      | `headlamp/headlamp`                         |
+Cluster, network, DNS, and other provider-backed result types expose their native Pulumi resource through `nativeResource`. Cluster results also expose their Kubernetes provider for direct Kubernetes resources.
 
-For AWS EKS with Route 53, `externalDns` instead provisions the EKS community
-add-on. `hostedZoneIds` scopes `ChangeResourceRecordSets`; because the add-on
-schema does not accept the upstream zone-ID filter, `ListResourceRecordSets`
-must allow discovery across zones. Set `domainFilters` to constrain discovery
-to intended DNS suffixes. If hosted zone IDs are omitted, Nimbus resolves each
-`domainFilters` value to a hosted zone for the write policy. Domain filters do
-not distinguish public/private zones sharing a name; write permissions still
-prevent changes outside configured IDs. Set `addonVersion`
-for the EKS add-on (`version` remains the Helm chart version for other
-clusters). `values` supplies add-on configuration such as `txtOwnerId`,
-`sources`, `registry`, and `policy`. EKS does not receive static AWS credentials.
-Existing Helm deployments should use the two-apply migration documented in the
-[examples](examples.md#eks-externaldns-community-add-on).
-
-Set `headlamp: { enabled: true }` to install the Kubernetes dashboard as a
-private `ClusterIP` service in the `headlamp` namespace. Nimbus does not create
-an Ingress or public load balancer for it. When Headlamp is enabled,
-`platform.exposedServices` includes it by default; pass that list to
-`createAccessGateway` to make it available on Tailscale. Set
-`headlamp.expose: false` to omit it from the gateway output. You can also use
-`kubectl port-forward -n headlamp svc/headlamp 8080:80`.
-
-Nimbus infers the cert-manager plugin when the platform stack installs
-cert-manager or the EKS community add-on is present, the Karpenter plugin when
-an EKS node pool uses `scaling.mode: "karpenter"`, and the Argo CD plugin when
-`argocd.enabled` is true. The Argo CD plugin package is third-party and
-read-only. Prometheus support is bundled with the Headlamp chart; Metrics
-Server metrics are native Headlamp views. Traefik, ExternalDNS, Vault, External
-Secrets, and Nimbus operators remain available through Headlamp's standard
-Kubernetes resource and CRD views.
-
-Use `headlamp.plugins.disabled` to skip inferred integrations or
-`headlamp.plugins.additional` to add Artifact Hub Headlamp packages with an
-explicit `name`, HTTPS package `source`, and pinned `version`. Plugins execute
-in the dashboard's UI security context, so only add sources you trust.
-`headlamp.version` selects the chart version, `namespace` changes its namespace,
-`serviceAccountClusterRoleName` selects the Pod ServiceAccount's ClusterRole
-(defaults to read-only `view`), and `values` merges additional chart settings.
-The dashboard authenticates users with their own Kubernetes credentials;
-Nimbus leaves shared ServiceAccount-token authentication disabled and does not
-replace users' Kubernetes RBAC.
-
-AWS cluster tags apply to Nimbus-managed, tag-capable cluster resources and
-supported children. A dedicated Nimbus network opts in with
-`clusterNameForTags`; shared networks are left unchanged. Auto Scaling tag
-propagation labels newly launched nodes only, so running instances are not
-backfilled automatically. Activate `nimbus:cluster` as a user-defined cost
-allocation tag in Billing and Cost Management before using Cost Explorer.
-
-### `createGlobalLoadBalancer(name, config)`
-
-Routes traffic across clusters using DNS-based health checks.
-
-| Strategy         | Behavior                                                 |
-| ---------------- | -------------------------------------------------------- |
-| `active-active`  | Weighted routing — equal traffic to all healthy clusters |
-| `active-passive` | Failover — primary cluster, secondary on failure         |
-| `geo`            | Geolocation — route by client continent                  |
+## Database operators
 
 ### `createOperator(type, config)`
 
@@ -442,293 +347,10 @@ result of a previous run) and transaction-safe (they run inside the same
 transaction as the rest of the applying script, so `CREATE INDEX CONCURRENTLY`,
 `VACUUM`, and a stray `COMMIT;` will all error or truncate the script early).
 
-## Provider Options
+## Additional guides
 
-```typescript
-providerOptions: {
-  aws: {
-    // Network
-    fckNatInstanceType: "t4g.nano",
-    availabilityZoneCount: 2,
-    // Cluster
-    autoMode: true,
-    addons: ["vpc-cni", "coredns"],
-    endpointAccess: "both",
-    // State backend
-    stateKmsKeyArn: "arn:aws:kms:...",
-    stateForceDestroy: false,
-  },
-  azure: {
-    resourceGroupName: "my-rg",  // Required for all Azure resources
-    // Network
-    subnetCount: 2,
-    // Cluster
-    azureCni: true,
-    virtualNodes: false,
-    aadTenantId: "...",
-    dnsPrefix: "...",
-    // Secrets
-    tenantId: "...",             // Required for Key Vault
-    objectId: "...",
-    sku: "standard",
-  },
-}
-```
-
-## Cloud Target Flexibility
-
-All factory functions accept flexible cloud arguments:
-
-```typescript
-// String shorthand (uses DEFAULT_REGIONS)
-await createNetwork("prod", { cloud: "aws", ... });
-
-// Explicit target
-await createNetwork("prod", { cloud: { provider: "aws", region: "eu-west-1" }, ... });
-
-// Multi-cloud array
-await createNetwork("prod", { cloud: ["aws", "azure"], ... });
-```
-
-## Direct Cloud Functions (Escape Hatch)
-
-### AWS EKS options
-
-`createEksCluster(..., options?)` accepts these AWS-specific options directly.
-The same options are available under `createCluster(..., { providerOptions: {
-aws: ... }})`.
-
-| Option | Description |
-| --- | --- |
-| `publicAccessCidrs` | CIDRs allowed to reach the public API endpoint. Applies when public endpoint access is enabled. |
-| `clusterAdminRoleArn` | IAM principal ARN (role or user) granted `AmazonEKSClusterAdminPolicy` through an EKS access entry. |
-| `kubernetesProviderRoleArn` | Optional IAM role assumed by the Kubernetes provider's `aws eks get-token` command. Use it when the provider must authenticate as a role different from the deployment credentials; that role must have EKS access. |
-| `nodeGroupRootDisk` | Enables an encrypted gp3 root disk launch template for managed node groups. `sizeGiB` defaults to 20 and `deleteOnTermination` defaults to `true`. Omit the option to preserve EKS defaults. |
-| `nodeGroupAmiType` | AMI family for managed node groups, such as `AL2023_ARM_64_STANDARD`. |
-| `nodeGroupInstanceTags` | EC2 instance tags propagated through managed node-group launch-template `tagSpecifications`. |
-| `ebsCsiDriver` | Installs the EBS CSI add-on and Pod Identity agent, with a dedicated role attached to `AmazonEBSCSIDriverPolicyV2`. Defaults to `false`. |
-| `metricsServer` | Opt-in EKS community add-on providing the Kubernetes Resource Metrics API. Set `true` to use the EKS-compatible default, or pass `{ enabled?, addonVersion?, configurationValues? }`. EKS validates version compatibility. This is separate from Prometheus and is EKS-only. |
-| `communityAddons` | Opts into typed EKS community add-ons for Prometheus Node Exporter, kube-state-metrics, and cert-manager. Each accepts optional `version` and `configurationValues`. |
-| `clusterAutoscaler` | Install one Cluster Autoscaler controller when at least one managed pool uses `scaling: { mode: "cluster-autoscaler" }`. Optional `version` selects the Helm chart version; Nimbus chooses a pinned chart compatible with the cluster version when omitted. Nimbus uses IRSA for the controller; it creates the cluster OIDC provider unless `oidcProviderArn` supplies an existing one. |
-| `karpenter` | Install one Karpenter controller when a pool uses `scaling: { mode: "karpenter", ... }`. Optional `version`, `namespace`, and `interruptionHandling` configure the shared controller. Spot interruption handling defaults on for Spot pools. |
-| `autoscalerControllerNodePoolName` | Required when either scaler is selected. Names a managed pool with `minNodes >= 1`; Nimbus pins controller pods to this steady pool. |
-| `awsAddons` | Typed opt-in AWS add-ons: EFS CSI, Secrets Store CSI provider, CloudWatch Observability, CSI snapshot controller, GuardDuty agent, Node Monitoring agent, S3 Mountpoint CSI, and FSx CSI. Each accepts version/configuration overrides; add-ons needing AWS access require a caller-provided role ARN. |
-| `authenticationMode` / `bootstrapClusterCreatorAdminPermissions` | EKS access configuration. Defaults preserve Nimbus's existing `API_AND_CONFIG_MAP` mode and AWS's creator-admin behavior. When creator admin is disabled, use API authentication and provide `clusterAdminRoleArn` so Nimbus can grant access before Kubernetes resources run. |
-| `upgradePolicy` | Sets `supportType` to `STANDARD` or `EXTENDED`. Omitted preserves AWS's current `EXTENDED` default. `STANDARD` avoids extended-support charges but AWS automatically upgrades the control plane at end of standard support; `EXTENDED` keeps the version longer at additional cost. See [AWS upgrade policy](https://docs.aws.amazon.com/eks/latest/userguide/view-upgrade-policy.html). |
-
-On AWS networks, `privateSubnetIds` resolves after route-table associations and the NAT default route report `active`. The fck-nat Auto Scaling Group waits up to 15 minutes for one healthy in-service instance before creating the private default route. If the route remains `blackhole`, the network output fails and dependent node groups are not created. Use `natStrategy: "managed"` for AWS-managed NAT gateways.
-
-The EBS CSI option is not supported with EKS Auto Mode, which has built-in block
-storage. Nimbus does not create or change a StorageClass; create one with
-`provisioner: ebs.csi.aws.com` and `parameters.type: gp3` to provision gp3 PVCs.
-
-Selecting `communityAddons.prometheusNodeExporter` or `communityAddons.kubeStateMetrics`
-disables the matching kube-prometheus-stack subchart on that cluster to avoid duplicate
-agents. Configure Prometheus scraping for the community add-on services as needed.
-Selecting `communityAddons.certManager` replaces the platform stack's cert-manager Helm
-release; Nimbus continues creating its configured issuers and certificates.
-
-`awsAddons` keeps these add-ons opt-in. EFS CSI, CloudWatch Observability, and FSx CSI
-use `podIdentityRoleArn`; Nimbus installs the Pod Identity agent when needed and creates
-the association, but the caller creates the role and attaches required permissions.
-S3 Mountpoint CSI requires `serviceAccountRoleArn` for a caller-created IRSA role scoped
-to the target bucket. The Secrets Store CSI provider itself needs no IAM role; application
-pods need their own identity. The snapshot controller and Node Monitoring agent need no
-add-on role. EKS Auto Mode already includes Node Monitoring, so Nimbus rejects selecting
-it explicitly there.
-
-Nimbus creates Pod Identity associations, not IAM roles or policies. Pod Identity roles
-must trust `pods.eks.amazonaws.com` for `sts:AssumeRole` and `sts:TagSession`; restrict
-the trust with EKS request-tag conditions for the intended namespace and service account.
-The Pulumi deployment principal also needs `iam:PassRole` for each supplied role. See
-[AWS Pod Identity role trust guidance](https://docs.aws.amazon.com/eks/latest/userguide/pod-id-role.html).
-
-| Add-on | Role permissions to attach |
-| --- | --- |
-| EFS CSI controller (`efsCsiDriver.podIdentityRoleArn`) | EFS only: `AmazonEFSCSIDriverPolicy`. S3 Files: `AmazonS3FilesCSIDriverPolicy`; both backends: both policies. |
-| EFS CSI node (`efsCsiDriver.nodePodIdentityRoleArn`, optional) | Required for S3 Files: `AmazonS3FilesClientFullAccess`, `AmazonS3ReadOnlyAccess`, and `AmazonElasticFileSystemsUtils`. |
-| CloudWatch Observability | `CloudWatchAgentServerPolicy` and `AWSXrayWriteOnlyAccess`. |
-| FSx CSI | AWS documents `AmazonFSxFullAccess` as required; it is broad, so review the policy and scope it to your environment where possible. |
-| S3 Mountpoint CSI | Create a bucket-scoped policy: `s3:ListBucket` on the bucket ARN and `s3:GetObject`, `s3:PutObject`, `s3:AbortMultipartUpload`, and `s3:DeleteObject` on its object ARNs. Remove write actions for read-only workloads. The cluster needs an IAM OIDC provider for IRSA. |
-| Secrets Store CSI provider | No add-on role. Grant each workload only the required Secrets Manager and/or SSM Parameter Store read actions and resource ARNs; add `kms:Decrypt` for customer-managed keys when needed. |
-
-The EFS node role is only needed for S3 Files. AWS's current guidance and policy details
-are in the [EKS add-on IAM reference](https://docs.aws.amazon.com/eks/latest/userguide/workloads-add-ons-available-eks.html),
-[S3 Files CSI setup](https://docs.aws.amazon.com/eks/latest/userguide/s3files-csi.html), and
-[Mountpoint CSI setup](https://docs.aws.amazon.com/eks/latest/userguide/s3-csi-create.html).
-
-GuardDuty Runtime Monitoring must be enabled for the GuardDuty agent to provide runtime
-detection. Use that option only when Nimbus should own the EKS add-on lifecycle.
-CloudWatch Observability enables AWS metrics and log collection by default; review its
-collection settings if Nimbus Alloy also ships logs.
-
-```typescript
-createCluster(
-  "prod",
-  {
-    cloud: "aws",
-    nodePools: [{ name: "workers", instanceType: "m7i.large", minNodes: 2, maxNodes: 5 }],
-    providerOptions: {
-      aws: {
-        publicAccessCidrs: ["203.0.113.0/24"],
-        clusterAdminRoleArn: adminRole.arn,
-        nodeGroupRootDisk: { sizeGiB: 80, deleteOnTermination: true },
-        ebsCsiDriver: true,
-        communityAddons: {
-          prometheusNodeExporter: {},
-          kubeStateMetrics: {},
-          certManager: {},
-        },
-        awsAddons: {
-          efsCsiDriver: {
-            podIdentityRoleArn: config.require("efsCsiRoleArn"),
-            // Optional; required only when using EFS CSI with S3 Files.
-            nodePodIdentityRoleArn: config.get("efsS3FilesNodeRoleArn"),
-          },
-          secretsStoreCsiDriverProvider: {},
-          cloudWatchObservability: { podIdentityRoleArn: config.require("cloudWatchRoleArn") },
-          csiSnapshotController: {},
-          guardDutyAgent: {}, // Requires GuardDuty Runtime Monitoring to be enabled.
-          nodeMonitoringAgent: {},
-          mountpointS3CsiDriver: {
-            serviceAccountRoleArn: config.require("s3CsiRoleArn"),
-          },
-          fsxCsiDriver: { podIdentityRoleArn: config.require("fsxCsiRoleArn") },
-        },
-      },
-    },
-  },
-  network
-);
-```
-
-Enable Metrics Server independently of Prometheus when `kubectl top` or
-resource-metrics consumers need recent CPU and memory readings:
-
-```typescript
-createCluster(
-  "prod",
-  {
-    cloud: "aws",
-    nodePools: [{ name: "workers", instanceType: "m7i.large", minNodes: 2, maxNodes: 5 }],
-    providerOptions: {
-      aws: {
-        metricsServer: {
-          enabled: true,
-          addonVersion: "v0.7.2-eksbuild.1",
-          configurationValues: JSON.stringify({ replicas: 2 }),
-        },
-      },
-    },
-  },
-  network
-);
-```
-
-Omit `addonVersion` to let EKS select its compatible default. After deployment,
-allow Metrics Server an initial sampling interval, then check the API and query
-current usage:
-
-```sh
-kubectl get apiservice v1beta1.metrics.k8s.io
-kubectl top nodes
-kubectl top pods -A
-```
-
-The APIService should report `Available=True`. Metrics Server serves short-lived
-resource metrics for commands such as `kubectl top` and resource-based autoscaling;
-Prometheus remains the separate system for historical monitoring and alerting.
-
-EKS node pools also support explicit capacity ownership. Existing pool objects
-without `scaling` keep their current EKS managed-node-group behavior. Use
-`{ mode: "fixed" }` to pin a managed pool to `desiredNodes ?? minNodes`,
-`{ mode: "cluster-autoscaler" }` for a managed group Cluster Autoscaler may
-adjust, or `mode: "karpenter"` for a Karpenter NodePool with instance types,
-capacity types, optional AZs, and CPU/memory limits. See the mixed example in
-[EKS mixed autoscaling](./examples.md#eks-mixed-cluster-autoscaler-and-karpenter-pools).
-For a zero-node fixed pool, Nimbus sets desired and minimum size to zero and
-maximum size to one because the EKS API requires `maxSize >= 1`.
-
-Nimbus creates one controller and IAM role per selected scaler. Cluster
-Autoscaler uses IRSA to support the AWS SDK version in its pinned image;
-Karpenter uses Pod Identity, and Nimbus attaches the Pod Identity Agent when
-needed. Cluster Autoscaler gets discovery tags and scale permissions only for selected managed groups;
-Karpenter receives a separate worker role and provisions only its own NodePools
-in Nimbus private subnets using the EKS cluster security group. A stable managed
-pool is required for controller placement. Keep the stable pool's minimum at
-one or more nodes so the controllers can start before burst capacity exists.
-
-For a complete Pulumi config example, see [EKS with restricted access, encrypted node disks, and EBS CSI](./examples.md#eks-with-restricted-access-encrypted-node-disks-and-ebs-csi).
-
-### CloudFront VPC Origins
-
-`createCdn` can create one shared CloudFront VPC Origin from an existing private ALB or NLB ARN.
-Nimbus validates the load balancer and VPC Origin prerequisites, then adds ingress from AWS's
-service-managed CloudFront VPC Origins security group.
-
-| Option                                                      | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vpcOrigin`                                                 | Optional shared private origin. `type: "alb-vpc"` accepts `albArn`, `originProtocolPolicy`, `httpPort`, `httpsPort`, `securityGroupPort`, and `albSecurityGroupIds`. `type: "nlb-vpc"` accepts `nlbArn`, HTTP-only `originProtocolPolicy`, `httpPort` (default 80), `securityGroupPort`, and `nlbSecurityGroupIds`; NLBs must be IPv4 and have no TLS listeners. With one attached security group, Nimbus infers it; otherwise select attached groups explicitly. Private origins also derive the trusted client-host header from viewer `Host` with a CloudFront Function. |
-| `aliases`                                                   | Additional hostnames on a distribution; all are routed through the shared ALB or NLB and need coverage in the viewer ACM certificate. Keep aliases in the configured Route 53 hosted zone.                                                                                                                                                                                                                                                                                                                                                                                  |
-| `cachePolicyId` / `originRequestPolicyId`                   | Default behavior policy IDs, overridable per ordered path behavior. Private origins default to CachingDisabled and a Host-forwarding policy.                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `allowedMethods` / `cachedMethods` / `viewerProtocolPolicy` | Distribution behavior settings, overridable per ordered path behavior. Cached methods must be included in allowed methods.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-
-```typescript
-createCdn("prod-apps", {
-  cloud: "aws",
-  hostedZoneId,
-  originSecretHeader: "X-Reyem-Origin-Secret",
-  originSecretValue,
-  vpcOrigin: {
-    type: "alb-vpc",
-    albArn: traefikAlb.arn,
-    albSecurityGroupIds: [traefikAlbSecurityGroup.id],
-    originProtocolPolicy: "http-only",
-    httpPort: 80,
-  },
-  distributions: [
-    {
-      hostname: "app1.example.com",
-      aliases: ["app2.example.com"],
-      certificateArn,
-      cachePolicyId: "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
-      orderedCacheBehaviors: [
-        { pathPattern: "/api/*", cachePolicyId: "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" },
-      ],
-    },
-  ],
-});
-```
-
-Dynamic, authenticated, and personalized routes should remain uncached unless their cache key
-and origin request policy include every response-varying request value. Public custom origins
-keep their previous defaults. If CloudFront uses HTTPS to reach the ALB, its certificate must
-cover the forwarded viewer `Host` alias. NLB VPC Origins require HTTP-only because CloudFront
-rejects NLB TLS listeners. See [Shared private Traefik ALB for multiple app hostnames](./examples.md#shared-private-traefik-alb-for-multiple-app-hostnames) and [Shared private Traefik NLB with HTTP VPC Origin](./examples.md#shared-private-traefik-nlb-with-http-vpc-origin) for full examples and ownership/prerequisite details.
-
-For maximum control, use cloud-specific functions directly via subpath imports:
-
-```typescript
-import { createAwsNetwork, createEksCluster } from "@reyemtech/nimbus/aws";
-import { createAzureNetwork, createAksCluster } from "@reyemtech/nimbus/azure";
-```
-
-Available functions:
-
-- `createAwsNetwork(name, config, options?)` / `createAzureNetwork(name, config, options)`
-- `createEksCluster(name, config, network, options?)` / `createAksCluster(name, config, network, options)`
-- `createRoute53Dns(name, config)` / `createAzureDns(name, config, options)`
-- `createAwsSecrets(name, config)` / `createAzureSecrets(name, config, options)`
-- `createAwsStateBackend(name, config, options?)` / `createAzureStateBackend(name, config, options)`
-
-## Escape Hatches
-
-Every resource exposes its cloud-native object via `nativeResource`:
-
-```typescript
-import * as aws from "@pulumi/aws";
-
-const cluster = await createCluster("prod", { cloud: "aws", ... }, network) as ICluster;
-const eksCluster = cluster.nativeResource as aws.eks.Cluster;
-eksCluster.arn.apply(arn => console.log("EKS ARN:", arn));
-```
+- [Examples](examples.md)
+- [AWS/EKS details](providers/aws.md)
+- [Azure/AKS details](providers/azure.md)
+- [Rackspace modes and state ownership](providers/rackspace.md)
+- [Documentation index](README.md)

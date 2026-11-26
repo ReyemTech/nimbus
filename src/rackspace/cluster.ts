@@ -12,7 +12,8 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import * as spot from "@reyemtech/pulumi-rackspace-spot";
 import { parse as parseYaml } from "yaml";
-import type { ICluster, IClusterConfig } from "../cluster";
+import type { IClusterConfig, IClusterWithFluentOperations } from "../cluster";
+import { withClusterFluentOperations } from "../cluster/fluent";
 import type { IManagedNodePool } from "../cluster";
 import type { IRackspaceProviderOptions } from "../factories/types";
 import { resolveCloudTarget } from "../types";
@@ -39,7 +40,7 @@ export function createRackspaceSpotCluster(
   name: string,
   config: IClusterConfig,
   options: IRackspaceProviderOptions
-): ICluster {
+): IClusterWithFluentOperations {
   const cloud = Array.isArray(config.cloud) ? (config.cloud[0] ?? "rackspace") : config.cloud;
   const target = resolveCloudTarget(cloud);
   validateUnsupportedPoolScaling("Rackspace Spot", config);
@@ -64,7 +65,7 @@ export function createRackspaceSpotCluster(
         : undefined
     );
     const endpoint = endpointFromKubeconfig(options.kubeconfig, options.kubeconfigContext);
-    return {
+    return withClusterFluentOperations({
       name,
       cloud: target,
       endpoint,
@@ -74,7 +75,7 @@ export function createRackspaceSpotCluster(
       nativeResource: provider as unknown as pulumi.Resource,
       provider,
       storageTiers: config.storageTiers,
-    };
+    });
   }
 
   if (!options.cloudspaceName) {
@@ -148,7 +149,7 @@ export function createRackspaceSpotCluster(
       : undefined
   );
 
-  return {
+  return withClusterFluentOperations({
     name,
     cloud: target,
     endpoint,
@@ -158,7 +159,7 @@ export function createRackspaceSpotCluster(
     nativeResource: provider as unknown as pulumi.Resource,
     provider,
     storageTiers: config.storageTiers,
-  };
+  });
 }
 
 function endpointFromKubeconfig(

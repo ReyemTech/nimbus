@@ -329,7 +329,18 @@ automatically. This allows separate cluster prefixes to coexist without
 colliding. DNS-01 certificate validation is independent of service-record
 visibility: for a publicly registered domain, cert-manager can publish ACME
 challenge records in the public authoritative zone while the application record
-is private. A private-only domain cannot be validated by a public ACME authority.
+is private. In split-zone mode, Nimbus configures its Helm-managed cert-manager
+to run DNS-01 self-checks against public recursive resolvers (Cloudflare and
+Google by default), so a private zone shadowing the parent suffix does not hide
+the public ACME TXT record. Override the resolver list with
+`externalDns.route53.dns01RecursiveNameservers` when cluster egress policy
+requires different public resolvers. Nimbus also sets the solver's
+`hostedZoneID` when exactly one public `hostedZoneIds` value is configured.
+Split DNS currently requires Helm-managed cert-manager; if the cluster uses
+the EKS community cert-manager add-on, disable that add-on for this cluster and
+let the platform stack manage cert-manager, or disable cert-manager in the
+platform stack. A private-only domain cannot be validated by a public ACME
+authority.
 
 See [AWS private DNS example](../examples/aws.md#private-route-53-and-ingress-visibility)
 for complete public/private Ingress and stack configuration.

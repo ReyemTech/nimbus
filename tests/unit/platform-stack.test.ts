@@ -711,6 +711,69 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
     );
   });
 
+  it("uses public DNS for cert-manager DNS01 checks when split Route 53 zones are enabled", () => {
+    const cluster = {
+      ...makeCluster("test"),
+      nativeResource: new aws.eks.Cluster("test", {} as aws.eks.ClusterArgs),
+      awsVpcId: mockOutput("vpc-123"),
+      awsRegion: "ca-central-1",
+      providerResources: { podIdentityAgent: {} as pulumi.Resource },
+    } as unknown as ICluster;
+    createPlatformStack("test", {
+      cluster,
+      domain: "example.com",
+      traefik: { enabled: false },
+      certManager: { values: { extraArgs: ["--v=2"] } },
+      externalDns: {
+        dnsProvider: "route53",
+        hostedZoneIds: ["Z-PUBLIC"],
+        domainFilters: ["example.com"],
+        route53: { privateHostedZones: [{ mode: "create", prefix: "cac-1" }] },
+      },
+    });
+
+    const certManagerRelease = createdReleases.find(
+      (release) => release.name === "test-cert-manager"
+    );
+    expect(certManagerRelease?.args.values.extraArgs).toEqual([
+      "--v=2",
+      "--dns01-recursive-nameservers-only",
+      "--dns01-recursive-nameservers=1.1.1.1:53,8.8.8.8:53",
+    ]);
+    const issuer = createdCustomResources.find(
+      (resource) =>
+        resource.args.kind === "ClusterIssuer" && resource.args.metadata?.name === "letsencrypt-dns"
+    );
+    expect(issuer?.args.spec.acme.solvers[0].dns01.route53).toEqual({
+      region: "ca-central-1",
+      hostedZoneID: "Z-PUBLIC",
+    });
+  });
+
+  it("rejects split Route 53 DNS with EKS-managed cert-manager", () => {
+    const cluster = {
+      ...makeCluster("test"),
+      nativeResource: new aws.eks.Cluster("test", {} as aws.eks.ClusterArgs),
+      awsVpcId: mockOutput("vpc-123"),
+      awsRegion: "ca-central-1",
+      eksAddons: ["cert-manager"],
+    } as unknown as ICluster;
+
+    expect(() =>
+      createPlatformStack("test", {
+        cluster,
+        domain: "example.com",
+        traefik: { enabled: false },
+        externalDns: {
+          dnsProvider: "route53",
+          hostedZoneIds: ["Z-PUBLIC"],
+          domainFilters: ["example.com"],
+          route53: { privateHostedZones: [{ mode: "create", prefix: "cac-1" }] },
+        },
+      })
+    ).toThrow(/requires Helm-managed cert-manager/);
+  });
+
   it("uses the effective cert-manager service account and rolls pods after Pod Identity is ready", () => {
     const cluster = {
       ...makeCluster("test"),

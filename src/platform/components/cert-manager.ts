@@ -15,13 +15,28 @@ export function deployCertManager(
   provider: k8s.Provider,
   defaultVersion: string | undefined,
   podIdentityAssociation?: pulumi.Resource,
-  podIdentityAssociationId?: pulumi.Input<string>
+  podIdentityAssociationId?: pulumi.Input<string>,
+  dns01RecursiveNameservers?: ReadonlyArray<string>
 ): k8s.helm.v3.Release {
   ensureNamespace("cert-manager", provider);
   const serviceAccountValues =
     (config?.values?.serviceAccount as Record<string, unknown> | undefined) ?? {};
   const podAnnotations =
     (config?.values?.podAnnotations as Record<string, unknown> | undefined) ?? {};
+  const configuredExtraArgs = Array.isArray(config?.values?.extraArgs)
+    ? config.values.extraArgs.filter((arg): arg is string => typeof arg === "string")
+    : [];
+  const extraArgs = dns01RecursiveNameservers
+    ? [
+        ...configuredExtraArgs.filter(
+          (arg) =>
+            !arg.startsWith("--dns01-recursive-nameservers=") &&
+            arg !== "--dns01-recursive-nameservers-only"
+        ),
+        "--dns01-recursive-nameservers-only",
+        `--dns01-recursive-nameservers=${dns01RecursiveNameservers.join(",")}`,
+      ]
+    : undefined;
 
   return new k8s.helm.v3.Release(
     `${name}-cert-manager`,
@@ -34,6 +49,7 @@ export function deployCertManager(
       values: {
         crds: { enabled: true },
         ...config?.values,
+        ...(extraArgs ? { extraArgs } : {}),
         ...(podIdentityAssociation && {
           serviceAccount: {
             name: certManagerServiceAccountName(config),

@@ -41,6 +41,8 @@ The available methods are `createServiceAccountAccess`, `createAccessGateway`, `
 
 For AWS EKS Route 53 split DNS, `externalDns.route53.privateHostedZones` opts into a public ExternalDNS controller for Ingress/Service/Traefik records and a private controller for private Ingresses. A created zone accepts an optional one-label `prefix` and defaults to `internal.<domain>`; use distinct prefixes such as `cac-1` for clusters sharing a parent domain. Ingresses select visibility with `nimbus.dev/dns-visibility: public|private`; missing annotations remain public. Existing private zones require an explicit zone ID and domain filter. Split mode defaults to `upsert-only` to preserve old records during public-to-private migration. See [AWS private DNS and Ingress visibility](providers/aws.md#private-route-53-zones-and-ingress-dns-visibility) for the complete API, ownership, Tailnet, and migration behavior.
 
+In split-zone mode, Helm-managed cert-manager uses public recursive DNS resolvers for DNS-01 self-checks. Configure `externalDns.route53.dns01RecursiveNameservers` to use resolvers reachable from your cluster. The EKS community cert-manager add-on is not supported with split DNS because Nimbus cannot configure its controller arguments through the add-on lifecycle.
+
 ## ServiceAccount access
 
 `createServiceAccountAccess(name, config)` accepts an `IServiceAccountAccessConfig` with a cluster, a typed `scope`, and optional ServiceAccount namespace and API endpoint override. Scopes support cluster `cluster-admin`/`view`, namespace `admin`/`edit`/`view`, and custom Role or ClusterRole references. The returned `IServiceAccountAccess` includes the ServiceAccount, token Secret, RBAC binding, and secret `kubeconfig` output.

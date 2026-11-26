@@ -1,5 +1,7 @@
 /** Default AWS private hosted-zone prefix when one is not specified. */
 export const DEFAULT_PRIVATE_DNS_PREFIX = "internal";
+/** Public resolvers used for cert-manager DNS-01 checks in split-horizon DNS mode. */
+export const DEFAULT_ROUTE53_DNS01_RECURSIVE_NAMESERVERS = ["1.1.1.1:53", "8.8.8.8:53"] as const;
 
 export type ExternalDnsVisibility = "public" | "private";
 

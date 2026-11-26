@@ -96,6 +96,8 @@ export interface IRoute53ExternalDnsConfig {
   readonly privateTxtOwnerId?: string;
   /** Private record policy. Defaults to `upsert-only`. */
   readonly privatePolicy?: "upsert-only" | "sync";
+  /** Public recursive DNS servers for cert-manager DNS-01 self-checks in split-horizon mode. */
+  readonly dns01RecursiveNameservers?: ReadonlyArray<string>;
   /** Stable Nimbus deployment identity for the public Ingress controller. */
   readonly publicControllerId?: string;
   /** Stable Nimbus deployment identity for the private Ingress controller. */

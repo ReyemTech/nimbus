@@ -47,6 +47,15 @@ export {
 export { type StorageTier, type StorageTierMap, STORAGE_TIERS, resolveStorageTier } from "./types";
 export { type IExposedService } from "./types";
 
+// Workload availability
+export {
+  type IPodDisruptionBudgetConfig,
+  type IPodSchedulingConfig,
+  type ResolvedPodDisruptionBudget,
+  resolvePodDisruptionBudget,
+  buildPodDisruptionBudgetSpec,
+} from "./availability";
+
 // Nimbus singleton
 export { nimbus } from "./nimbus";
 export type {

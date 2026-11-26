@@ -31,10 +31,14 @@ const network = await createNetwork("prod", {
   natStrategy: "managed",
 });
 
-const cluster = createCluster("prod", {
-  cloud: "aws",
-  nodePools: [{ name: "system", instanceType: "t4g.large", minNodes: 2, maxNodes: 4 }],
-}, network as INetwork) as IClusterWithFluentOperations;
+const cluster = createCluster(
+  "prod",
+  {
+    cloud: "aws",
+    nodePools: [{ name: "system", instanceType: "t4g.large", minNodes: 2, maxNodes: 4 }],
+  },
+  network as INetwork
+) as IClusterWithFluentOperations;
 
 const access = cluster.createServiceAccountAccess("ci-reader", {
   scope: { type: "namespace", namespace: "apps", role: "view" },
@@ -46,7 +50,7 @@ For a scaffolded project, run `npx @reyemtech/nimbus new my-infra aws`.
 
 ## Documentation
 
-Start at the [documentation index](docs/README.md). It links to [provider guides](docs/providers/), [examples](docs/examples.md), [Kubernetes access](docs/guides/kubernetes-access.md), and the [API reference](docs/api-reference.md).
+Start at the [documentation index](docs/README.md). It links to [provider guides](docs/providers/), [examples](docs/examples.md), [Kubernetes access](docs/guides/kubernetes-access.md), and the [API reference](docs/api-reference.md). AWS EKS users can also see the [private Route 53 and Ingress visibility guide](docs/providers/aws.md#private-route-53-zones-and-ingress-dns-visibility).
 
 ## Development
 

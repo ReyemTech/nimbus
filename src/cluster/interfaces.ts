@@ -162,6 +162,11 @@ export interface ICluster {
    */
   readonly awsResourceTags?: Readonly<Record<string, string>>;
 
+  /** AWS EKS VPC ID, exposed to AWS-specific cluster components. */
+  readonly awsVpcId?: pulumi.Output<string>;
+  /** AWS region for provider-specific cluster components. */
+  readonly awsRegion?: string;
+
   /** EKS add-on names managed by Nimbus on this cluster, when applicable. */
   readonly eksAddons?: ReadonlyArray<string>;
 }

@@ -4,20 +4,20 @@ Nimbus exports provider-agnostic factories from `@reyemtech/nimbus`, plus provid
 
 ## High-level factories
 
-| Factory | Purpose |
-| --- | --- |
-| `createNetwork(name, config)` | Create or attach provider networking. |
-| `createCluster(name, config, network?)` | Create EKS, AKS, or Rackspace Spot cluster; multi-cloud targets return one cluster per provider. |
-| `createDns(name, config)` | Create DNS zones and records. |
-| `createSecrets(name, config)` | Create a provider-backed secrets store. |
-| `createPlatformStack(name, config)` | Install cluster platform services, including ingress, DNS automation, cert-manager, and optional Headlamp. |
-| `createObservabilityStack(name, config)` | Install monitoring, logging, dashboards, and alerting. |
-| `createAccessGateway(name, config)` | Install a Tailscale or WireGuard access gateway. |
-| `createServiceAccountAccess(name, config)` | Create scoped Kubernetes ServiceAccount access and a secret portable kubeconfig. |
-| `createOperator(type, config)` | Install a database operator. |
-| `createArgoCD(name, config)` | Configure Argo CD on an existing cluster. |
-| `createGlobalLoadBalancer(name, config)` | Configure global traffic distribution. |
-| `createStateBackend(name, config)` | Configure cloud object storage and locking for Pulumi state. |
+| Factory                                    | Purpose                                                                                                    |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `createNetwork(name, config)`              | Create or attach provider networking.                                                                      |
+| `createCluster(name, config, network?)`    | Create EKS, AKS, or Rackspace Spot cluster; multi-cloud targets return one cluster per provider.           |
+| `createDns(name, config)`                  | Create DNS zones and records.                                                                              |
+| `createSecrets(name, config)`              | Create a provider-backed secrets store.                                                                    |
+| `createPlatformStack(name, config)`        | Install cluster platform services, including ingress, DNS automation, cert-manager, and optional Headlamp. |
+| `createObservabilityStack(name, config)`   | Install monitoring, logging, dashboards, and alerting.                                                     |
+| `createAccessGateway(name, config)`        | Install a Tailscale or WireGuard access gateway.                                                           |
+| `createServiceAccountAccess(name, config)` | Create scoped Kubernetes ServiceAccount access and a secret portable kubeconfig.                           |
+| `createOperator(type, config)`             | Install a database operator.                                                                               |
+| `createArgoCD(name, config)`               | Configure Argo CD on an existing cluster.                                                                  |
+| `createGlobalLoadBalancer(name, config)`   | Configure global traffic distribution.                                                                     |
+| `createStateBackend(name, config)`         | Configure cloud object storage and locking for Pulumi state.                                               |
 
 See provider guides for cloud-specific options: [AWS](providers/aws.md), [Azure](providers/azure.md), and [Rackspace](providers/rackspace.md).
 
@@ -40,6 +40,10 @@ The available methods are `createServiceAccountAccess`, `createAccessGateway`, `
 `createPlatformStack` can install core ingress, cert-manager, and DNS automation, with optional components such as Headlamp. Headlamp is installed as a private ClusterIP service by default. By default, Nimbus creates a ClusterRole that allows `get`, `list`, and `watch` across Kubernetes API resources and binds it to Headlamp's managed pod ServiceAccount. This includes PVs, StorageClasses, VolumeAttributesClasses, Gateway API resources and policies, Roles, RoleBindings, Secrets, PriorityClasses, RuntimeClasses, Leases, webhook configurations, DeviceClasses, LeaderWorkerSets, and custom resources. All viewers share this identity; because it can read secret contents, expose Headlamp only through a trusted authentication proxy or private network such as a restricted tailnet. Set `headlamp.authentication: "user-token"` to use Kubernetes' built-in `view` role for Headlamp's pod and require each viewer to provide their own Kubernetes token. `createAccessGateway` supports Tailscale and WireGuard. `createObservabilityStack` is separate from the cluster-scoped EKS Metrics Server add-on.
 
 Headlamp CPU and memory usage comes from the Kubernetes Resource Metrics API. On EKS, enable `metricsServer` in the cluster's AWS provider options; the Headlamp ClusterRole already grants read access to `metrics.k8s.io`. See the [AWS Metrics Server example](examples/aws.md#eks-metrics-server).
+
+For AWS EKS Route 53 split DNS, `externalDns.route53.privateHostedZones` opts into a public ExternalDNS controller for Ingress/Service/Traefik records and a private controller for private Ingresses. A created zone accepts an optional one-label `prefix` and defaults to `internal.<domain>`; use distinct prefixes such as `cac-1` for clusters sharing a parent domain. Ingresses select visibility with `nimbus.dev/dns-visibility: public|private`; missing annotations remain public. Existing private zones require an explicit zone ID and domain filter. Split mode defaults to `upsert-only` to preserve old records during public-to-private migration. See [AWS private DNS and Ingress visibility](providers/aws.md#private-route-53-zones-and-ingress-dns-visibility) for the complete API, ownership, Tailnet, and migration behavior.
+
+In split-zone mode, Helm-managed cert-manager uses public recursive DNS resolvers for DNS-01 self-checks. Configure `externalDns.route53.dns01RecursiveNameservers` to use resolvers reachable from your cluster. The EKS community cert-manager add-on is not supported with split DNS because Nimbus cannot configure its controller arguments through the add-on lifecycle.
 
 ## ServiceAccount access
 

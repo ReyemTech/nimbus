@@ -60,6 +60,48 @@ export interface IExternalDnsConfig extends IPlatformComponentConfig {
   readonly hostedZoneIds?: ReadonlyArray<pulumi.Input<string>>;
   /** EKS community add-on version (separate from the Helm chart version). */
   readonly addonVersion?: pulumi.Input<string>;
+  /** AWS Route 53 private-zone and split-Ingress options. Omit to preserve legacy behavior. */
+  readonly route53?: IRoute53ExternalDnsConfig;
+}
+
+/** A private Route 53 zone created with an association to the cluster VPC. */
+export interface IRoute53PrivateZoneCreateConfig {
+  readonly mode: "create";
+  /** One DNS label prepended to the platform domain. Defaults to `internal`. */
+  readonly prefix?: string;
+  readonly comment?: string;
+}
+
+/** A caller-owned private zone referenced by ID. */
+export interface IRoute53PrivateZoneExistingConfig {
+  readonly mode: "existing";
+  readonly hostedZoneId: pulumi.Input<string>;
+  /** Explicit DNS suffix allowed for this zone. */
+  readonly domainFilter: string;
+  /** Create and own this cluster VPC association. Defaults to false. */
+  readonly associateClusterVpc?: boolean;
+}
+
+export type IRoute53PrivateHostedZoneConfig =
+  | IRoute53PrivateZoneCreateConfig
+  | IRoute53PrivateZoneExistingConfig;
+
+/** AWS Route 53 split-DNS options for Ingress publication. */
+export interface IRoute53ExternalDnsConfig {
+  /** Private zones managed or referenced by this EKS platform stack. */
+  readonly privateHostedZones?: ReadonlyArray<IRoute53PrivateHostedZoneConfig>;
+  /** Kubernetes annotation selecting `public` or `private`. Defaults to `nimbus.dev/dns-visibility`. */
+  readonly ingressVisibilityAnnotation?: string;
+  /** Stable private-controller TXT owner. Defaults to `<stack>-private`. */
+  readonly privateTxtOwnerId?: string;
+  /** Private record policy. Defaults to `upsert-only`. */
+  readonly privatePolicy?: "upsert-only" | "sync";
+  /** Public recursive DNS servers for cert-manager DNS-01 self-checks in split-horizon mode. */
+  readonly dns01RecursiveNameservers?: ReadonlyArray<string>;
+  /** Stable Nimbus deployment identity for the public Ingress controller. */
+  readonly publicControllerId?: string;
+  /** Stable Nimbus deployment identity for the private Ingress controller. */
+  readonly privateControllerId?: string;
 }
 
 /** Headlamp integrations Nimbus can infer from its cluster and platform configuration. */

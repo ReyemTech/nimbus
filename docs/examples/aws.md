@@ -557,3 +557,93 @@ Traefik Service stay owned by the platform stack; Nimbus owns the CloudFront VPC
 ingress rule. NLB VPC Origins require an internal IPv4 NLB with an attached security group, no
 TLS listener, and supported private subnets/region/AZs. See the [AWS VPC Origins
 prerequisites](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html#private-content-vpc-origins-prerequisites).
+
+### Private Route 53 and Ingress visibility
+
+This example creates `cac-1.reyem.tech` as a private hosted zone and retains
+the existing public zone for public records. The prefix is selectable; omit it
+to create `internal.reyem.tech`. Use a distinct prefix for each cluster and
+configure Tailnet split DNS to forward the same suffix to the cluster VPC.
+
+```typescript
+createPlatformStack("prod", {
+  cluster,
+  domain: "reyem.tech",
+  externalDns: {
+    dnsProvider: "route53",
+    hostedZoneIds: [publicZoneId],
+    domainFilters: ["reyem.tech"],
+    values: {
+      txtOwnerId: "prod-public",
+      registry: "txt",
+      policy: "upsert-only",
+    },
+    route53: {
+      privateHostedZones: [{ mode: "create", prefix: "cac-1" }],
+      privateTxtOwnerId: "prod-cac-1-private",
+      privatePolicy: "upsert-only",
+    },
+  },
+});
+```
+
+An Ingress with no visibility annotation continues to publish publicly. Select
+the private controller explicitly for internal applications:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: public-app
+  annotations:
+    nimbus.dev/dns-visibility: public
+spec:
+  rules:
+    - host: app.reyem.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app
+                port: { number: 80 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: private-argocd
+  annotations:
+    nimbus.dev/dns-visibility: private
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  rules:
+    - host: argocd.cac-1.reyem.tech
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: argocd-server
+                port: { number: 80 }
+```
+
+DNS publication does not make an Ingress private by itself. Configure its
+Ingress controller/load balancer for internal access separately, and configure
+TLS independently. Nimbus's private controller watches only Ingresses marked
+`private`; public and private controllers are limited to their respective
+hosted-zone IDs, so records cannot cross zones. Both controllers use independent
+TXT owner IDs. Tailnet/CoreDNS should forward `cac-1.reyem.tech` for this
+cluster; with the default prefix, forward `internal.reyem.tech` instead.
+
+Migration is non-destructive by default: apply the private annotation first,
+verify the private record and TXT owner, then remove the old public record if
+desired. Split mode defaults to `upsert-only`; `sync` is an explicit opt-in that
+can delete records. Created zones and explicitly requested VPC associations
+are Pulumi-owned; existing zones are caller-owned and are not deleted. Route 53
+may refuse deletion of a created zone until its records, including ExternalDNS
+TXT records, are removed. For existing zones, set `associateClusterVpc: true`
+only when Nimbus should manage the association. Cert-manager DNS-01 validation
+can use the public authoritative zone for a publicly registered domain even
+when the application's A/CNAME record is private.

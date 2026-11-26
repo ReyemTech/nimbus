@@ -15,12 +15,14 @@ import type { ICluster } from "../cluster";
 import type { IPlatformStack, IPlatformStackConfig } from "./interfaces";
 import type { IExposedService } from "../types";
 import { ensureNamespace } from "../utils/ensure-namespace";
+import { DEFAULT_ROUTE53_DNS01_RECURSIVE_NAMESERVERS } from "./components/route53-private-dns";
 import {
   deployTraefik,
   deployCertManager,
   certManagerServiceAccountName,
   deployExternalDns,
   deployEksExternalDns,
+  deployEksExternalDnsSplit,
   deployArgocd,
   deployVault,
   deployExternalSecrets,
@@ -97,6 +99,24 @@ function deployToCluster(
   const components: Record<string, k8s.helm.v3.Release> = {};
   const providerResources: Record<string, pulumi.Resource> = {};
   const provider = cluster.provider;
+  const splitRoute53Dns = (config.externalDns?.route53?.privateHostedZones?.length ?? 0) > 0;
+  const dns01RecursiveNameservers = splitRoute53Dns
+    ? (config.externalDns?.route53?.dns01RecursiveNameservers ??
+      DEFAULT_ROUTE53_DNS01_RECURSIVE_NAMESERVERS)
+    : undefined;
+
+  if (
+    splitRoute53Dns &&
+    config.certManager?.enabled !== false &&
+    cluster.eksAddons?.includes("cert-manager")
+  ) {
+    throw new Error(
+      "Route 53 split DNS requires Helm-managed cert-manager so Nimbus can configure public DNS-01 resolvers; disable the EKS cert-manager add-on or cert-manager in this platform stack"
+    );
+  }
+  if (dns01RecursiveNameservers && dns01RecursiveNameservers.length === 0) {
+    throw new Error("Route 53 split DNS requires at least one public DNS-01 recursive nameserver");
+  }
 
   // 1. Traefik (ingress controller) — enabled by default
   if (config.traefik?.enabled !== false) {
@@ -110,20 +130,54 @@ function deployToCluster(
     );
   }
 
-  let eksDnsResources: ReturnType<typeof deployEksExternalDns> | undefined;
+  let eksDnsResources:
+    | ReturnType<typeof deployEksExternalDns>
+    | ReturnType<typeof deployEksExternalDnsSplit>
+    | undefined;
+  if (
+    splitRoute53Dns &&
+    (config.externalDns?.dnsProvider !== "route53" ||
+      !(cluster.nativeResource instanceof aws.eks.Cluster))
+  ) {
+    throw new Error("Route 53 private hosted zones are supported only for AWS EKS clusters");
+  }
   if (
     config.externalDns?.enabled !== false &&
     config.externalDns?.dnsProvider === "route53" &&
     cluster.nativeResource instanceof aws.eks.Cluster
   ) {
-    eksDnsResources = deployEksExternalDns(
-      name,
-      cluster,
-      config.externalDns,
-      config.externalDns.awsProvider as aws.Provider | undefined,
-      certManagerServiceAccountName(config.certManager)
-    );
-    providerResources["external-dns"] = eksDnsResources.addon;
+    if (splitRoute53Dns) {
+      eksDnsResources = deployEksExternalDnsSplit(
+        name,
+        cluster,
+        config.domain,
+        config.externalDns,
+        provider,
+        config.externalDns.awsProvider as aws.Provider | undefined,
+        certManagerServiceAccountName(config.certManager)
+      );
+      eksDnsResources.releases.forEach((release, index) => {
+        providerResources[`external-dns-${index}`] = release;
+      });
+      const [publicRelease, privateRelease] = eksDnsResources.releases;
+      components["external-dns-public"] = publicRelease;
+      components["external-dns-private"] = privateRelease;
+      eksDnsResources.privateZones.forEach((zone, index) => {
+        providerResources[`route53-private-zone-${index}`] = zone;
+      });
+      eksDnsResources.identities.forEach((identity, index) => {
+        providerResources[`external-dns-identity-${index}`] = identity;
+      });
+    } else {
+      eksDnsResources = deployEksExternalDns(
+        name,
+        cluster,
+        config.externalDns,
+        config.externalDns.awsProvider as aws.Provider | undefined,
+        certManagerServiceAccountName(config.certManager)
+      );
+      providerResources["external-dns"] = eksDnsResources.addon;
+    }
     providerResources["cert-manager-route53-identity"] = eksDnsResources.certManagerIdentity;
     providerResources["pod-identity-agent"] = eksDnsResources.podIdentityAgent;
   }
@@ -137,7 +191,8 @@ function deployToCluster(
       provider,
       DEFAULT_VERSIONS.certManager,
       eksDnsResources?.certManagerIdentity,
-      eksDnsResources?.certManagerIdentity.associationId
+      eksDnsResources?.certManagerIdentity.associationId,
+      dns01RecursiveNameservers
     );
   }
   const certManagerReady =
@@ -186,7 +241,18 @@ function deployToCluster(
                 email: `contact@${config.domain}`,
                 server: "https://acme-v02.api.letsencrypt.org/directory",
                 privateKeySecretRef: { name: "letsencrypt-dns-account-key" },
-                solvers: [{ dns01: { route53: { region: dnsConfig.awsRegion ?? "us-east-1" } } }],
+                solvers: [
+                  {
+                    dns01: {
+                      route53: {
+                        region: dnsConfig.awsRegion ?? cluster.awsRegion ?? "us-east-1",
+                        ...(dnsConfig.hostedZoneIds?.length === 1
+                          ? { hostedZoneID: dnsConfig.hostedZoneIds[0] }
+                          : {}),
+                      },
+                    },
+                  },
+                ],
               },
             },
           },

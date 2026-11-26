@@ -15,7 +15,11 @@ export {
 } from "./headlamp";
 export { deployCertManager, certManagerServiceAccountName } from "./cert-manager";
 export { deployExternalDns } from "./external-dns";
-export { deployEksExternalDns } from "./external-dns-eks";
+export {
+  deployEksExternalDns,
+  deployEksExternalDnsSplit,
+  type IEksExternalDnsSplitResources,
+} from "./external-dns-eks";
 export { deployArgocd } from "./argocd";
 export { deployVault } from "./vault";
 export { deployExternalSecrets } from "./external-secrets";

@@ -638,6 +638,8 @@ export function createEksCluster(
     providerResources: podIdentityAgent ? { podIdentityAgent } : undefined,
     eksAddons: [...addonNames],
     awsResourceTags: tags,
+    awsVpcId: network.vpcId,
+    awsRegion: aws.config.region ?? target.region,
   });
 }
 

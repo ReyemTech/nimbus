@@ -179,7 +179,7 @@ describe("deployHeadlamp", () => {
     mockCreatedReleases.length = 0;
   });
 
-  it("creates a private Headlamp release with safe authentication and RBAC defaults", () => {
+  it("creates a private Headlamp release that authenticates with its read-only pod identity", () => {
     const prerequisite = {} as never;
     deployHeadlamp("prod", { enabled: true }, [], {} as never, "0.46.0", [prerequisite]);
 
@@ -194,10 +194,12 @@ describe("deployHeadlamp", () => {
       createNamespace: false,
       values: {
         fullnameOverride: "headlamp",
+        serviceAccount: { create: true },
+        automountServiceAccountToken: true,
         service: { type: "ClusterIP" },
         ingress: { enabled: false },
         config: {
-          unsafeUseServiceAccountToken: false,
+          unsafeUseServiceAccountToken: true,
           watchPlugins: false,
           staticPlugins: { enabled: true },
         },
@@ -224,9 +226,11 @@ describe("deployHeadlamp", () => {
         serviceAccountClusterRoleName: "headlamp-observer",
         values: {
           replicaCount: 2,
+          serviceAccount: { create: false },
+          automountServiceAccountToken: false,
           service: { type: "LoadBalancer" },
           ingress: { enabled: true },
-          config: { unsafeUseServiceAccountToken: true, watchPlugins: true },
+          config: { unsafeUseServiceAccountToken: false, watchPlugins: true },
           clusterRoleBinding: { clusterRoleName: "cluster-admin" },
         },
       },
@@ -239,10 +243,12 @@ describe("deployHeadlamp", () => {
     const values = mockCreatedReleases[0]?.args.values;
     expect(values).toMatchObject({
       replicaCount: 2,
+      serviceAccount: { create: true },
+      automountServiceAccountToken: true,
       service: { type: "ClusterIP" },
       ingress: { enabled: false },
       config: {
-        unsafeUseServiceAccountToken: false,
+        unsafeUseServiceAccountToken: true,
         watchPlugins: false,
         staticPlugins: { enabled: true },
       },
@@ -257,6 +263,23 @@ describe("deployHeadlamp", () => {
     expect(values.pluginsManager.configContent).toContain("headlamp_karpenter");
     expect(values.pluginsManager.configContent).toContain("headlamp-argocd");
     expect(values.pluginsManager.configContent).not.toContain("version: latest");
+  });
+
+  it("keeps token-based user authentication available when requested", () => {
+    deployHeadlamp(
+      "user-auth",
+      {
+        enabled: true,
+        authentication: "user-token",
+        values: { config: { unsafeUseServiceAccountToken: true } },
+      },
+      [],
+      {} as never,
+      undefined,
+      []
+    );
+
+    expect(mockCreatedReleases[0]?.args.values.config.unsafeUseServiceAccountToken).toBe(false);
   });
 
   it("does not start the plugin manager when no dynamic plugins are selected", () => {

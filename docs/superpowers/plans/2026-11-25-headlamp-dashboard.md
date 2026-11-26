@@ -14,7 +14,7 @@
 
 - Headlamp is opt-in; `headlamp.enabled` defaults to `false`.
 - The Kubernetes Service defaults to `ClusterIP`; ingress is disabled.
-- Headlamp authenticates dashboard users with their own Kubernetes credentials; `config.unsafeUseServiceAccountToken` stays `false`.
+- Headlamp uses its managed read-only pod ServiceAccount by default for automatic access; `authentication: "user-token"` keeps per-user token auth available. Shared ServiceAccount auth must stay behind a trusted access proxy or private network.
 - The upstream chart's default `cluster-admin` binding is replaced with read-only `view` by default.
 - `headlamp.expose` defaults to `true` when Headlamp is enabled and only adds an `IExposedService` for the separate access gateway to consume.
 - Auto-detected and caller-added plugins use explicit pinned versions; plugin watch/reload remains disabled.
@@ -101,7 +101,7 @@ Expected: PASS for every plugin selection and validation case.
 
 - [x] **Step 1: Write Helm-release tests for secure defaults**
 
-Assert the release uses the upstream `headlamp` chart/repository, configured/default namespace, private `ClusterIP`, disabled chart ingress, `config.unsafeUseServiceAccountToken: false`, no plugin watch/reload, plugin manager config for selected plugins, and a read-only `view` ClusterRole binding rather than upstream `cluster-admin`.
+Assert the release uses the upstream `headlamp` chart/repository, configured/default namespace, private `ClusterIP`, disabled chart ingress, automatic pod ServiceAccount authentication by default, per-user token mode when selected, no plugin watch/reload, plugin manager config for selected plugins, and a read-only `view` ClusterRole binding rather than upstream `cluster-admin`.
 
 - [x] **Step 2: Run focused tests to verify the expected failures**
 

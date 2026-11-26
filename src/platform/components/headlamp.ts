@@ -51,15 +51,18 @@ export function deployHeadlamp(
     plugins,
     installOptions: { parallel: true, maxConcurrent: 2 },
   };
+  const useServiceAccountToken = config.authentication !== "user-token";
 
   const mergedValues = mergeValues(
     {
       fullnameOverride: "headlamp",
+      serviceAccount: { create: true },
+      automountServiceAccountToken: true,
       service: { type: "ClusterIP", port: 80 },
       ingress: { enabled: false },
       config: {
         inCluster: true,
-        unsafeUseServiceAccountToken: false,
+        unsafeUseServiceAccountToken: useServiceAccountToken,
         watchPlugins: false,
         staticPlugins: { enabled: true },
       },
@@ -72,11 +75,13 @@ export function deployHeadlamp(
   );
   const values = mergeValues(mergedValues, {
     fullnameOverride: "headlamp",
+    serviceAccount: { create: true },
+    automountServiceAccountToken: true,
     service: { type: "ClusterIP", port: 80 },
     ingress: { enabled: false },
     config: {
       inCluster: true,
-      unsafeUseServiceAccountToken: false,
+      unsafeUseServiceAccountToken: useServiceAccountToken,
       watchPlugins: false,
     },
     clusterRoleBinding: {

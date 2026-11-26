@@ -65,15 +65,22 @@ createAccessGateway("prod-access", {
 
 Full example: [`examples/single-cloud-aws/`](../../examples/single-cloud-aws/)
 
-Headlamp is exposed only through the configured Tailscale gateway. To access it
-directly for local troubleshooting, run:
+Headlamp uses its managed ServiceAccount by default, bound to Kubernetes'
+read-only `view` role, so it opens without a pasted token. Every viewer shares
+that identity. Keep it behind the configured, access-controlled Tailscale
+gateway or another trusted authentication proxy. Do not expose the service
+publicly without an authentication layer. To require individual Kubernetes
+credentials instead, set `headlamp: { enabled: true, authentication: "user-token" }`.
+To access it directly for local troubleshooting, run:
 
 ```bash
 kubectl port-forward -n headlamp svc/headlamp 8080:80
 ```
 
-Users still authenticate to Headlamp with their own Kubernetes credentials;
-their cluster RBAC determines which resources and actions they can use.
+The Headlamp pod ServiceAccount can be given a different existing ClusterRole
+through `serviceAccountClusterRoleName`. Use a restrictive role: permissions are
+shared by every viewer when the default ServiceAccount authentication mode is
+active.
 
 ### EKS ExternalDNS community add-on
 

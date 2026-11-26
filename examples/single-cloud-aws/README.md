@@ -58,7 +58,11 @@ Headlamp installs as a private `ClusterIP` service and is included in
 `platform.exposedServices`. The example only creates the Tailscale access
 gateway when `enableTailscaleAccess` is true. Set the `tailscaleOAuthClientId`
 and secret `tailscaleOAuthClientSecret` Pulumi config values to enable it.
-Headlamp still uses each user's Kubernetes credentials and RBAC.
+Headlamp uses its managed pod ServiceAccount by default, bound to the read-only
+`view` role, so users do not need to create or paste a token. All viewers share
+that identity, so keep the endpoint behind the access-controlled Tailscale
+gateway. Set `headlamp.authentication` to `"user-token"` to require individual
+Kubernetes tokens instead.
 
 For local access without Tailscale:
 

@@ -84,6 +84,13 @@ export interface IHeadlampPluginsConfig {
 export interface IHeadlampConfig extends IPlatformComponentConfig {
   /** Enable the dashboard. Defaults to false. */
   readonly enabled?: boolean;
+  /**
+   * Authentication model for the dashboard. Defaults to the Headlamp pod's
+   * ServiceAccount; use `user-token` to require each user to provide a token.
+   * ServiceAccount mode authenticates every viewer as the pod identity and
+   * must only be exposed behind a trusted authentication proxy or private network.
+   */
+  readonly authentication?: "service-account" | "user-token";
   /** Include Headlamp in access-gateway outputs. Defaults to true when enabled. */
   readonly expose?: boolean;
   /** Kubernetes namespace for Headlamp. Defaults to `headlamp`. */

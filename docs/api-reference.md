@@ -37,7 +37,7 @@ The available methods are `createServiceAccountAccess`, `createAccessGateway`, `
 
 ## Platform and cluster services
 
-`createPlatformStack` can install core ingress, cert-manager, and DNS automation, with optional components such as Headlamp. Headlamp is installed as a private ClusterIP service by default; the caller chooses how to expose it, including a tailnet path through Tailscale. `createAccessGateway` supports Tailscale and WireGuard. `createObservabilityStack` is separate from the cluster-scoped EKS Metrics Server add-on.
+`createPlatformStack` can install core ingress, cert-manager, and DNS automation, with optional components such as Headlamp. Headlamp is installed as a private ClusterIP service by default. By default, its managed pod ServiceAccount authenticates dashboard requests and is bound to the read-only `view` ClusterRole, so no separate login token is needed. All viewers share that identity and permission set; expose it only through a trusted authentication proxy or private network such as a restricted tailnet. Set `headlamp.authentication: "user-token"` to require each viewer to provide their own Kubernetes token. `createAccessGateway` supports Tailscale and WireGuard. `createObservabilityStack` is separate from the cluster-scoped EKS Metrics Server add-on.
 
 ## ServiceAccount access
 

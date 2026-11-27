@@ -198,6 +198,9 @@ vi.mock("@pulumi/kubernetes", () => {
   };
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  const mockPodDisruptionBudget = class {};
+
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockNamespace = class {};
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
@@ -222,6 +225,7 @@ vi.mock("@pulumi/kubernetes", () => {
 
   return {
     helm: { v3: { Release: mockRelease } },
+    policy: { v1: { PodDisruptionBudget: mockPodDisruptionBudget } },
     apiextensions: { CustomResource: mockCustomResource },
     apps: {
       v1: {
@@ -953,6 +957,7 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
       externalDns: {
         dnsProvider: "route53",
         domainFilters: ["reyem.tech"],
+        values: { env: [{ name: "CUSTOM_FLAG", value: "enabled" }] },
       },
     });
 
@@ -962,8 +967,10 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
     const env = (ednsRelease!.args.values as Record<string, unknown>)["env"] as Array<
       Record<string, unknown>
     >;
-    expect(env).toHaveLength(3);
+    expect(env).toHaveLength(4);
+    expect(env).toContainEqual({ name: "CUSTOM_FLAG", value: "enabled" });
     expect(env.map((e) => e["name"])).toEqual([
+      "CUSTOM_FLAG",
       "AWS_ACCESS_KEY_ID",
       "AWS_SECRET_ACCESS_KEY",
       "AWS_REGION",

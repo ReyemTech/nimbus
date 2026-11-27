@@ -25,6 +25,9 @@ import { createDashboards, lokiLogsDashboard } from "./dashboards/index";
 import { resolveStorageTier } from "../types/storage-tiers";
 import { createGlobalAlertRules, buildAlertmanagerConfig } from "./alerts";
 import { createPrometheusRule } from "./alerts";
+import { buildPodDisruptionBudgetSpec, resolvePodDisruptionBudget } from "../availability";
+import { chartPodPlacement } from "../platform/components/scheduling";
+import type { IPodDisruptionBudgetConfig, IPodSchedulingConfig } from "../availability";
 
 /**
  * Default Helm chart versions. Used only when the consumer doesn't pass `version`.
@@ -88,6 +91,33 @@ export function createObservabilityStack(
   }
 
   if (prometheusEnabled || grafanaEnabled || alertmanagerEnabled) {
+    const rawKubePrometheusValues = {
+      ...config.prometheus?.values,
+      ...config.grafana?.values,
+      ...config.alertmanager?.values,
+    };
+    if (
+      !cluster.eksAddons?.includes("kube-state-metrics") &&
+      config.kubeStateMetrics?.podDisruptionBudget?.enabled !== false &&
+      hasRawPdb(rawKubePrometheusValues["kube-state-metrics"])
+    )
+      throw new Error(
+        "kube-state-metrics podDisruptionBudget conflicts with Helm values.kube-state-metrics"
+      );
+    if (
+      config.prometheus?.podDisruptionBudget?.enabled !== false &&
+      hasRawPdb(rawKubePrometheusValues.prometheus)
+    )
+      throw new Error("Prometheus Nimbus podDisruptionBudget conflicts with raw Helm PDB settings");
+    if (config.grafana?.podDisruptionBudget?.enabled !== false && hasRawPdb(config.grafana?.values))
+      throw new Error("Grafana Nimbus podDisruptionBudget conflicts with raw Helm PDB settings");
+    if (
+      config.alertmanager?.podDisruptionBudget?.enabled !== false &&
+      hasRawPdb(rawKubePrometheusValues.alertmanager)
+    )
+      throw new Error(
+        "Alertmanager Nimbus podDisruptionBudget conflicts with raw Helm PDB settings"
+      );
     components["kube-prometheus-stack"] = deployKubePrometheusStack(
       name,
       namespace,
@@ -100,8 +130,34 @@ export function createObservabilityStack(
       grafanaPlugins,
       config.alerts,
       observabilityNamespace,
-      cluster.eksAddons
+      cluster.eksAddons,
+      config.kubeStateMetrics
     );
+    const instance = components["kube-prometheus-stack"].status.apply(
+      (s) => s?.name ?? kubePrometheusReleaseName(name)
+    );
+    if (grafanaEnabled)
+      addChartBudget(
+        `${name}-grafana-pdb`,
+        namespace,
+        "grafana",
+        instance,
+        config.grafana?.podDisruptionBudget,
+        config.grafana?.scheduling?.replicas ?? 1,
+        provider,
+        components["kube-prometheus-stack"]
+      );
+    if (!cluster.eksAddons?.includes("kube-state-metrics"))
+      addChartBudget(
+        `${name}-kube-state-metrics-pdb`,
+        namespace,
+        "kube-state-metrics",
+        instance,
+        config.kubeStateMetrics?.podDisruptionBudget,
+        config.kubeStateMetrics?.scheduling?.replicas ?? 1,
+        provider,
+        components["kube-prometheus-stack"]
+      );
   }
 
   // Global alert rules (PVC, cert-manager) — after kube-prometheus-stack
@@ -149,7 +205,91 @@ export function createObservabilityStack(
 
   // 3. Loki (log aggregation)
   if (config.loki?.enabled) {
+    const lokiMode = config.loki.mode ?? "single-binary";
+    if (
+      config.loki.podDisruptionBudget?.enabled !== false &&
+      ((lokiMode === "distributed" && hasLokiComponentPdb(config.loki.values)) ||
+        (lokiMode === "single-binary" && hasRawPdb(config.loki.values?.singleBinary)))
+    ) {
+      throw new Error("Loki component native PDB conflicts with Nimbus podDisruptionBudget");
+    }
     components["loki"] = deployLoki(name, namespace, config.loki, provider, cluster.storageTiers);
+    if (lokiMode === "distributed") {
+      const distributed = [
+        ["compactor", "compactor", 1],
+        ["distributor", "distributor", 3],
+        ["indexGateway", "index-gateway", 2],
+        ["ingester", "ingester", 3],
+        ["querier", "querier", 3],
+        ["queryFrontend", "query-frontend", 2],
+        ["queryScheduler", "query-scheduler", 2],
+        ["gateway", "gateway", 1],
+      ] as const;
+      const rawGateway = config.loki.values?.gateway as Record<string, unknown> | undefined;
+      const enabled: Array<readonly [string, string, number]> = distributed.filter(
+        ([key]) => key !== "gateway" || rawGateway?.enabled !== false
+      );
+      for (const [key, workload] of [
+        ["patternIngester", "pattern-ingester"],
+        ["ruler", "ruler"],
+      ] as const) {
+        const values = config.loki.values?.[key] as Record<string, unknown> | undefined;
+        if (values?.enabled === true) enabled.push([key, workload, 1]);
+      }
+      for (const [key, workload, defaultReplicas] of enabled) {
+        const values = config.loki.values?.[key] as Record<string, unknown> | undefined;
+        const replicas =
+          config.loki.scheduling?.replicas ??
+          (typeof values?.replicas === "number" ? values.replicas : defaultReplicas);
+        const autoscaling =
+          workload === "gateway" && values?.autoscaling && typeof values.autoscaling === "object"
+            ? (values.autoscaling as Record<string, unknown>)
+            : undefined;
+        const gatewayPdbReplicas =
+          autoscaling?.enabled === true && typeof autoscaling.minReplicas === "number"
+            ? autoscaling.minReplicas
+            : replicas;
+        // The distributed chart creates native budgets for multi-replica
+        // components. Its gateway template fixes maxUnavailable at 1 and does
+        // not expose an override or opt-out, so reject policies it cannot honor.
+        const hasNativeBudget = workload === "gateway" ? gatewayPdbReplicas > 1 : replicas > 1;
+        if (workload === "gateway" && hasNativeBudget) {
+          const effectiveMaxUnavailable = lokiMaxUnavailable(
+            config.loki.podDisruptionBudget,
+            gatewayPdbReplicas
+          );
+          if (effectiveMaxUnavailable !== 1) {
+            throw new Error(
+              `Loki gateway replicas use a chart-native PDB fixed at maxUnavailable: 1; the requested podDisruptionBudget cannot be represented by the chart`
+            );
+          }
+        }
+        if (!hasNativeBudget)
+          addChartBudget(
+            `${name}-loki-${workload}-pdb`,
+            namespace,
+            "loki",
+            components["loki"].status.apply((s) => s?.name ?? `${name}-loki`),
+            config.loki.podDisruptionBudget,
+            replicas,
+            provider,
+            components["loki"],
+            workload
+          );
+      }
+    } else {
+      addChartBudget(
+        `${name}-loki-pdb`,
+        namespace,
+        "loki",
+        components["loki"].status.apply((s) => s?.name ?? `${name}-loki`),
+        config.loki.podDisruptionBudget,
+        config.loki.scheduling?.replicas ?? 1,
+        provider,
+        components["loki"],
+        "single-binary"
+      );
+    }
   }
 
   // 4. Alloy (log/metric collector)
@@ -294,6 +434,18 @@ export function createObservabilityStack(
   // 8. Uptime Kuma (uptime monitoring)
   if (config.uptimeKuma?.enabled) {
     components["uptime-kuma"] = deployUptimeKuma(name, config.domain, config.uptimeKuma, provider);
+    addChartBudget(
+      `${name}-uptime-kuma-pdb`,
+      "uptime-kuma",
+      String(config.uptimeKuma.values?.nameOverride ?? "uptime-kuma")
+        .slice(0, 63)
+        .replace(/-+$/, ""),
+      components["uptime-kuma"].status.apply((s) => s?.name ?? `${name}-uptime-kuma`),
+      config.uptimeKuma.podDisruptionBudget,
+      config.uptimeKuma.scheduling?.replicas ?? 1,
+      provider,
+      components["uptime-kuma"]
+    );
   }
 
   // Collect exposed services — use Helm release name to derive K8s service names
@@ -351,6 +503,33 @@ export function createObservabilityStack(
   return { name, cluster, components, exposedServices };
 }
 
+function hasLokiComponentPdb(values: ILokiConfig["values"]): boolean {
+  if (!values) return false;
+  const componentKeys = [
+    "compactor",
+    "distributor",
+    "indexGateway",
+    "ingester",
+    "querier",
+    "queryFrontend",
+    "queryScheduler",
+    "gateway",
+    "patternIngester",
+    "ruler",
+  ];
+  return componentKeys.some((key) => {
+    const component = values[key] as Record<string, unknown> | undefined;
+    if (!component) return false;
+    if ((key === "patternIngester" || key === "ruler") && component.enabled !== true) return false;
+    const native = component.podDisruptionBudget as Record<string, unknown> | undefined;
+    return (
+      component.maxUnavailable !== undefined ||
+      component.minAvailable !== undefined ||
+      (native !== undefined && native.enabled !== false)
+    );
+  });
+}
+
 function deployKubePrometheusStack(
   name: string,
   namespace: string,
@@ -363,7 +542,8 @@ function deployKubePrometheusStack(
   grafanaPlugins?: string[],
   alertConfig?: IAlertConfig,
   namespaceResource?: pulumi.Resource,
-  managedEksAddons?: ReadonlyArray<string>
+  managedEksAddons?: ReadonlyArray<string>,
+  kubeStateMetrics?: IObservabilityStackConfig["kubeStateMetrics"]
 ): k8s.helm.v3.Release {
   const certName = domain.replace(/\./g, "-");
   const tlsSecretName = `${certName}-wildcard-tls`;
@@ -394,6 +574,15 @@ function deployKubePrometheusStack(
           },
         },
       },
+      ...(prometheus.scheduling?.replicas !== undefined
+        ? { replicas: prometheus.scheduling.replicas }
+        : {}),
+      ...chartPodPlacement(
+        prometheus.scheduling?.spread,
+        { "app.kubernetes.io/name": "prometheus" },
+        (prometheus.values?.prometheus as Record<string, unknown>) ?? {},
+        "Prometheus"
+      ),
     };
     // Disable public ingress when exposed via access gateway (expose defaults to true)
     const promIngressEnabled = prometheus?.expose === false;
@@ -423,6 +612,17 @@ function deployKubePrometheusStack(
       },
       tls: [{ secretName: tlsSecretName, hosts: [`${grafSubdomain}.${domain}`] }],
     };
+    if (grafana.scheduling?.replicas !== undefined)
+      grafanaValues["replicas"] = grafana.scheduling.replicas;
+    Object.assign(
+      grafanaValues,
+      chartPodPlacement(
+        grafana.scheduling?.spread,
+        { "app.kubernetes.io/name": "grafana" },
+        grafana.values ?? {},
+        "Grafana"
+      )
+    );
 
     // Install additional Grafana plugins
     if (grafanaPlugins && grafanaPlugins.length > 0) {
@@ -489,6 +689,17 @@ function deployKubePrometheusStack(
         tls: [{ secretName: tlsSecretName, hosts: [`${amSubdomain}.${domain}`] }],
       }),
     };
+    alertmanagerValues["alertmanagerSpec"] = {
+      ...(alertmanager.scheduling?.replicas !== undefined
+        ? { replicas: alertmanager.scheduling.replicas }
+        : {}),
+      ...chartPodPlacement(
+        alertmanager.scheduling?.spread,
+        { "app.kubernetes.io/name": "alertmanager" },
+        (alertmanager.values?.alertmanager as Record<string, unknown>) ?? {},
+        "Alertmanager"
+      ),
+    };
   }
 
   // Determine the chart version — use prometheus version, grafana version, alertmanager version, or default
@@ -520,6 +731,88 @@ function deployKubePrometheusStack(
       ? { alertmanager: { ...alertmanagerValues, ...buildAlertmanagerConfig(alertConfig) } }
       : {}),
   };
+  if (prometheus?.enabled) {
+    const values = (stackValues.prometheus as Record<string, unknown>) ?? {};
+    const spec = (values.prometheusSpec as Record<string, unknown> | undefined) ?? {};
+    if (
+      prometheus.podDisruptionBudget?.enabled !== false ||
+      values.podDisruptionBudget === undefined
+    ) {
+      values.podDisruptionBudget = chartNativeBudget(
+        prometheus.podDisruptionBudget,
+        prometheus.scheduling?.replicas ?? replicaValue(spec.replicas) ?? 1
+      );
+    }
+    stackValues.prometheus = values;
+  }
+  if (alertmanager?.enabled) {
+    const values = (stackValues.alertmanager as Record<string, unknown>) ?? {};
+    const spec = (values.alertmanagerSpec as Record<string, unknown> | undefined) ?? {};
+    if (
+      alertmanager.podDisruptionBudget?.enabled !== false ||
+      values.podDisruptionBudget === undefined
+    ) {
+      values.podDisruptionBudget = chartNativeBudget(
+        alertmanager.podDisruptionBudget,
+        alertmanager.scheduling?.replicas ?? replicaValue(spec.replicas) ?? 1
+      );
+    }
+    stackValues.alertmanager = values;
+  }
+  applyObservedScheduling(
+    stackValues,
+    "prometheus",
+    prometheus?.scheduling,
+    prometheus?.values,
+    "prometheusSpec",
+    "Prometheus"
+  );
+  applyObservedScheduling(
+    stackValues,
+    "grafana",
+    grafana?.scheduling,
+    grafana?.values,
+    undefined,
+    "Grafana"
+  );
+  applyObservedScheduling(
+    stackValues,
+    "alertmanager",
+    alertmanager?.scheduling,
+    alertmanager?.values,
+    "alertmanagerSpec",
+    "Alertmanager"
+  );
+  if (managedEksAddons?.includes("kube-state-metrics") !== true) {
+    const kubeStateMetricsConfig = kubeStateMetrics ?? {};
+    const values = (stackValues["kube-state-metrics"] as Record<string, unknown>) ?? {};
+    const raw = (prometheus?.values?.["kube-state-metrics"] as Record<string, unknown>) ?? {};
+    if (kubeStateMetricsConfig.scheduling?.replicas !== undefined) {
+      if (raw.replicas !== undefined)
+        throw new Error(
+          "kube-state-metrics scheduling.replicas conflicts with Helm values.kube-state-metrics.replicas"
+        );
+      values.replicas = kubeStateMetricsConfig.scheduling.replicas;
+    }
+    if (
+      kubeStateMetricsConfig.podDisruptionBudget?.enabled !== false &&
+      raw.podDisruptionBudget !== undefined
+    ) {
+      throw new Error(
+        "kube-state-metrics podDisruptionBudget conflicts with Helm values.kube-state-metrics.podDisruptionBudget"
+      );
+    }
+    Object.assign(
+      values,
+      chartPodPlacement(
+        kubeStateMetricsConfig.scheduling?.spread,
+        { "app.kubernetes.io/name": "kube-state-metrics" },
+        raw,
+        "kube-state-metrics"
+      )
+    );
+    stackValues["kube-state-metrics"] = values;
+  }
 
   // The EKS community add-ons own these agents when selected. Disable the
   // kube-prometheus-stack subcharts to prevent duplicate DaemonSets/Deployments.
@@ -544,6 +837,58 @@ function deployKubePrometheusStack(
   );
 }
 
+function applyObservedScheduling(
+  values: Record<string, unknown>,
+  chartKey: string,
+  scheduling: IPodSchedulingConfig | undefined,
+  rawValues: Readonly<Record<string, unknown>> | undefined,
+  nestedKey: string | undefined,
+  component: string
+): void {
+  if (scheduling?.replicas === undefined && !scheduling?.spread) return;
+  const chartValues = (values[chartKey] as Record<string, unknown>) ?? {};
+  const rawChartValues = (rawValues?.[chartKey] as Record<string, unknown>) ?? {};
+  const targetKey = nestedKey ?? "";
+  const target = targetKey
+    ? ((chartValues[targetKey] as Record<string, unknown>) ?? {})
+    : chartValues;
+  const rawTarget = targetKey
+    ? ((rawChartValues[targetKey] as Record<string, unknown>) ?? {})
+    : rawChartValues;
+  if (scheduling.replicas !== undefined) {
+    const path = targetKey ? `${targetKey}.replicas` : "replicas";
+    if (rawTarget.replicas !== undefined)
+      throw new Error(
+        `${component} scheduling.replicas conflicts with Helm values.${chartKey}.${path}`
+      );
+    target.replicas = scheduling.replicas;
+  }
+  if (scheduling.spread)
+    Object.assign(
+      target,
+      chartPodPlacement(
+        scheduling.spread,
+        { "app.kubernetes.io/name": chartKey },
+        rawTarget,
+        component
+      )
+    );
+  if (targetKey) chartValues[targetKey] = target;
+  values[chartKey] = chartValues;
+}
+
+function kubePrometheusReleaseName(name: string): string {
+  const releaseBase = `${name}-kps`
+    .replace(/[^a-zA-Z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  if (releaseBase.length <= 53) return `${name}-kube-prometheus-stack`;
+  return `${releaseBase.slice(0, 45).replace(/-+$/g, "")}-${Array.from(releaseBase)
+    .reduce((acc, char) => (acc * 31 + char.charCodeAt(0)) >>> 0, 0)
+    .toString(36)
+    .slice(-7)}`;
+}
+
 function disableHelmSubchart(values: Record<string, unknown>, name: string): void {
   const current = values[name];
   values[name] = {
@@ -552,6 +897,81 @@ function disableHelmSubchart(values: Record<string, unknown>, name: string): voi
       : {}),
     enabled: false,
   };
+}
+
+function addChartBudget(
+  name: string,
+  namespace: string,
+  component: string,
+  instance: pulumi.Input<string>,
+  policy: IPodDisruptionBudgetConfig | undefined,
+  replicas: number,
+  provider: k8s.Provider,
+  dependsOn: k8s.helm.v3.Release,
+  workload?: string
+): void {
+  const manifest = buildPodDisruptionBudgetSpec(
+    policy ?? {},
+    {
+      "app.kubernetes.io/name": component,
+      "app.kubernetes.io/instance": instance,
+      ...(workload ? { "app.kubernetes.io/component": workload } : {}),
+    },
+    replicas
+  );
+  if (!manifest) return;
+  new k8s.policy.v1.PodDisruptionBudget(
+    name,
+    { metadata: { name, namespace }, spec: manifest.spec },
+    { provider, dependsOn: [dependsOn] }
+  );
+}
+
+function hasRawPdb(values: unknown): boolean {
+  if (typeof values !== "object" || values === null) return false;
+  if (Object.prototype.hasOwnProperty.call(values, "podDisruptionBudget")) return true;
+  return Object.values(values).some((value) => hasRawPdb(value));
+}
+
+function chartNativeBudget(
+  policy: IPodDisruptionBudgetConfig | undefined,
+  replicas: number
+): Record<string, unknown> {
+  const budget = resolvePodDisruptionBudget(policy ?? {}, replicas);
+  if (!budget) return { enabled: false };
+  return {
+    enabled: true,
+    ...budget,
+    ...("maxUnavailable" in budget ? { minAvailable: null } : { maxUnavailable: null }),
+  };
+}
+
+function lokiMaxUnavailable(
+  policy: IPodDisruptionBudgetConfig | undefined,
+  replicas: number
+): number {
+  const budget = resolvePodDisruptionBudget(policy ?? {}, replicas);
+  if (!budget) return replicas;
+  if ("maxUnavailable" in budget) {
+    if (typeof budget.maxUnavailable === "number") return budget.maxUnavailable;
+    const percentage = Number(budget.maxUnavailable.slice(0, -1));
+    return Math.ceil((replicas * percentage) / 100);
+  }
+  if (typeof budget.minAvailable === "number") {
+    if (budget.minAvailable > replicas)
+      throw new Error(`Loki podDisruptionBudget minAvailable cannot exceed ${replicas} replicas`);
+    return replicas - budget.minAvailable;
+  }
+  const minimum = Number(budget.minAvailable.slice(0, -1));
+  if (!Number.isFinite(minimum) || minimum > 100)
+    throw new Error("Loki podDisruptionBudget minAvailable percentage cannot exceed 100%");
+  return replicas - Math.ceil((replicas * minimum) / 100);
+}
+
+function replicaValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
+  if (typeof value === "string" && /^\d+$/.test(value) && Number(value) > 0) return Number(value);
+  return undefined;
 }
 
 function deployLoki(
@@ -615,6 +1035,8 @@ function deployLoki(
     };
   }
 
+  if (mode === "distributed") lokiValues["deploymentMode"] = "Distributed";
+
   return new k8s.helm.v3.Release(
     `${name}-loki`,
     {
@@ -623,10 +1045,102 @@ function deployLoki(
       version: config.version ?? DEFAULT_VERSIONS.loki,
       namespace,
       createNamespace: false,
-      values: {
-        ...lokiValues,
-        ...config.values,
-      },
+      values: (() => {
+        const values = { ...lokiValues, ...config.values };
+        if (mode === "distributed") {
+          for (const key of ["read", "write", "backend"]) {
+            const raw = (config.values?.[key] as Record<string, unknown> | undefined) ?? {};
+            if (typeof raw.replicas === "number" && raw.replicas !== 0) {
+              throw new Error(
+                `Loki distributed mode requires values.${key}.replicas to be 0; ${key} is a SimpleScalable target`
+              );
+            }
+            values[key] = { ...raw, replicas: 0 };
+          }
+          const distributed = [
+            ["compactor", "compactor", 1],
+            ["distributor", "distributor", 3],
+            ["indexGateway", "index-gateway", 2],
+            ["ingester", "ingester", 3],
+            ["querier", "querier", 3],
+            ["queryFrontend", "query-frontend", 2],
+            ["queryScheduler", "query-scheduler", 2],
+            ["gateway", "gateway", 1],
+          ] as const;
+          const enabled: Array<readonly [string, string, number]> = [...distributed];
+          for (const [key, workload] of [
+            ["patternIngester", "pattern-ingester"],
+            ["ruler", "ruler"],
+          ] as const) {
+            const raw = config.values?.[key] as Record<string, unknown> | undefined;
+            if (raw?.enabled === true) enabled.push([key, workload, 1]);
+          }
+          for (const [key, workload, defaultReplicas] of enabled) {
+            const raw = (config.values?.[key] as Record<string, unknown> | undefined) ?? {};
+            if (
+              config.scheduling?.replicas !== undefined &&
+              typeof raw.replicas === "number" &&
+              raw.replicas !== config.scheduling.replicas
+            ) {
+              throw new Error(
+                `Loki scheduling.replicas conflicts with Helm values.${key}.replicas`
+              );
+            }
+            const replicas =
+              config.scheduling?.replicas ??
+              (typeof raw.replicas === "number" ? raw.replicas : defaultReplicas);
+            values[key] = {
+              ...raw,
+              replicas,
+              ...(key !== "gateway" &&
+              replicas > 1 &&
+              raw.maxUnavailable === undefined &&
+              raw.minAvailable === undefined
+                ? { maxUnavailable: lokiMaxUnavailable(config.podDisruptionBudget, replicas) }
+                : {}),
+              ...chartPodPlacement(
+                config.scheduling?.spread,
+                {
+                  "app.kubernetes.io/name": "loki",
+                  "app.kubernetes.io/component": workload,
+                },
+                raw,
+                `Loki ${key}`
+              ),
+            };
+          }
+        }
+        if (mode === "distributed") {
+          const rawSingleBinary = (config.values?.singleBinary as Record<string, unknown>) ?? {};
+          if (rawSingleBinary.replicas !== undefined && rawSingleBinary.replicas !== 0) {
+            throw new Error("Loki distributed mode requires values.singleBinary.replicas to be 0");
+          }
+          values.singleBinary = { ...rawSingleBinary, replicas: 0 };
+        } else if (config.scheduling?.replicas !== undefined) {
+          const rawSingleBinary = (config.values?.singleBinary as Record<string, unknown>) ?? {};
+          if (rawSingleBinary.replicas !== undefined)
+            throw new Error(
+              "Loki scheduling.replicas conflicts with Helm values.singleBinary.replicas"
+            );
+          values.singleBinary = {
+            ...lokiValues.singleBinary,
+            ...rawSingleBinary,
+            replicas: config.scheduling.replicas,
+          };
+        }
+        if (mode === "single-binary" && config.scheduling?.spread) {
+          values.singleBinary = {
+            ...(values.singleBinary as Record<string, unknown>),
+            ...chartPodPlacement(
+              config.scheduling.spread,
+              { "app.kubernetes.io/name": "loki" },
+              (config.values?.singleBinary as Record<string, unknown>) ?? {},
+              "Loki"
+            ),
+          };
+        }
+        return values;
+      })(),
     },
     { provider }
   );
@@ -715,6 +1229,14 @@ function deployUptimeKuma(
 ): k8s.helm.v3.Release {
   const ukNamespace = "uptime-kuma";
   const subdomain = config.subdomain ?? "uptime";
+  if (config.scheduling?.replicas !== undefined)
+    throw new Error(
+      "Uptime Kuma chart hard-codes one replica and does not support scheduling.replicas"
+    );
+  if (config.scheduling?.spread?.strategy === "topology-spread")
+    throw new Error("Uptime Kuma chart does not support topology-spread scheduling");
+  if (config.podDisruptionBudget?.enabled !== false && hasRawPdb(config.values))
+    throw new Error("Uptime Kuma Nimbus podDisruptionBudget conflicts with raw Helm PDB settings");
 
   const ns = ensureNamespace(ukNamespace, provider);
 
@@ -758,6 +1280,18 @@ function deployUptimeKuma(
         },
         serviceMonitor: { enabled: true },
         ...config.values,
+        ...(config.scheduling?.spread
+          ? chartPodPlacement(
+              config.scheduling.spread,
+              {
+                "app.kubernetes.io/name": String(config.values?.nameOverride ?? "uptime-kuma")
+                  .slice(0, 63)
+                  .replace(/-+$/, ""),
+              },
+              config.values ?? {},
+              "Uptime Kuma"
+            )
+          : {}),
       },
     },
     { provider, dependsOn: [ns] }

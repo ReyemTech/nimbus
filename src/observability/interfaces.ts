@@ -15,6 +15,7 @@ import type { IEmailTransport } from "../email/interfaces";
 import type { IExposedService } from "../types";
 import type { IClusterInstance } from "../operator/interfaces";
 import type { IArgoAppMonitor } from "../argocd/interfaces";
+import type { IPodDisruptionBudgetConfig, IPodSchedulingConfig } from "../availability";
 
 // ---------------------------------------------------------------------------
 // Alerting interfaces
@@ -62,6 +63,8 @@ export interface IPrometheusConfig {
   readonly subdomain?: string;
   /** Helm chart version override. */
   readonly version?: string;
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  readonly scheduling?: IPodSchedulingConfig;
   /** Additional Helm values to merge with defaults. */
   readonly values?: Readonly<Record<string, unknown>>;
 }
@@ -84,6 +87,8 @@ export interface IGrafanaConfig {
   readonly subdomain?: string;
   /** Helm chart version override. */
   readonly version?: string;
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  readonly scheduling?: IPodSchedulingConfig;
   /** Additional Helm values to merge with defaults. */
   readonly values?: Readonly<Record<string, unknown>>;
 }
@@ -102,6 +107,8 @@ export interface ILokiConfig {
   readonly retention?: string;
   /** Helm chart version override. */
   readonly version?: string;
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  readonly scheduling?: IPodSchedulingConfig;
   /** Additional Helm values to merge with defaults. */
   readonly values?: Readonly<Record<string, unknown>>;
 }
@@ -126,6 +133,8 @@ export interface IUptimeKumaConfig {
   readonly mariadbCluster: IClusterInstance;
   /** Helm chart version override. */
   readonly version?: string;
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  readonly scheduling?: IPodSchedulingConfig;
   /** Expose via access gateway (Tailscale). Default: false. */
   readonly expose?: boolean;
   /** Additional Helm values to merge with defaults. */
@@ -144,6 +153,8 @@ export interface IAlertmanagerConfig {
   readonly subdomain?: string;
   /** Helm chart version override. */
   readonly version?: string;
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  readonly scheduling?: IPodSchedulingConfig;
   /** Additional Helm values to merge with defaults. */
   readonly values?: Readonly<Record<string, unknown>>;
 }
@@ -180,6 +191,11 @@ export interface IObservabilityStackConfig {
   readonly alloy?: IAlloyConfig;
   /** Alertmanager configuration. */
   readonly alertmanager?: IAlertmanagerConfig;
+  /** kube-state-metrics availability when managed by kube-prometheus-stack. */
+  readonly kubeStateMetrics?: {
+    readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+    readonly scheduling?: IPodSchedulingConfig;
+  };
   /** Uptime Kuma uptime monitoring configuration. */
   readonly uptimeKuma?: IUptimeKumaConfig;
   /** Alerting configuration: notification receivers and rule thresholds. */

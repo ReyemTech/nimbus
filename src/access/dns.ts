@@ -12,6 +12,8 @@ import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type { IAccessDnsConfig } from "./interfaces";
 import type { IExposedService } from "../types";
+import { resolvePodDisruptionBudget } from "../availability";
+import { buildPodPlacement } from "../operator/availability";
 
 /** CoreDNS deployment output. */
 export interface IAccessDns {
@@ -75,7 +77,8 @@ export function deployAccessDns(
   namespace: string,
   provider: k8s.Provider,
   proxiedServices: ReadonlyArray<IExposedService>,
-  dependsOn?: pulumi.Resource[]
+  dependsOn?: pulumi.Resource[],
+  availability: IAccessDnsConfig = dnsConfig
 ): IAccessDns {
   const tld = dnsConfig.tld ?? "internal";
   const zone = `${prefix}.${tld}`;
@@ -91,16 +94,19 @@ export function deployAccessDns(
 
   const labels = { app: "access-dns", "app.kubernetes.io/managed-by": "nimbus" };
 
-  new k8s.apps.v1.Deployment(
+  const deployment = new k8s.apps.v1.Deployment(
     `${name}-access-dns`,
     {
       metadata: { name: "access-dns", namespace },
       spec: {
-        replicas: 1,
+        replicas: availability?.scheduling?.replicas ?? 1,
         selector: { matchLabels: labels },
         template: {
           metadata: { labels },
           spec: {
+            ...(availability?.scheduling?.spread
+              ? buildPodPlacement(availability.scheduling.spread, labels)
+              : {}),
             containers: [
               {
                 name: "coredns",
@@ -124,6 +130,19 @@ export function deployAccessDns(
     },
     { provider, dependsOn: [corefile] }
   );
+  const budget = resolvePodDisruptionBudget(
+    availability?.podDisruptionBudget ?? {},
+    availability?.scheduling?.replicas ?? 1
+  );
+  if (budget)
+    new k8s.policy.v1.PodDisruptionBudget(
+      `${name}-access-dns-pdb`,
+      {
+        metadata: { name: "access-dns", namespace },
+        spec: { ...budget, selector: { matchLabels: labels } },
+      },
+      { provider, dependsOn: [deployment] }
+    );
 
   const service = new k8s.core.v1.Service(
     `${name}-access-dns-svc`,

@@ -20,11 +20,22 @@ import type {
 } from "./interfaces";
 import { resolveStorageTier } from "../types/storage-tiers";
 import { createPrometheusRule } from "../observability/alerts";
+import { buildPodDisruptionBudgetSpec } from "../availability";
+import { buildPodPlacement } from "./availability.js";
 
 const DATA_NAMESPACE = "data";
 const DEFAULT_STORAGE_GB = 20;
 const MINIO_SERVICE_PORT = 80;
 const TENANT_NAME = "minio";
+const POOL_NAME = "pool-0";
+const POOL_SERVERS = 1;
+
+// Community Operator v7.1.1 ContainerMatchLabels uses the tenant, console and pool labels.
+const POOL_SELECTOR = {
+  "v1.min.io/tenant": TENANT_NAME,
+  "v1.min.io/console": `${TENANT_NAME}-console`,
+  "v1.min.io/pool": POOL_NAME,
+};
 
 /**
  * Create a MinIO Tenant via the MinIO Operator and return an IMinIOOperator
@@ -48,6 +59,13 @@ export function createMinioOperator(
   config: IOperatorConfig,
   helmRelease: k8s.helm.v3.Release
 ): IMinIOOperator {
+  const availability = config.tenant;
+  const spread = availability?.scheduling?.spread;
+  const budget = buildPodDisruptionBudgetSpec(
+    availability?.podDisruptionBudget ?? {},
+    POOL_SELECTOR,
+    POOL_SERVERS
+  );
   const provider = config.cluster.provider;
   const namespace = ensureNamespace(DATA_NAMESPACE, provider);
   const storageGb = DEFAULT_STORAGE_GB;
@@ -110,8 +128,9 @@ export function createMinioOperator(
         requestAutoCert: false,
         pools: [
           {
-            name: "pool-0",
-            servers: 1,
+            name: POOL_NAME,
+            servers: POOL_SERVERS,
+            ...(spread && buildPodPlacement(spread, POOL_SELECTOR)),
             volumesPerServer: 1,
             volumeClaimTemplate: {
               metadata: { name: "data" },
@@ -138,6 +157,26 @@ export function createMinioOperator(
     },
     { provider, dependsOn: [helmRelease, configSecret] }
   );
+
+  // The community Tenant controller does not reconcile a PDB for this pool.
+  if (budget) {
+    const name = `${TENANT_NAME}-tenant-${POOL_NAME}-pdb`;
+    new k8s.policy.v1.PodDisruptionBudget(
+      name,
+      {
+        metadata: {
+          name,
+          namespace: DATA_NAMESPACE,
+          labels: {
+            "app.kubernetes.io/managed-by": "nimbus",
+            "app.kubernetes.io/component": "database-pool",
+          },
+        },
+        spec: budget.spec,
+      },
+      { provider, dependsOn: [tenant] }
+    );
+  }
 
   // MinIO alert rules
   createPrometheusRule(

@@ -5,9 +5,62 @@
  */
 
 import * as k8s from "@pulumi/kubernetes";
-import type { IExternalDnsConfig } from "../interfaces";
+import type { IExternalDnsConfig, IPlatformComponentConfig } from "../interfaces";
+import { buildPodDisruptionBudgetSpec } from "../../availability";
 import { assertNever } from "../../types";
 import { ensureNamespace } from "../../utils/ensure-namespace";
+import { chartPodPlacement } from "./scheduling";
+
+function addAvailability(
+  release: k8s.helm.v3.Release,
+  name: string,
+  namespace: string,
+  provider: k8s.Provider,
+  config: IPlatformComponentConfig,
+  replicas: number,
+  selectors: ReadonlyArray<Record<string, string>>
+): void {
+  const budget = config.podDisruptionBudget ?? {};
+  const replicaCount = config.scheduling?.replicas ?? replicas;
+  for (const [index, selector] of selectors.entries()) {
+    const spec = buildPodDisruptionBudgetSpec(budget, selector, replicaCount);
+    if (spec)
+      new k8s.policy.v1.PodDisruptionBudget(
+        `${name}-pdb${selectors.length > 1 ? `-${index}` : ""}`,
+        {
+          metadata: { name: `${name}${selectors.length > 1 ? `-${index}` : ""}`, namespace },
+          spec: {
+            ...spec.spec,
+            selector: {
+              matchLabels: {
+                ...selector,
+                "app.kubernetes.io/instance": release.status.apply((status) => status.name),
+              },
+            },
+          },
+        },
+        { provider, dependsOn: [release] }
+      );
+  }
+}
+
+function desiredReplicas(
+  typed: number | undefined,
+  raw: unknown,
+  fallback: number,
+  path: string
+): number {
+  const rawCount =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string" && /^\d+$/.test(raw)
+        ? Number(raw)
+        : undefined;
+  if (typed !== undefined && rawCount !== undefined && typed !== rawCount) {
+    throw new Error(`scheduling.replicas conflicts with Helm values.${path}`);
+  }
+  return typed ?? rawCount ?? fallback;
+}
 
 export function deployExternalDns(
   name: string,
@@ -44,12 +97,32 @@ export function deployExternalDns(
   };
 
   if (envOverrides) {
-    values["env"] = envOverrides;
+    const userEnv = Array.isArray(values.env) ? (values.env as Record<string, unknown>[]) : [];
+    const merged = new Map(userEnv.map((entry) => [entry.name, entry]));
+    for (const entry of envOverrides) merged.set(entry.name, entry);
+    values.env = [...merged.values()];
   }
+  const instance = `${name}-external-dns`;
+  const selector = {
+    "app.kubernetes.io/name": "external-dns",
+    "app.kubernetes.io/instance": instance,
+  };
+  const replicas = desiredReplicas(
+    config.scheduling?.replicas,
+    config.values?.replicaCount,
+    1,
+    "replicaCount"
+  );
+  Object.assign(values, {
+    ...chartPodPlacement(config.scheduling?.spread, selector, config.values ?? {}, "External DNS"),
+    ...(config.scheduling?.replicas !== undefined
+      ? { replicaCount: config.scheduling.replicas }
+      : {}),
+  });
 
   ensureNamespace("external-dns", provider);
 
-  return new k8s.helm.v3.Release(
+  const release = new k8s.helm.v3.Release(
     `${name}-external-dns`,
     {
       chart: "external-dns",
@@ -63,4 +136,6 @@ export function deployExternalDns(
     },
     { provider }
   );
+  addAvailability(release, instance, "external-dns", provider, config, replicas, [selector]);
+  return release;
 }

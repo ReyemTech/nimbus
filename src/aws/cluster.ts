@@ -17,6 +17,11 @@ import {
   validateEksNodePoolScaling,
 } from "./eks-autoscaling";
 import { createAwsClusterTags } from "./tagging";
+import {
+  resolvePodDisruptionBudget,
+  type IPodDisruptionBudgetConfig,
+  type IPodSchedulingConfig,
+} from "../availability";
 
 /** EKS community Metrics Server add-on configuration. */
 export interface IEksMetricsServerOptions {
@@ -26,12 +31,26 @@ export interface IEksMetricsServerOptions {
   readonly addonVersion?: pulumi.Input<string>;
   /** JSON add-on configuration values. */
   readonly configurationValues?: pulumi.Input<string>;
+  /** Exact AWS DescribeAddonConfiguration snapshot for the selected build. */
+  readonly configurationSchema?: IEksAddonConfigurationSchema;
+  /** Opt in to a typed disruption budget for the metrics-server Deployment. */
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+}
+
+/** Schema returned by AWS DescribeAddonConfiguration for one exact add-on build. */
+export interface IEksAddonConfigurationSchema {
+  readonly addonVersion: string;
+  readonly schema: string;
 }
 
 /** Version and configuration overrides for an EKS add-on. */
 export interface IEksAddonOptions {
   readonly version?: pulumi.Input<string>;
   readonly configurationValues?: pulumi.Input<string>;
+  /** Exact AWS DescribeAddonConfiguration schema matching this add-on version. */
+  readonly configurationSchema?: IEksAddonConfigurationSchema;
+  /** Opt in to a safe disruption budget for supported community Deployment add-ons. */
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
 }
 
 /** Add-on using a caller-managed EKS Pod Identity role. */
@@ -51,7 +70,10 @@ export interface IEksServiceAccountRoleAddonOptions extends IEksAddonOptions {
 }
 
 /** Version and configuration overrides for one AWS community add-on. */
-export type IEksCommunityAddonOptions = IEksAddonOptions;
+export interface IEksCommunityAddonOptions extends IEksAddonOptions {
+  /** Node exporter is a DaemonSet by default; select Deployment only for a confirmed Deployment build. */
+  readonly workloadKind?: "Deployment" | "DaemonSet";
+}
 
 /** Community add-ons Nimbus coordinates with its platform and observability stacks. */
 export interface IEksCommunityAddons {
@@ -124,18 +146,216 @@ export interface IEksOptions {
     readonly version?: pulumi.Input<string>;
     /** Existing cluster OIDC provider ARN; Nimbus creates one when omitted. */
     readonly oidcProviderArn?: pulumi.Input<string>;
+    readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+    readonly scheduling?: IPodSchedulingConfig;
   };
   /** Shared Karpenter Helm chart and interruption handling options. */
   readonly karpenter?: {
     readonly version?: pulumi.Input<string>;
     readonly namespace?: string;
     readonly interruptionHandling?: boolean;
+    readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+    readonly scheduling?: IPodSchedulingConfig;
   };
   /** Stable on-demand managed pool that hosts autoscaler controller pods. */
   readonly autoscalerControllerNodePoolName?: string;
 }
 
 const DEFAULT_ADDONS = ["vpc-cni", "coredns", "kube-proxy"];
+
+interface AddonPdbSettings {
+  readonly policy: IPodDisruptionBudgetConfig | undefined;
+  readonly schema: IEksAddonConfigurationSchema | undefined;
+  readonly workloadKind: "Deployment" | "DaemonSet";
+}
+
+function communityPdbSettings(
+  settings: IEksCommunityAddonOptions | undefined,
+  workloadKind: "Deployment" | "DaemonSet"
+): AddonPdbSettings | undefined {
+  return settings
+    ? {
+        policy: settings.podDisruptionBudget,
+        schema: settings.configurationSchema,
+        workloadKind,
+      }
+    : undefined;
+}
+
+function prepareAddonPdbConfiguration(
+  addon: string,
+  settings: AddonPdbSettings,
+  requestedVersion: pulumi.Input<string> | undefined,
+  rawConfigurationValues: pulumi.Input<string> | undefined
+): {
+  addonVersion?: string;
+  configurationValues?: pulumi.Input<string>;
+} {
+  const replicas = 1;
+  const budget = settings.policy
+    ? resolvePodDisruptionBudget(settings.policy, replicas)
+    : undefined;
+  if (!budget || settings.workloadKind === "DaemonSet") {
+    return { configurationValues: rawConfigurationValues };
+  }
+  const schema = settings.schema;
+  if (!schema) {
+    throw new Error(
+      `${addon} PDB requires the exact configurationSchema from AWS DescribeAddonConfiguration`
+    );
+  }
+  if (requestedVersion !== undefined && typeof requestedVersion !== "string") {
+    throw new Error(
+      `${addon} PDB requires a literal add-on version matching configurationSchema.addonVersion`
+    );
+  }
+  if (typeof requestedVersion === "string" && requestedVersion !== schema.addonVersion) {
+    throw new Error(
+      `${addon} configurationSchema.addonVersion must match the requested add-on version`
+    );
+  }
+  const parsedSchema = parseJsonObject(schema.schema, `${addon} AWS configuration schema`);
+  const parsedValues =
+    rawConfigurationValues === undefined
+      ? {}
+      : typeof rawConfigurationValues === "string"
+        ? parseJsonObject(rawConfigurationValues, `${addon} configurationValues`)
+        : (() => {
+            throw new Error(
+              `${addon} PDB requires literal JSON configurationValues so existing budgets can be checked`
+            );
+          })();
+  if (containsPdbConfiguration(parsedValues)) {
+    throw new Error(
+      `${addon} configurationValues already configures a PDB; remove it or omit Nimbus podDisruptionBudget`
+    );
+  }
+  const nativePdbPath = findSchemaPdbPath(parsedSchema);
+  if (nativePdbPath) {
+    const nativePdbSchema = schemaAtPath(parsedSchema, nativePdbPath);
+    const pdbValues = nativeSchemaBudget(nativePdbSchema, budget, addon);
+    setObjectPath(parsedValues, nativePdbPath, pdbValues);
+    return {
+      addonVersion: requestedVersion === undefined ? schema.addonVersion : undefined,
+      configurationValues: JSON.stringify(parsedValues),
+    };
+  }
+  throw new Error(
+    `${addon} selected AWS schema has no native PDB configuration; Nimbus will not risk creating a duplicate external budget`
+  );
+}
+
+function parseJsonObject(value: string, label: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(`${label} must be valid JSON`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function containsPdbConfiguration(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsPdbConfiguration);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value as Record<string, unknown>).some(
+    ([key, child]) => /^(pod)?disruptionbudget$|^pdb$/i.test(key) || containsPdbConfiguration(child)
+  );
+}
+
+function findSchemaPdbPath(schema: Record<string, unknown>): string[] | undefined {
+  const resolvedRoot = resolveSchemaRef(schema, schema, new Set());
+  return findSchemaPdbPathIn(resolvedRoot, schema, [], new Set());
+}
+
+function findSchemaPdbPathIn(
+  schema: Record<string, unknown>,
+  root: Record<string, unknown>,
+  path: string[],
+  seenRefs: Set<string>
+): string[] | undefined {
+  const properties = schema.properties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return undefined;
+  for (const [key, child] of Object.entries(properties as Record<string, unknown>)) {
+    if (/^(pod)?disruptionbudget$|^pdb$/i.test(key)) return [...path, key];
+    if (child && typeof child === "object" && !Array.isArray(child)) {
+      const childSchema = resolveSchemaRef(child as Record<string, unknown>, root, seenRefs);
+      const nested = findSchemaPdbPathIn(childSchema, root, [...path, key], new Set(seenRefs));
+      if (nested) return nested;
+    }
+  }
+  return undefined;
+}
+
+function schemaAtPath(schema: Record<string, unknown>, path: string[]): Record<string, unknown> {
+  let current = resolveSchemaRef(schema, schema, new Set());
+  for (const part of path) {
+    const properties = current.properties as Record<string, unknown>;
+    current = properties[part] as Record<string, unknown>;
+    current = resolveSchemaRef(current, schema, new Set());
+  }
+  return current;
+}
+
+function resolveSchemaRef(
+  schema: Record<string, unknown>,
+  root: Record<string, unknown>,
+  seenRefs: Set<string>
+): Record<string, unknown> {
+  const ref = schema.$ref;
+  if (typeof ref !== "string") return schema;
+  if (!ref.startsWith("#/")) {
+    throw new Error(`AWS add-on schema contains unsupported external reference: ${ref}`);
+  }
+  if (seenRefs.has(ref)) return {};
+  const target = ref
+    .slice(2)
+    .split("/")
+    .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"))
+    .reduce<unknown>(
+      (value, part) =>
+        value && typeof value === "object" ? (value as Record<string, unknown>)[part] : undefined,
+      root
+    );
+  if (!target || typeof target !== "object" || Array.isArray(target)) {
+    throw new Error(`AWS add-on schema reference ${ref} does not resolve`);
+  }
+  const nextRefs = new Set(seenRefs);
+  nextRefs.add(ref);
+  return resolveSchemaRef(target as Record<string, unknown>, root, nextRefs);
+}
+
+function nativeSchemaBudget(
+  schema: Record<string, unknown>,
+  budget: { minAvailable?: number | string; maxUnavailable?: number | string },
+  addon: string
+): Record<string, unknown> {
+  const properties = schema.properties as Record<string, unknown> | undefined;
+  const supportsMin = properties?.minAvailable !== undefined;
+  const supportsMax = properties?.maxUnavailable !== undefined;
+  if ("minAvailable" in budget && supportsMin) return { minAvailable: budget.minAvailable };
+  if ("maxUnavailable" in budget && supportsMax) return { maxUnavailable: budget.maxUnavailable };
+  throw new Error(`${addon} AWS schema PDB properties cannot represent the requested policy`);
+}
+
+function setObjectPath(target: Record<string, unknown>, path: string[], value: unknown): void {
+  const leaf = path[path.length - 1];
+  if (!leaf) throw new Error("AWS add-on PDB schema path cannot be empty");
+  let current = target;
+  for (const part of path.slice(0, -1)) {
+    const child = current[part];
+    if (child !== undefined && (!child || typeof child !== "object" || Array.isArray(child))) {
+      throw new Error(
+        `configurationValues path ${path.join(".")} conflicts with a non-object value`
+      );
+    }
+    current = (current[part] ??= {}) as Record<string, unknown>;
+  }
+  current[leaf] = value;
+}
 
 /**
  * Create an EKS cluster with optional Auto Mode.
@@ -170,6 +390,25 @@ export function createEksCluster(
     "prometheus-node-exporter": options?.communityAddons?.prometheusNodeExporter,
     "kube-state-metrics": options?.communityAddons?.kubeStateMetrics,
     "cert-manager": options?.communityAddons?.certManager,
+  };
+  const addonPdbSettings: Readonly<Record<string, AddonPdbSettings | undefined>> = {
+    "metrics-server":
+      typeof options?.metricsServer === "object"
+        ? {
+            policy: options.metricsServer.podDisruptionBudget,
+            schema: options.metricsServer.configurationSchema,
+            workloadKind: "Deployment",
+          }
+        : undefined,
+    "cert-manager": communityPdbSettings(communityAddonSettings["cert-manager"], "Deployment"),
+    "kube-state-metrics": communityPdbSettings(
+      communityAddonSettings["kube-state-metrics"],
+      "Deployment"
+    ),
+    "prometheus-node-exporter": communityPdbSettings(
+      communityAddonSettings["prometheus-node-exporter"],
+      communityAddonSettings["prometheus-node-exporter"]?.workloadKind ?? "DaemonSet"
+    ),
   };
   const awsAddonSettings: Readonly<Record<string, IEksAddonOptions | undefined>> = {
     "aws-efs-csi-driver": options?.awsAddons?.efsCsiDriver,
@@ -484,6 +723,27 @@ export function createEksCluster(
   }
   if (needsPodIdentityAgent) addonNames.add("eks-pod-identity-agent");
 
+  const preparedAddonConfigurations = new Map<
+    string,
+    ReturnType<typeof prepareAddonPdbConfiguration>
+  >();
+  for (const addon of addonNames) {
+    const addonPdb = addonPdbSettings[addon];
+    const configuredAddonVersion =
+      addon === "metrics-server" && typeof metricsServerOption === "object"
+        ? metricsServerOption.addonVersion
+        : (communityAddonSettings[addon]?.version ?? awsAddonSettings[addon]?.version);
+    const configuredValues =
+      addon === "metrics-server" && typeof metricsServerOption === "object"
+        ? metricsServerOption.configurationValues
+        : (communityAddonSettings[addon]?.configurationValues ??
+          awsAddonSettings[addon]?.configurationValues);
+    const prepared = addonPdb
+      ? prepareAddonPdbConfiguration(addon, addonPdb, configuredAddonVersion, configuredValues)
+      : { configurationValues: configuredValues };
+    preparedAddonConfigurations.set(addon, prepared);
+  }
+
   // EKS Add-ons
   let podIdentityAgent: aws.eks.Addon | undefined;
   const addonsCreated: aws.eks.Addon[] = [];
@@ -496,20 +756,18 @@ export function createEksCluster(
     if (addon === "aws-ebs-csi-driver" && ebsCsiPolicyAttachment) {
       dependsOn.push(ebsCsiPolicyAttachment);
     }
+    const configuredAddonVersion =
+      addon === "metrics-server" && typeof metricsServerOption === "object"
+        ? metricsServerOption.addonVersion
+        : (communityAddonSettings[addon]?.version ?? awsAddonSettings[addon]?.version);
+    const preparedPdb = preparedAddonConfigurations.get(addon) ?? {};
     const addonResource = new aws.eks.Addon(
       `${name}-addon-${addon}`,
       {
         clusterName: cluster.name,
         addonName: addon,
-        addonVersion:
-          addon === "metrics-server" && typeof metricsServerOption === "object"
-            ? metricsServerOption.addonVersion
-            : (communityAddonSettings[addon]?.version ?? awsAddonSettings[addon]?.version),
-        configurationValues:
-          addon === "metrics-server" && typeof metricsServerOption === "object"
-            ? metricsServerOption.configurationValues
-            : (communityAddonSettings[addon]?.configurationValues ??
-              awsAddonSettings[addon]?.configurationValues),
+        addonVersion: preparedPdb.addonVersion ?? configuredAddonVersion,
+        configurationValues: preparedPdb.configurationValues,
         resolveConflictsOnCreate: "OVERWRITE",
         resolveConflictsOnUpdate: "OVERWRITE",
         podIdentityAssociations:

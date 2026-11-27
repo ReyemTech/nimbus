@@ -6,6 +6,8 @@
 
 import * as k8s from "@pulumi/kubernetes";
 import type { ITrivyExposureClassifierConfig } from "../interfaces";
+import { buildPodDisruptionBudgetSpec, resolvePodDisruptionBudget } from "../../availability";
+import { chartPodPlacement } from "./scheduling";
 
 const DEFAULT_NAMESPACE = "observability";
 const DEFAULT_IMAGE = "node:22-alpine";
@@ -143,6 +145,8 @@ export function createTrivyExposureClassifier(
   const app = "trivy-exposure-classifier";
   const image = config.image ?? DEFAULT_IMAGE;
   const intervalSeconds = config.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS;
+  const replicas = config.scheduling?.replicas ?? 1;
+  const selector = { app };
   const options = { provider, dependsOn: dependsOn ? [dependsOn] : undefined };
 
   const serviceAccount = new k8s.core.v1.ServiceAccount(
@@ -194,11 +198,17 @@ export function createTrivyExposureClassifier(
     {
       metadata: { name: app, namespace, labels: { app } },
       spec: {
-        replicas: 1,
+        replicas,
         selector: { matchLabels: { app } },
         template: {
           metadata: { labels: { app } },
           spec: {
+            ...chartPodPlacement(
+              config.scheduling?.spread,
+              selector,
+              {},
+              "Trivy exposure classifier"
+            ),
             serviceAccountName: app,
             automountServiceAccountToken: true,
             securityContext: {
@@ -233,6 +243,15 @@ export function createTrivyExposureClassifier(
     },
     { ...options, dependsOn: [binding, script, ...(dependsOn ? [dependsOn] : [])] }
   );
+  const budget = resolvePodDisruptionBudget(config.podDisruptionBudget ?? {}, replicas);
+  if (budget) {
+    const spec = buildPodDisruptionBudgetSpec(config.podDisruptionBudget ?? {}, selector, replicas);
+    new k8s.policy.v1.PodDisruptionBudget(
+      `${name}-${app}-pdb`,
+      { metadata: { name: app, namespace }, spec: spec?.spec },
+      { provider, dependsOn: [deployment] }
+    );
+  }
   const service = new k8s.core.v1.Service(
     `${name}-${app}`,
     {

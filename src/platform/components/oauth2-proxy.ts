@@ -9,6 +9,8 @@ import * as pulumi from "@pulumi/pulumi";
 import { createHash } from "crypto";
 import type { IPlatformComponentConfig } from "../interfaces";
 import { ensureNamespace } from "../../utils/ensure-namespace";
+import { resolvePodDisruptionBudget } from "../../availability";
+import { chartPodPlacement } from "./scheduling";
 
 export function deployOAuth2Proxy(
   name: string,
@@ -28,9 +30,19 @@ export function deployOAuth2Proxy(
   });
 
   ensureNamespace("traefik", provider);
+  const instance = `${name}-oauth2-proxy`;
+  const raw = config.values ?? {};
+  const replicas = config.scheduling?.replicas ?? (raw.replicaCount as number | undefined) ?? 1;
+  if (config.podDisruptionBudget !== undefined && raw.podDisruptionBudget !== undefined) {
+    throw new Error("podDisruptionBudget conflicts with Helm values.podDisruptionBudget");
+  }
+  const resolvedBudget =
+    config.podDisruptionBudget === undefined
+      ? undefined
+      : resolvePodDisruptionBudget(config.podDisruptionBudget, replicas);
 
-  return new k8s.helm.v3.Release(
-    `${name}-oauth2-proxy`,
+  const release = new k8s.helm.v3.Release(
+    instance,
     {
       chart: "oauth2-proxy",
       repositoryOpts: {
@@ -56,9 +68,26 @@ export function deployOAuth2Proxy(
           "whitelist-domain": `.${domain}`,
         },
         service: { portNumber: 4180 },
-        ...config.values,
+        ...raw,
+        ...chartPodPlacement(
+          config.scheduling?.spread,
+          { "app.kubernetes.io/name": "oauth2-proxy", "app.kubernetes.io/instance": instance },
+          raw,
+          "OAuth2 Proxy"
+        ),
+        ...(config.scheduling?.replicas !== undefined
+          ? { replicaCount: config.scheduling.replicas }
+          : {}),
+        ...(config.podDisruptionBudget !== undefined
+          ? {
+              podDisruptionBudget: resolvedBudget
+                ? { enabled: true, ...resolvedBudget }
+                : { enabled: false },
+            }
+          : {}),
       },
     },
     { provider }
   );
+  return release;
 }

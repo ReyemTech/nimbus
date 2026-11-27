@@ -11,6 +11,7 @@ import type * as pulumi from "@pulumi/pulumi";
 import type * as k8s from "@pulumi/kubernetes";
 import type { ICluster } from "../cluster";
 import type { IExposedService } from "../types";
+import type { IPodDisruptionBudgetConfig, IPodSchedulingConfig } from "../availability";
 
 /** Built-in Kubernetes roles supported by the access factory. */
 export type ServiceAccountBuiltinRole = "cluster-admin" | "admin" | "edit" | "view";
@@ -65,10 +66,14 @@ export interface IAccessDnsConfig {
   readonly enabled: boolean;
   /** Top-level domain for service names. Default: "internal". */
   readonly tld?: string;
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  readonly scheduling?: IPodSchedulingConfig;
 }
 
 /** Tailscale-specific configuration. */
 export interface ITailscaleConfig {
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  readonly scheduling?: IPodSchedulingConfig;
   /** OAuth client ID (generate at Tailscale admin → Settings → OAuth). */
   readonly oauthClientId: pulumi.Input<string>;
   /** OAuth client secret. */
@@ -97,6 +102,8 @@ export interface IWireGuardPeer {
 
 /** WireGuard-specific configuration. */
 export interface IWireGuardConfig {
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  readonly scheduling?: IPodSchedulingConfig;
   /** Public DNS name or IP for the WireGuard endpoint. */
   readonly endpoint: string;
   /** UDP listen port. Default: 51820. */

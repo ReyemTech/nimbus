@@ -6,6 +6,8 @@
 
 import * as k8s from "@pulumi/kubernetes";
 import type { IPlatformComponentConfig } from "../interfaces";
+import { resolvePodDisruptionBudget } from "../../availability";
+import { chartPodPlacement } from "./scheduling";
 
 export function deployTrivyOperator(
   name: string,
@@ -13,8 +15,23 @@ export function deployTrivyOperator(
   provider: k8s.Provider,
   defaultVersion: string | undefined
 ): k8s.helm.v3.Release {
-  return new k8s.helm.v3.Release(
-    `${name}-trivy-operator`,
+  const instance = `${name}-trivy-operator`;
+  const raw = config.values ?? {};
+  const rawOperator = (raw.operator ?? {}) as Record<string, unknown>;
+  const rawTrivy = (raw.trivy ?? {}) as Record<string, unknown>;
+  const replicas = config.scheduling?.replicas ?? (rawOperator.replicas as number | undefined) ?? 1;
+  if (config.scheduling?.spread?.strategy === "topology-spread")
+    throw new Error(
+      "Trivy Operator chart supports pod anti-affinity, not topology spread constraints"
+    );
+  const placement = chartPodPlacement(
+    config.scheduling?.spread,
+    { "app.kubernetes.io/name": "trivy-operator", "app.kubernetes.io/instance": instance },
+    raw,
+    "Trivy Operator"
+  );
+  const release = new k8s.helm.v3.Release(
+    instance,
     {
       chart: "trivy-operator",
       repositoryOpts: { repo: "https://aquasecurity.github.io/helm-charts" },
@@ -22,17 +39,42 @@ export function deployTrivyOperator(
       namespace: "trivy-system",
       createNamespace: true,
       values: {
+        ...raw,
+        ...placement,
         operator: {
           scanJobTimeout: "10m",
           scanJobsConcurrentLimit: 5,
+          ...rawOperator,
+          ...(config.scheduling?.replicas !== undefined
+            ? { replicas: config.scheduling.replicas }
+            : {}),
         },
         trivy: {
           // Report unfixed CVEs too, so exposure is visible before a patch exists.
           ignoreUnfixed: false,
+          ...rawTrivy,
         },
-        ...config.values,
       },
     },
     { provider }
   );
+  const budget = resolvePodDisruptionBudget(config.podDisruptionBudget ?? {}, replicas);
+  if (budget)
+    new k8s.policy.v1.PodDisruptionBudget(
+      `${instance}-pdb`,
+      {
+        metadata: { name: instance, namespace: "trivy-system" },
+        spec: {
+          ...budget,
+          selector: {
+            matchLabels: {
+              "app.kubernetes.io/name": "trivy-operator",
+              "app.kubernetes.io/instance": release.status.apply((status) => status.name),
+            },
+          },
+        },
+      },
+      { provider, dependsOn: [release] }
+    );
+  return release;
 }

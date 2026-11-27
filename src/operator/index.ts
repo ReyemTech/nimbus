@@ -10,6 +10,7 @@
 
 import * as k8s from "@pulumi/kubernetes";
 import { assertNever } from "../types";
+import { controllerAvailability, INSTANCE_LABEL } from "./availability.js";
 import { ensureNamespace } from "../utils/ensure-namespace";
 import { createCnpgDatabase } from "./cnpg";
 import { createMariadbDatabase } from "./mariadb";
@@ -137,6 +138,14 @@ export function createOperator(
   const chartInfo = OPERATOR_CHARTS[type];
   const provider = config.cluster.provider;
   const namespace = config.namespace ?? chartInfo.defaultNamespace;
+  if (type !== "minio" && config.tenant !== undefined) {
+    throw new Error("tenant availability settings are supported only by the MinIO operator");
+  }
+  if (type === "neo4j" && (config.podDisruptionBudget || config.scheduling)) {
+    throw new Error("Neo4j has no operator controller. Configure availability on createCluster()");
+  }
+  const availability =
+    type === "neo4j" ? undefined : controllerAvailability(type, config, namespace);
 
   // Ensure operator namespace exists
   const ns = ensureNamespace(namespace, provider);
@@ -163,7 +172,7 @@ export function createOperator(
   // Helm release with instance-specific values.
   const skipOperatorInstall = type === "neo4j";
 
-  const helmValues = config.values ?? {};
+  const helmValues = availability?.values ?? config.values ?? {};
 
   // Deploy Helm release (operator chart)
   const helmRelease = skipOperatorInstall
@@ -180,6 +189,33 @@ export function createOperator(
         },
         { provider, dependsOn: [ns, ...operatorDeps] }
       );
+
+  if (availability?.standaloneBudget) {
+    const name = `${type}-operator-pdb`;
+    new k8s.policy.v1.PodDisruptionBudget(
+      name,
+      {
+        metadata: {
+          name,
+          namespace: availability.namespace,
+          labels: {
+            "app.kubernetes.io/managed-by": "nimbus",
+            "app.kubernetes.io/component": "operator-controller",
+          },
+        },
+        spec: {
+          ...availability.standaloneBudget,
+          selector: {
+            matchLabels: {
+              "app.kubernetes.io/name": availability.selectorName,
+              [INSTANCE_LABEL]: helmRelease.name,
+            },
+          },
+        },
+      },
+      { provider, dependsOn: [helmRelease] }
+    );
+  }
 
   // CNPG's admission webhooks ship with timeouts tuned for a control plane
   // co-located with the cluster: 10s mutating, 15s validating, both with

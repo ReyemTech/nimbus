@@ -12,6 +12,7 @@ import * as pulumi from "@pulumi/pulumi";
 import type { IWireGuardGatewayConfig, IWireGuardPeer, IAccessGateway } from "./interfaces";
 import { deployAccessDns } from "./dns";
 import { ensureNamespace } from "../utils/ensure-namespace";
+import { resolvePodDisruptionBudget } from "../availability";
 
 const NAMESPACE = "access";
 const DEFAULT_PORT = 51820;
@@ -58,6 +59,71 @@ export function deployWireGuard(name: string, config: IWireGuardGatewayConfig): 
   const prefix = config.hostnamePrefix ?? name;
   const listenPort = config.wireguard.listenPort ?? DEFAULT_PORT;
   const nsResource = ensureNamespace(NAMESPACE, k8sProvider);
+  if (config.wireguard.scheduling?.spread !== undefined) {
+    throw new Error(
+      "WireGuard scheduling.spread is not supported because the chart hard-codes topology spread constraints"
+    );
+  }
+  const rawValues = config.wireguard.values ?? {};
+  const rawReplicas = rawValues.replicaCount;
+  const typedReplicas = config.wireguard.scheduling?.replicas;
+  const rawAutoscaling = (rawValues.autoscaling ?? {}) as Record<string, unknown>;
+  const daemonSet = rawValues.daemonSet === true;
+  const typedBudget = config.wireguard.podDisruptionBudget;
+  const rawBudget = rawValues.disruptionBudget;
+  if (typedReplicas !== undefined && rawAutoscaling.enabled === true) {
+    throw new Error("scheduling.replicas conflicts with Helm values.autoscaling.enabled");
+  }
+  if (typedReplicas !== undefined && daemonSet) {
+    throw new Error("scheduling.replicas is not supported with daemonSet: true");
+  }
+  if (
+    daemonSet &&
+    typedBudget !== undefined &&
+    typedBudget.enabled !== false &&
+    typedBudget.minAvailable === undefined &&
+    typedBudget.maxUnavailable === undefined
+  ) {
+    throw new Error(
+      "podDisruptionBudget is not supported with daemonSet unless an explicit bound is provided"
+    );
+  }
+  if (typedBudget !== undefined && rawBudget !== undefined) {
+    throw new Error("podDisruptionBudget conflicts with Helm values.disruptionBudget");
+  }
+  if (typedReplicas !== undefined && rawReplicas !== undefined && typedReplicas !== rawReplicas) {
+    throw new Error("scheduling.replicas conflicts with Helm values.replicaCount");
+  }
+  const actualReplicas =
+    rawAutoscaling.enabled !== false && typeof rawAutoscaling.minReplicas === "number"
+      ? rawAutoscaling.minReplicas
+      : typeof rawReplicas === "number"
+        ? rawReplicas
+        : 3;
+  const replicas = typedReplicas ?? actualReplicas;
+  let chartBudget: Record<string, unknown> | undefined;
+  if (typedBudget !== undefined) {
+    if (typedBudget.enabled === false) {
+      chartBudget = { enabled: false };
+    } else {
+      if (typedBudget.maxUnavailable !== undefined) {
+        throw new Error(
+          "WireGuard chart disruptionBudget supports minAvailable only; maxUnavailable cannot be represented"
+        );
+      }
+      if (typedBudget.minAvailable !== undefined && typeof typedBudget.minAvailable !== "number") {
+        throw new Error(
+          "WireGuard chart disruptionBudget.minAvailable supports integer values only"
+        );
+      }
+      const resolved = resolvePodDisruptionBudget(typedBudget, replicas);
+      const minAvailable =
+        resolved && "minAvailable" in resolved
+          ? resolved.minAvailable
+          : replicas - Number(resolved?.maxUnavailable ?? 1);
+      chartBudget = { enabled: true, minAvailable };
+    }
+  }
 
   const helmRelease = new k8s.helm.v3.Release(
     `${name}-wireguard`,
@@ -88,7 +154,14 @@ export function deployWireGuard(name: string, config: IWireGuardGatewayConfig): 
           enabled: true,
           size: "100Mi",
         },
-        ...config.wireguard.values,
+        ...rawValues,
+        ...(typedReplicas !== undefined
+          ? {
+              replicaCount: typedReplicas,
+              autoscaling: { ...rawAutoscaling, enabled: false },
+            }
+          : {}),
+        ...(chartBudget !== undefined ? { disruptionBudget: chartBudget } : {}),
       },
     },
     { provider: k8sProvider, dependsOn: [nsResource] }
@@ -97,7 +170,16 @@ export function deployWireGuard(name: string, config: IWireGuardGatewayConfig): 
   // Split DNS
   let dnsClusterIp: pulumi.Output<string> | undefined;
   if (config.dns?.enabled) {
-    const dns = deployAccessDns(name, prefix, config.dns, NAMESPACE, k8sProvider, [], [nsResource]);
+    const dns = deployAccessDns(
+      name,
+      prefix,
+      config.dns,
+      NAMESPACE,
+      k8sProvider,
+      [],
+      [nsResource],
+      config.dns
+    );
     dnsClusterIp = dns.clusterIp;
   }
 

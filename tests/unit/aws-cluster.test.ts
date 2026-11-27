@@ -1129,6 +1129,48 @@ describe("createEksCluster options", () => {
     expect(JSON.stringify(karpenterPolicy?.args.policy)).toContain("sqs:ReceiveMessage");
   });
 
+  it("maps controller replica, PDB, and spread settings to supported chart values", () => {
+    create(
+      {
+        autoscalerControllerNodePoolName: "steady",
+        clusterAutoscaler: {
+          scheduling: { replicas: 3, spread: { strategy: "topology-spread" } },
+          podDisruptionBudget: { maxUnavailable: 1 },
+        },
+        karpenter: {
+          scheduling: { replicas: 2, spread: { strategy: "topology-spread" } },
+          podDisruptionBudget: { minAvailable: 1 },
+        },
+      },
+      network,
+      {
+        ...config,
+        nodePools: [
+          {
+            name: "steady",
+            instanceType: "m7i.large",
+            minNodes: 2,
+            maxNodes: 3,
+            scaling: { mode: "cluster-autoscaler" },
+          },
+          { name: "burst", scaling: { mode: "karpenter", instanceTypes: ["m7i.large"] } },
+        ],
+      }
+    );
+    const ca = resourcesOf("k8s.Chart").find(({ name }) => name === "prod-cluster-autoscaler");
+    const karpenter = resourcesOf("k8s.Release").find(({ name }) => name === "prod-karpenter");
+    expect(ca?.args.values).toMatchObject({
+      replicaCount: 3,
+      podDisruptionBudget: { enabled: true, maxUnavailable: 1 },
+      topologySpreadConstraints: expect.any(Array),
+    });
+    expect(karpenter?.args.values).toMatchObject({
+      replicas: 2,
+      podDisruptionBudget: { maxUnavailable: 1 },
+      topologySpreadConstraints: expect.any(Array),
+    });
+  });
+
   it("uses the deployed cluster region for autoscaler configuration and IAM", () => {
     mockPulumi.clusterArn.value = "arn:aws:eks:ca-central-1:123456789012:cluster/prod";
     mockPulumi.clusterIssuer.value = "https://oidc.eks.ca-central-1.amazonaws.com/id/EXAMPLE";

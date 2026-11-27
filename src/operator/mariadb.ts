@@ -30,6 +30,9 @@ import {
   createMariadbRoleRegistry,
 } from "./mariadb-common.js";
 import { createSingleMariadbDatabaseInstance } from "./mariadb-database.js";
+import { resolvePodDisruptionBudget } from "../availability";
+import { buildPodPlacement } from "./availability.js";
+import { syncMariadbPodDisruptionBudget } from "./mariadb-pdb.js";
 
 const DEFAULT_MARIADB_VERSION = "11.7";
 const DEFAULT_REPLICAS = 1;
@@ -46,8 +49,14 @@ function createSingleMariadbCluster(
   operatorRelease: k8s.helm.v3.Release,
   storageTiers?: StorageTierMap
 ): IClusterInstance {
-  const namespace = ensureNamespace(DATA_NAMESPACE, provider);
   const replicas = config?.replicas ?? DEFAULT_REPLICAS;
+  // An omitted policy triggers MariaDB's native HA default. Zero allows
+  // evictions while keeping the budget under the operator's ownership.
+  const budget = resolvePodDisruptionBudget(config?.podDisruptionBudget, replicas) ?? {
+    minAvailable: 0,
+  };
+  const spread = config?.scheduling?.spread;
+  const namespace = ensureNamespace(DATA_NAMESPACE, provider);
   const storageGb = config?.storageGb ?? DEFAULT_STORAGE_GB;
   const dbVersion = config?.version ?? DEFAULT_MARIADB_VERSION;
   const image = `mariadb:${dbVersion}`;
@@ -63,6 +72,7 @@ function createSingleMariadbCluster(
   // MariaDB CRD spec
   const mariadbSpec: Record<string, unknown> = {
     image,
+    podDisruptionBudget: budget,
     rootPasswordSecretKeyRef: {
       name: `${name}-root`,
       key: "password",
@@ -78,6 +88,16 @@ function createSingleMariadbCluster(
         : {}),
     },
   };
+
+  if (spread) {
+    Object.assign(
+      mariadbSpec,
+      buildPodPlacement(spread, {
+        "app.kubernetes.io/name": "mariadb",
+        "app.kubernetes.io/instance": name,
+      })
+    );
+  }
 
   if (config?.resources) {
     mariadbSpec["resources"] = config.resources;
@@ -100,7 +120,7 @@ function createSingleMariadbCluster(
     mariadbSpec["replicas"] = replicas;
     mariadbSpec["replication"] = {
       enabled: true,
-      primary: { automaticFailover: true },
+      primary: { autoFailover: true },
     };
   }
 
@@ -138,6 +158,8 @@ function createSingleMariadbCluster(
     },
     { provider, dependsOn }
   );
+
+  syncMariadbPodDisruptionBudget(name, budget, mariadb, provider);
 
   // Per-cluster Grafana dashboard
   createMariadbClusterDashboard(name, "observability", provider, [mariadb]);

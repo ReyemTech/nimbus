@@ -8,6 +8,7 @@ export { createAwsNetwork, type IAwsNetworkOptions } from "./network";
 export {
   createEksCluster,
   type IEksAddonOptions,
+  type IEksAddonConfigurationSchema,
   type IEksAwsAddons,
   type IEksCommunityAddonOptions,
   type IEksCommunityAddons,

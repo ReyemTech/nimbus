@@ -4,6 +4,9 @@ import * as pulumi from "@pulumi/pulumi";
 import type { IClusterConfig, IKarpenterNodePool, IManagedNodePool } from "../cluster";
 import type { INetwork } from "../network";
 import type { IEksOptions } from "./cluster";
+import { resolvePodDisruptionBudget } from "../availability";
+import type { IPodDisruptionBudgetConfig } from "../availability";
+import { chartPodPlacement } from "../platform/components/scheduling";
 
 const STABLE_LABEL = "nimbus.dev/node-pool";
 const KARPENTER_VERSION = "1.15.3";
@@ -110,6 +113,10 @@ export function createEksAutoscaling(
         : stablePoolConfig.minNodes
       : 1;
   const controllerReplicas = stablePoolGuaranteedNodes >= 2 ? 2 : 1;
+  const caReplicas = options.clusterAutoscaler?.scheduling?.replicas ?? controllerReplicas;
+  const karpenterReplicas = options.karpenter?.scheduling?.replicas ?? controllerReplicas;
+  validateControllerReplicas(caReplicas, "Cluster Autoscaler");
+  validateControllerReplicas(karpenterReplicas, "Karpenter");
   if (caPools.length) {
     const issuer = cluster.identities.apply((identities) => {
       const url = identities[0]?.oidcs[0]?.issuer;
@@ -245,6 +252,20 @@ export function createEksAutoscaling(
             },
           },
           nodeSelector: stableSelector.matchLabels,
+          replicaCount: caReplicas,
+          podDisruptionBudget: caPodDisruptionBudget(
+            options.clusterAutoscaler?.podDisruptionBudget,
+            caReplicas
+          ),
+          ...chartPodPlacement(
+            options.clusterAutoscaler?.scheduling?.spread,
+            {
+              "app.kubernetes.io/name": "cluster-autoscaler",
+              "app.kubernetes.io/instance": `${name}-cluster-autoscaler`,
+            },
+            {},
+            "Cluster Autoscaler"
+          ),
           extraArgs: {
             "skip-nodes-with-local-storage": "false",
             "balance-similar-node-groups": "true",
@@ -405,7 +426,20 @@ export function createEksAutoscaling(
           controller: {
             env: [{ name: "AWS_REGION", value: clusterRegion }],
           },
-          replicas: controllerReplicas,
+          replicas: karpenterReplicas,
+          podDisruptionBudget: karpenterPodDisruptionBudget(
+            options.karpenter?.podDisruptionBudget,
+            karpenterReplicas
+          ),
+          ...chartPodPlacement(
+            options.karpenter?.scheduling?.spread,
+            {
+              "app.kubernetes.io/name": "karpenter",
+              "app.kubernetes.io/instance": `${name}-karpenter`,
+            },
+            {},
+            "Karpenter"
+          ),
         },
       },
       {
@@ -524,6 +558,38 @@ export function createEksAutoscaling(
     }
   }
   return resources;
+}
+
+function caPodDisruptionBudget(
+  policy: IPodDisruptionBudgetConfig | undefined,
+  replicas: number
+): Record<string, unknown> {
+  const budget = resolvePodDisruptionBudget(policy, replicas);
+  return budget ? { enabled: true, ...budget } : { enabled: false };
+}
+
+function karpenterPodDisruptionBudget(
+  policy: IPodDisruptionBudgetConfig | undefined,
+  replicas: number
+): Record<string, unknown> {
+  const budget = resolvePodDisruptionBudget(policy, replicas);
+  if (!budget) return { name: "karpenter", maxUnavailable: replicas };
+  if ("maxUnavailable" in budget && typeof budget.maxUnavailable === "number") {
+    return { name: "karpenter", maxUnavailable: budget.maxUnavailable };
+  }
+  if ("minAvailable" in budget && typeof budget.minAvailable === "number") {
+    if (budget.minAvailable > replicas) {
+      throw new Error("Karpenter PDB minAvailable cannot exceed the controller replica count");
+    }
+    return { name: "karpenter", maxUnavailable: replicas - budget.minAvailable };
+  }
+  throw new Error("Karpenter Helm chart supports integer PDB values only");
+}
+
+function validateControllerReplicas(replicas: number, component: string): void {
+  if (!Number.isInteger(replicas) || replicas < 1) {
+    throw new Error(`${component} replicas must be a positive integer`);
+  }
 }
 
 function clusterAutoscalerChartVersion(kubernetesVersion: string): string {

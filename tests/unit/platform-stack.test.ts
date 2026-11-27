@@ -1125,30 +1125,19 @@ describe("platform stack — ClusterSecretStore", () => {
     );
   });
 
-  it("uses a caller-selected Vault service account consistently for RBAC and auth", () => {
-    createPlatformStack("test", {
-      cluster: makeCluster("test"),
-      domain: "reyem.tech",
-      certManager: { enabled: false },
-      vault: {
-        enabled: true,
-        serviceAccountName: "vault-server",
-        esoSecretPaths: ["argocd/ghcr-reyemtech"],
-      },
-    });
-
-    const release = createdReleases.find((item) => item.name === "test-vault");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((release?.args.values as any).server.serviceAccount.name).toBe("vault-server");
-    const binding = createdClusterRoleBindings.find(
-      (item) => item.name === "test-vault-auth-delegator"
-    );
-    expect(binding?.args.subjects).toEqual([
-      { kind: "ServiceAccount", name: "vault-server", namespace: "vault" },
-    ]);
-    const script = createdConfigMaps.find((item) => item.name === "test-vault-bootstrap-script")
-      ?.args.data["bootstrap.sh"] as string;
-    expect(script).toContain("bound_service_account_names=vault-server");
+  it("rejects custom Vault ServiceAccounts that could strand bootstrap authentication", () => {
+    expect(() =>
+      createPlatformStack("test", {
+        cluster: makeCluster("test"),
+        domain: "reyem.tech",
+        certManager: { enabled: false },
+        vault: {
+          enabled: true,
+          esoSecretPaths: ["argocd/ghcr-reyemtech"],
+          values: { server: { serviceAccount: { name: "vault-server" } } },
+        },
+      })
+    ).toThrow(/Vault server ServiceAccount name is fixed to "vault"/);
   });
 
   it("requires explicit Vault paths when ESO is enabled", () => {

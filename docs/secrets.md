@@ -439,7 +439,6 @@ const platform = createPlatformStack("reyemtech", {
   domain: "reyem.ca",
   vault: {
     enabled: true,
-    serviceAccountName: "vault",
     // KV-v2 paths are relative to the `secret` mount; add every ESO path.
     esoSecretPaths: ["argocd/ghcr-reyemtech"],
     autoUnseal: { provider: "awskms", region: "us-east-1", awsProvider },
@@ -455,7 +454,10 @@ or write access. When Vault and ESO use Nimbus bootstrap, omitting this list
 fails deployment rather than granting broad access.
 
 Vault uses its rotating Kubernetes ServiceAccount token for TokenReview. Nimbus
-keeps the Vault ServiceAccount name and `system:auth-delegator` binding aligned.
+uses the stable `vault` ServiceAccount and keeps its `system:auth-delegator`
+binding and bootstrap role aligned. Do not override
+`values.server.serviceAccount.name`; changing this identity would strand the
+bootstrap role after root-token revocation.
 ESO receives a separate short-lived projected token. Nimbus does not persist a
 root token: bootstrap uses the initial token in memory, creates a restricted
 one-hour bootstrap role for later reconciliation, and revokes the root token.

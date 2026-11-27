@@ -193,8 +193,6 @@ export interface IVaultConfig extends IPlatformComponentConfig {
   readonly storageSize?: string;
   /** Domain for Vault ingress (e.g., "vault.reyem.tech"). */
   readonly ingressHost?: string;
-  /** Vault server pod ServiceAccount name. Default: "vault". */
-  readonly serviceAccountName?: string;
   /** Expose via access gateway (Tailscale). Default: true. */
   readonly expose?: boolean;
   /** Auto-unseal via cloud KMS. Creates KMS key + IAM + credentials. */

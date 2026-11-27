@@ -31,6 +31,7 @@ const VAULT_HA_REPLICAS = 3;
  */
 const ESO_SERVICE_ACCOUNT = "external-secrets";
 const ESO_NAMESPACE = "external-secrets";
+const VAULT_SERVICE_ACCOUNT = "vault";
 const VAULT_BOOTSTRAP_AUDIENCE = "vault";
 const DEFAULT_ESO_AUDIENCE = VAULT_BOOTSTRAP_AUDIENCE;
 
@@ -557,11 +558,15 @@ export function deployVault(
   const customServerValues = (config.values?.server as Record<string, unknown> | undefined) ?? {};
   const customServiceAccountValues =
     (customServerValues["serviceAccount"] as Record<string, unknown> | undefined) ?? {};
-  const vaultServiceAccountName =
-    config.serviceAccountName ??
-    (typeof customServiceAccountValues["name"] === "string"
-      ? customServiceAccountValues["name"]
-      : "vault");
+  if (
+    typeof customServiceAccountValues["name"] === "string" &&
+    customServiceAccountValues["name"] !== VAULT_SERVICE_ACCOUNT
+  ) {
+    throw new Error(
+      `Vault server ServiceAccount name is fixed to "${VAULT_SERVICE_ACCOUNT}" so bootstrap authentication remains available across upgrades.`
+    );
+  }
+  const vaultServiceAccountName = VAULT_SERVICE_ACCOUNT;
   const bootstrapScript = buildVaultBootstrapScript(
     esoSecretPaths,
     esoAudience,

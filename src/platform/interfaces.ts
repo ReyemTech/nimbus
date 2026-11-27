@@ -282,6 +282,8 @@ export interface ITrivyExposureClassifierConfig {
   readonly image?: string;
   readonly intervalSeconds?: number;
   readonly serviceMonitorLabels?: Readonly<Record<string, string>>;
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  readonly scheduling?: IPodSchedulingConfig;
 }
 
 /**

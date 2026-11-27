@@ -17,6 +17,8 @@ import { resolveStorageTier, type StorageTierMap } from "../types/storage-tiers"
 import { ensureNamespace } from "../utils/ensure-namespace";
 import type { ICacheConfig, ICache } from "./interfaces";
 import { createPrometheusRule } from "../observability/alerts";
+import { buildPodDisruptionBudgetSpec, resolvePodDisruptionBudget } from "../availability";
+import { chartPodPlacement } from "../platform/components/scheduling";
 
 /** Target namespace for all cache deployments. */
 const CACHE_NAMESPACE = "data";
@@ -86,6 +88,7 @@ export function createCache(
   const architecture = config.architecture ?? "replication";
   const storageGb = config.storageGb ?? 8;
   const replicas = config.replicas ?? 2;
+  const redisReplicas = config.scheduling?.replicas ?? replicas;
   const memoryLimit = config.memory ?? "256Mi";
   const memoryRequest = parseMemoryRequest(memoryLimit);
 
@@ -111,6 +114,19 @@ export function createCache(
         requests: { cpu: "100m", memory: memoryRequest },
         limits: { memory: memoryLimit },
       },
+      ...(config.podDisruptionBudget
+        ? { pdb: redisChartBudget(config.podDisruptionBudget, 1) }
+        : {}),
+      ...chartPodPlacement(
+        config.scheduling?.spread,
+        {
+          "app.kubernetes.io/name": "redis",
+          "app.kubernetes.io/instance": `${name}-redis`,
+          "app.kubernetes.io/component": "master",
+        },
+        {},
+        "Redis master"
+      ),
     },
   };
 
@@ -119,7 +135,7 @@ export function createCache(
       enabled: true,
     };
     values["replica"] = {
-      replicaCount: replicas,
+      replicaCount: redisReplicas,
       persistence: {
         enabled: true,
         size: `${storageGb}Gi`,
@@ -129,6 +145,19 @@ export function createCache(
         requests: { cpu: "100m", memory: memoryRequest },
         limits: { memory: memoryLimit },
       },
+      ...(config.podDisruptionBudget
+        ? { pdb: redisChartBudget(config.podDisruptionBudget, redisReplicas) }
+        : {}),
+      ...chartPodPlacement(
+        config.scheduling?.spread,
+        {
+          "app.kubernetes.io/name": "redis",
+          "app.kubernetes.io/instance": `${name}-redis`,
+          "app.kubernetes.io/component": "replica",
+        },
+        {},
+        "Redis replicas"
+      ),
     };
   }
 
@@ -235,11 +264,17 @@ export function createCache(
       {
         metadata: { name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE },
         spec: {
-          replicas: 1,
+          replicas: config.scheduling?.replicas ?? 1,
           selector: { matchLabels: { app: `${name}-master-tracker` } },
           template: {
             metadata: { labels: { app: `${name}-master-tracker` } },
             spec: {
+              ...chartPodPlacement(
+                config.scheduling?.spread,
+                { app: `${name}-master-tracker` },
+                {},
+                "Redis master tracker"
+              ),
               serviceAccountName: `${name}-master-tracker`,
               containers: [
                 {
@@ -268,6 +303,25 @@ export function createCache(
       },
       { provider, dependsOn: [release, ns] }
     );
+    const trackerReplicas = config.scheduling?.replicas ?? 1;
+    const trackerBudget = config.podDisruptionBudget
+      ? resolvePodDisruptionBudget(config.podDisruptionBudget, trackerReplicas)
+      : undefined;
+    if (trackerBudget && config.podDisruptionBudget) {
+      const spec = buildPodDisruptionBudgetSpec(
+        config.podDisruptionBudget ?? {},
+        { app: `${name}-master-tracker` },
+        trackerReplicas
+      );
+      new k8s.policy.v1.PodDisruptionBudget(
+        `${name}-redis-master-tracker-pdb`,
+        {
+          metadata: { name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE },
+          spec: spec?.spec,
+        },
+        { provider, dependsOn: [release] }
+      );
+    }
 
     new k8s.core.v1.ServiceAccount(
       `${name}-redis-master-tracker-sa`,
@@ -423,4 +477,12 @@ export function createCache(
     secrets,
     nativeResource: release,
   };
+}
+
+function redisChartBudget(
+  policy: NonNullable<ICacheConfig["podDisruptionBudget"]>,
+  replicas: number
+) {
+  const budget = resolvePodDisruptionBudget(policy, replicas);
+  return budget ? { create: true, ...budget } : { create: false };
 }

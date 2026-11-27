@@ -11,6 +11,7 @@ import type * as pulumi from "@pulumi/pulumi";
 import type { CloudArg, ResolvedCloudTarget } from "../types";
 import type { StorageTier } from "../types/storage-tiers";
 import type { ISecretRef } from "../secrets";
+import type { IPodDisruptionBudgetConfig, IPodSchedulingConfig } from "../availability";
 
 /** Supported cache engines. */
 export type CacheEngine = "redis" | "memcached" | "valkey";
@@ -88,6 +89,10 @@ export interface ICacheConfig {
   readonly tags?: Readonly<Record<string, string>>;
   /** Namespaces to replicate connection secrets into (host, port, password, uri). */
   readonly namespaces?: string[];
+  /** Disruption policy applied to Redis controllers and the Nimbus master tracker. */
+  readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+  /** Replica count and placement for Redis controllers and the Nimbus tracker. */
+  readonly scheduling?: IPodSchedulingConfig;
 }
 
 /** Cache output — the created cache resource. */

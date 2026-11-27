@@ -7,22 +7,27 @@ const suite = configuredContext ? describe : describe.skip;
 
 suite("Kubernetes PodDisruptionBudget eviction behavior", () => {
   const namespace = `nimbus-pdb-${randomUUID().slice(0, 8)}`;
-  const requestTimeout = "10s";
-  const commandTimeoutMs = 15_000;
+  const ordinaryRequestTimeout = "10s";
+  const ordinaryCommandTimeoutMs = 15_000;
+  const rolloutTimeout = { requestTimeout: "130s", commandTimeoutMs: 150_000 };
 
-  function kubectl(args: string[], input?: string): Promise<string> {
+  function kubectl(
+    args: string[],
+    input?: string,
+    timeout = { requestTimeout: ordinaryRequestTimeout, commandTimeoutMs: ordinaryCommandTimeoutMs }
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       execFile(
         "kubectl",
         [
-          `--request-timeout=${requestTimeout}`,
+          `--request-timeout=${timeout.requestTimeout}`,
           "--context",
           configuredContext ?? "",
           "-n",
           namespace,
           ...args,
         ],
-        { encoding: "utf8", timeout: commandTimeoutMs, maxBuffer: 1024 * 1024 },
+        { encoding: "utf8", timeout: timeout.commandTimeoutMs, maxBuffer: 1024 * 1024 },
         (error, stdout, stderr) => {
           if (error) {
             Object.assign(error, { stdout, stderr });
@@ -146,7 +151,11 @@ spec:
 
   it("blocks a single replica, allows one of two, then allows eviction without a budget", async () => {
     await apply(deployment("singleton", 1));
-    await kubectl(["rollout", "status", "deployment/singleton", "--timeout=120s"]);
+    await kubectl(
+      ["rollout", "status", "deployment/singleton", "--timeout=120s"],
+      undefined,
+      rolloutTimeout
+    );
     await apply(budget("singleton-budget", "singleton", "minAvailable: 1"));
     await waitForBudget("singleton-budget", 0);
     const singleton = (await pods("singleton"))[0];
@@ -156,7 +165,11 @@ spec:
     expect(blockedSingleton.output).toMatch(/429|Too Many Requests|disruption budget/i);
 
     await apply(deployment("pair", 2));
-    await kubectl(["rollout", "status", "deployment/pair", "--timeout=120s"]);
+    await kubectl(
+      ["rollout", "status", "deployment/pair", "--timeout=120s"],
+      undefined,
+      rolloutTimeout
+    );
     await apply(budget("pair-budget", "pair", "maxUnavailable: 1"));
     await waitForBudget("pair-budget", 1);
     const pairPods = await pods("pair");
@@ -171,7 +184,11 @@ spec:
     expect(blockedSecond.output).toMatch(/429|Too Many Requests|disruption budget/i);
 
     await apply(deployment("unprotected", 1));
-    await kubectl(["rollout", "status", "deployment/unprotected", "--timeout=120s"]);
+    await kubectl(
+      ["rollout", "status", "deployment/unprotected", "--timeout=120s"],
+      undefined,
+      rolloutTimeout
+    );
     const unprotectedPod = (await pods("unprotected"))[0];
     if (!unprotectedPod) throw new Error("unprotected Deployment has no pod");
     expect((await evict(unprotectedPod)).status).toBe(0);

@@ -52,3 +52,21 @@ Exact commands and results from the review-fix pass:
 | `git diff --check` | Exit 0. |
 
 Live Kubernetes PDB readiness and eviction behavior remain unverified without a configured `NIMBUS_PDB_TEST_CONTEXT`.
+
+## Round 2 review fix (base `679a683`)
+
+Rollout status calls now use a 130-second Kubernetes request timeout and a 150-second process timeout, exceeding their explicit `--timeout=120s` while remaining bounded. Ordinary kubectl calls retain 10-second request and 15-second process timeouts.
+
+Exact validation commands and results:
+
+| Command | Result |
+| --- | --- |
+| `npx prettier --write tests/integration/pod-disruption-budget-eviction.test.ts` | Exit 0. |
+| `npm run test:integration:pdb` (without `NIMBUS_PDB_TEST_CONTEXT`) | Exit 0; 1 test skipped, no cluster access attempted. |
+| `npm run typecheck` | Exit 0. |
+| `npm run lint` | Exit 0. |
+| `npm test` | Exit 0; 51 files passed and integration file skipped; 1044 passed tests, 1 skipped. |
+| `npm run format:check` | Exit 0; all matched TypeScript files formatted. |
+| `git diff --check` | Exit 0. |
+
+Live Kubernetes behavior remains unverified without `NIMBUS_PDB_TEST_CONTEXT`.

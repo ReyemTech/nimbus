@@ -25,19 +25,20 @@ export function deployTailscale(name: string, config: ITailscaleGatewayConfig): 
   const provider = config.cluster.provider;
   const prefix = config.hostnamePrefix ?? name;
   const tags = config.tailscale.tags ?? ["tag:k8s"];
+  const releaseName = `${name}-tailscale-operator`;
   if (
     config.tailscale.scheduling?.replicas !== undefined ||
     config.tailscale.scheduling?.spread !== undefined
   ) {
     throw new Error(
-      "Tailscale scheduling is not supported by its Helm chart (replicas are fixed at 1 and placement values are unavailable)"
+      "Tailscale scheduling is not supported by its Helm chart (replicas are fixed at 1 and typed spread is unavailable; use raw chart placement values)"
     );
   }
   const nsResource = ensureNamespace(NAMESPACE, provider);
 
   // Tailscale Operator Helm chart — uses OAuth client credentials
   const helmRelease = new k8s.helm.v3.Release(
-    `${name}-tailscale-operator`,
+    releaseName,
     {
       chart: "tailscale-operator",
       repositoryOpts: { repo: "https://pkgs.tailscale.com/helmcharts" },
@@ -60,6 +61,21 @@ export function deployTailscale(name: string, config: ITailscaleGatewayConfig): 
     { provider, dependsOn: [nsResource] }
   );
   const operatorBudget = resolvePodDisruptionBudget(config.tailscale.podDisruptionBudget ?? {}, 1);
+  const rawValues = config.tailscale.values ?? {};
+  const nameOverride = typeof rawValues.nameOverride === "string" ? rawValues.nameOverride : "";
+  const fullnameOverride =
+    typeof rawValues.fullnameOverride === "string" ? rawValues.fullnameOverride : "";
+  const selectorApp = (
+    fullnameOverride
+      ? fullnameOverride
+      : nameOverride
+        ? releaseName.includes(nameOverride)
+          ? releaseName
+          : `${releaseName}-${nameOverride}`
+        : "operator"
+  )
+    .slice(0, 63)
+    .replace(/-+$/, "");
   if (operatorBudget)
     new k8s.policy.v1.PodDisruptionBudget(
       `${name}-tailscale-operator-pdb`,
@@ -69,7 +85,7 @@ export function deployTailscale(name: string, config: ITailscaleGatewayConfig): 
           ...operatorBudget,
           selector: {
             matchLabels: {
-              app: "operator",
+              app: selectorApp,
             },
           },
         },

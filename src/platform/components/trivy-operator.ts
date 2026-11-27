@@ -18,6 +18,7 @@ export function deployTrivyOperator(
   const instance = `${name}-trivy-operator`;
   const raw = config.values ?? {};
   const rawOperator = (raw.operator ?? {}) as Record<string, unknown>;
+  const rawTrivy = (raw.trivy ?? {}) as Record<string, unknown>;
   const replicas = config.scheduling?.replicas ?? (rawOperator.replicas as number | undefined) ?? 1;
   const release = new k8s.helm.v3.Release(
     instance,
@@ -46,6 +47,7 @@ export function deployTrivyOperator(
         trivy: {
           // Report unfixed CVEs too, so exposure is visible before a patch exists.
           ignoreUnfixed: false,
+          ...rawTrivy,
         },
       },
     },

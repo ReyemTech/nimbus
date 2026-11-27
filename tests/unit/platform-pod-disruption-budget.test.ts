@@ -683,7 +683,10 @@ it("keeps raw Trivy operator values while applying typed replicas and spread", (
           topologyKey: "topology.kubernetes.io/zone",
         },
       },
-      values: { operator: { scanJobTimeout: "20m", replicas: 2 } },
+      values: {
+        operator: { scanJobTimeout: "20m", replicas: 2 },
+        trivy: { ignoreUnfixed: true, mode: "ClientServer" },
+      },
     },
     mockProvider,
     "1.0.0"
@@ -704,7 +707,19 @@ it("keeps raw Trivy operator values while applying typed replicas and spread", (
       },
     },
   ]);
+  expect(releases[0]!.args.values.trivy).toEqual({ ignoreUnfixed: true, mode: "ClientServer" });
   expect(budgets[0]!.args.spec.maxUnavailable).toBe(1);
+});
+it("rejects enabled raw Descheduler PDB values in CronJob mode", () => {
+  expect(() =>
+    deployDescheduler(
+      "test",
+      { values: { podDisruptionBudget: { enabled: true } } },
+      mockProvider,
+      "1.0.0"
+    )
+  ).toThrow(/raw values.podDisruptionBudget requires values.kind: Deployment/);
+  expect(releases).toHaveLength(0);
 });
 
 it("keeps Argo CD native PDBs per controller and a separate notifications PDB", () => {

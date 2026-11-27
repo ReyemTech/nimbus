@@ -30,11 +30,15 @@ export function deployDescheduler(
   const raw = config.values ?? {};
   const kind = raw.kind ?? "CronJob";
   const typedBudget = config.podDisruptionBudget;
+  const rawBudget = raw.podDisruptionBudget as { enabled?: boolean } | undefined;
   const schedulingRequested = Boolean(
     config.scheduling?.replicas !== undefined || config.scheduling?.spread
   );
   if (kind !== "Deployment" && typedBudget?.enabled !== false && typedBudget !== undefined) {
     throw new Error("Descheduler podDisruptionBudget requires values.kind: Deployment");
+  }
+  if (kind !== "Deployment" && rawBudget?.enabled !== false && rawBudget !== undefined) {
+    throw new Error("Descheduler raw values.podDisruptionBudget requires values.kind: Deployment");
   }
   if (kind !== "Deployment" && schedulingRequested) {
     throw new Error("Descheduler scheduling requires values.kind: Deployment");

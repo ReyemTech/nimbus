@@ -76,3 +76,34 @@ Implemented Task 3B in commit `74e4b2e` (`feat: add remaining controller disrupt
 - `src/access/wireguard.ts`
 - `tests/unit/platform-pod-disruption-budget.test.ts`
 - `tests/unit/access-pod-disruption-budget.test.ts`
+
+## Round 2 review fixes
+
+### Test-first evidence
+
+- **RED:** Before production fixes, `npx vitest run tests/unit/platform-pod-disruption-budget.test.ts tests/unit/access-pod-disruption-budget.test.ts` produced **8 failing tests**. They covered raw Descheduler PDBs under CronJob mode, loss of user Trivy values, Tailscale override selectors, WireGuard HPA/DaemonSet replica behavior, native PDB mapping, and disabled/conflicting budget cases.
+- **Focused GREEN:** The same command passed **72 tests in 2 files**.
+- **Full suite:** `npm test` passed **47 files, 1,017 tests**.
+- `npm run typecheck` passed.
+- ESLint passed on all changed TypeScript and test files.
+- Prettier check and `git diff --check` passed.
+
+### Changes and upstream evidence
+
+1. **Descheduler raw PDB gating:** Enabled raw `values.podDisruptionBudget` is now rejected when `values.kind` is absent or not `Deployment`. Disabled raw budgets remain permissible; default CronJob behavior is preserved. The chart documents the CronJob default and Deployment-only PDB support in [upstream values](https://github.com/kubernetes-sigs/descheduler/blob/master/charts/descheduler/values.yaml).
+2. **WireGuard autoscaling and DaemonSet:** Typed replicas now turn off the chart's default HPA so the requested `replicaCount` is effective. Explicit raw `autoscaling.enabled: true` conflicts with typed replicas and fails. Typed replicas are rejected with `daemonSet: true`; implicit replica-derived budget calculation is avoided for DaemonSets, and a typed enabled PDB there requires an explicit bound.
+3. **WireGuard native PDB:** Removed Nimbus's standalone PDB. Typed policies map to `disruptionBudget` chart values, which render the native chart PDB. Upstream [values](https://raw.githubusercontent.com/bryopsida/wireguard-chart/main/helm/wireguard/values.yaml) declare `disruptionBudget.enabled` and integer `minAvailable`; the [PDB template](https://raw.githubusercontent.com/bryopsida/wireguard-chart/main/helm/wireguard/templates/pdb.yaml) renders only `minAvailable` and selects `app: <release>-wireguard`. Nimbus maps inferred `maxUnavailable` to `minAvailable` using the fixed configured replica count, rejects explicit `maxUnavailable` (the chart cannot represent it), and rejects percentage `minAvailable` (chart values are integer-only). Raw and typed native PDB settings conflict explicitly.
+4. **Trivy raw values:** User `values.trivy` are merged over Nimbus defaults, preserving existing chart settings such as `mode` while allowing raw override of defaults.
+5. **Tailscale selector overrides:** The selector now follows the upstream `fullname` helper's exact default/override rules, including `nameOverride`, `fullnameOverride`, `contains` behavior, truncation, and trailing-dash trimming. Evidence: [Deployment template](https://github.com/tailscale/tailscale/blob/main/cmd/k8s-operator/deploy/chart/templates/deployment.yaml) selects `app: <fullname>`; the [fullname helper](https://raw.githubusercontent.com/tailscale/tailscale/main/cmd/k8s-operator/deploy/chart/templates/_helpers.tpl) defines default `operator` and both override rules.
+6. **Tailscale scheduling note correction:** The chart fixes operator replicas at one and does not expose typed spread settings for the operator Deployment. It does support raw `operatorConfig.nodeSelector`, `affinity`, and `tolerations`; Nimbus's error now says raw chart placement values can be used.
+
+### Round 2 changed files
+
+- `src/platform/components/descheduler.ts`
+- `src/platform/components/trivy-operator.ts`
+- `src/access/tailscale.ts`
+- `src/access/wireguard.ts`
+- `tests/unit/platform-pod-disruption-budget.test.ts`
+- `tests/unit/access-pod-disruption-budget.test.ts`
+
+Helm rendering was not run. Upstream sources are current `main` branches and the charts remain unpinned, so exact installed chart versions can still differ from the inspected sources.

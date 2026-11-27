@@ -67,10 +67,63 @@ export function deployWireGuard(name: string, config: IWireGuardGatewayConfig): 
   const rawValues = config.wireguard.values ?? {};
   const rawReplicas = rawValues.replicaCount;
   const typedReplicas = config.wireguard.scheduling?.replicas;
+  const rawAutoscaling = (rawValues.autoscaling ?? {}) as Record<string, unknown>;
+  const daemonSet = rawValues.daemonSet === true;
+  const typedBudget = config.wireguard.podDisruptionBudget;
+  const rawBudget = rawValues.disruptionBudget;
+  if (typedReplicas !== undefined && rawAutoscaling.enabled === true) {
+    throw new Error("scheduling.replicas conflicts with Helm values.autoscaling.enabled");
+  }
+  if (typedReplicas !== undefined && daemonSet) {
+    throw new Error("scheduling.replicas is not supported with daemonSet: true");
+  }
+  if (
+    daemonSet &&
+    typedBudget !== undefined &&
+    typedBudget.enabled !== false &&
+    typedBudget.minAvailable === undefined &&
+    typedBudget.maxUnavailable === undefined
+  ) {
+    throw new Error(
+      "podDisruptionBudget is not supported with daemonSet unless an explicit bound is provided"
+    );
+  }
+  if (typedBudget !== undefined && rawBudget !== undefined) {
+    throw new Error("podDisruptionBudget conflicts with Helm values.disruptionBudget");
+  }
   if (typedReplicas !== undefined && rawReplicas !== undefined && typedReplicas !== rawReplicas) {
     throw new Error("scheduling.replicas conflicts with Helm values.replicaCount");
   }
-  const replicas = typedReplicas ?? (typeof rawReplicas === "number" ? rawReplicas : 1);
+  const actualReplicas =
+    typeof rawAutoscaling.minReplicas === "number"
+      ? rawAutoscaling.minReplicas
+      : typeof rawReplicas === "number"
+        ? rawReplicas
+        : 3;
+  const replicas = typedReplicas ?? actualReplicas;
+  let chartBudget: Record<string, unknown> | undefined;
+  if (typedBudget !== undefined) {
+    if (typedBudget.enabled === false) {
+      chartBudget = { enabled: false };
+    } else {
+      if (typedBudget.maxUnavailable !== undefined) {
+        throw new Error(
+          "WireGuard chart disruptionBudget supports minAvailable only; maxUnavailable cannot be represented"
+        );
+      }
+      if (typedBudget.minAvailable !== undefined && typeof typedBudget.minAvailable !== "number") {
+        throw new Error(
+          "WireGuard chart disruptionBudget.minAvailable supports integer values only"
+        );
+      }
+      const resolved = resolvePodDisruptionBudget(typedBudget, replicas);
+      const minAvailable =
+        resolved && "minAvailable" in resolved
+          ? resolved.minAvailable
+          : replicas - Number(resolved?.maxUnavailable ?? 1);
+      chartBudget = { enabled: true, minAvailable };
+    }
+  }
 
   const helmRelease = new k8s.helm.v3.Release(
     `${name}-wireguard`,
@@ -102,28 +155,17 @@ export function deployWireGuard(name: string, config: IWireGuardGatewayConfig): 
           size: "100Mi",
         },
         ...rawValues,
-        ...(typedReplicas !== undefined ? { replicaCount: typedReplicas } : {}),
+        ...(typedReplicas !== undefined
+          ? {
+              replicaCount: typedReplicas,
+              autoscaling: { ...rawAutoscaling, enabled: false },
+            }
+          : {}),
+        ...(chartBudget !== undefined ? { disruptionBudget: chartBudget } : {}),
       },
     },
     { provider: k8sProvider, dependsOn: [nsResource] }
   );
-  const budget = resolvePodDisruptionBudget(config.wireguard.podDisruptionBudget ?? {}, replicas);
-  if (budget)
-    new k8s.policy.v1.PodDisruptionBudget(
-      `${name}-wireguard-pdb`,
-      {
-        metadata: { name: "wireguard", namespace: NAMESPACE },
-        spec: {
-          ...budget,
-          selector: {
-            matchLabels: {
-              app: `${name}-wireguard-wireguard`,
-            },
-          },
-        },
-      },
-      { provider: k8sProvider, dependsOn: [helmRelease] }
-    );
 
   // Split DNS
   let dnsClusterIp: pulumi.Output<string> | undefined;

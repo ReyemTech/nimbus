@@ -238,10 +238,30 @@ export function createObservabilityStack(
         const replicas =
           config.loki.scheduling?.replicas ??
           (typeof values?.replicas === "number" ? values.replicas : defaultReplicas);
-        // The Loki chart already renders component PDBs for workloads with
-        // multiple replicas. Nimbus creates a separate PDB only for singleton
-        // components, which the chart does not protect natively.
-        if (replicas === 1)
+        const autoscaling =
+          workload === "gateway" && values?.autoscaling && typeof values.autoscaling === "object"
+            ? (values.autoscaling as Record<string, unknown>)
+            : undefined;
+        const gatewayPdbReplicas =
+          autoscaling?.enabled === true && typeof autoscaling.minReplicas === "number"
+            ? autoscaling.minReplicas
+            : replicas;
+        // The distributed chart creates native budgets for multi-replica
+        // components. Its gateway template fixes maxUnavailable at 1 and does
+        // not expose an override or opt-out, so reject policies it cannot honor.
+        const hasNativeBudget = workload === "gateway" ? gatewayPdbReplicas > 1 : replicas > 1;
+        if (workload === "gateway" && hasNativeBudget) {
+          const effectiveMaxUnavailable = lokiMaxUnavailable(
+            config.loki.podDisruptionBudget,
+            gatewayPdbReplicas
+          );
+          if (effectiveMaxUnavailable !== 1) {
+            throw new Error(
+              `Loki gateway replicas use a chart-native PDB fixed at maxUnavailable: 1; the requested podDisruptionBudget cannot be represented by the chart`
+            );
+          }
+        }
+        if (!hasNativeBudget)
           addChartBudget(
             `${name}-loki-${workload}-pdb`,
             namespace,
@@ -926,11 +946,14 @@ function chartNativeBudget(
 function lokiMaxUnavailable(
   policy: IPodDisruptionBudgetConfig | undefined,
   replicas: number
-): number | string {
-  if (policy?.enabled === false) return replicas;
+): number {
   const budget = resolvePodDisruptionBudget(policy ?? {}, replicas);
   if (!budget) return replicas;
-  if ("maxUnavailable" in budget) return budget.maxUnavailable;
+  if ("maxUnavailable" in budget) {
+    if (typeof budget.maxUnavailable === "number") return budget.maxUnavailable;
+    const percentage = Number(budget.maxUnavailable.slice(0, -1));
+    return Math.ceil((replicas * percentage) / 100);
+  }
   if (typeof budget.minAvailable === "number") {
     if (budget.minAvailable > replicas)
       throw new Error(`Loki podDisruptionBudget minAvailable cannot exceed ${replicas} replicas`);
@@ -1066,7 +1089,10 @@ function deployLoki(
             values[key] = {
               ...raw,
               replicas,
-              ...(replicas > 1 && raw.maxUnavailable === undefined && raw.minAvailable === undefined
+              ...(key !== "gateway" &&
+              replicas > 1 &&
+              raw.maxUnavailable === undefined &&
+              raw.minAvailable === undefined
                 ? { maxUnavailable: lokiMaxUnavailable(config.podDisruptionBudget, replicas) }
                 : {}),
               ...chartPodPlacement(

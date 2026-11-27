@@ -270,7 +270,67 @@ describe("observability workload disruption budgets", () => {
       backend: { replicas: 0 },
     });
     expect((release?.inputs as any).values.distributor.maxUnavailable).toBe(1);
+    expect((release?.inputs as any).values.gateway.maxUnavailable).toBeUndefined();
+    expect((release?.inputs as any).values.gateway.replicas).toBe(2);
     expect(byType(PDB)).toHaveLength(0);
+  });
+  it.each([
+    ["maxUnavailable: 0", { maxUnavailable: 0 }],
+    ["disabled PDBs", { enabled: false }],
+    ["minAvailable: 2", { minAvailable: 2 }],
+  ])(
+    "rejects distributed Loki gateway policies the chart cannot apply (%s)",
+    async (_label, policy) => {
+      expect(() =>
+        stack({
+          loki: {
+            enabled: true,
+            mode: "distributed",
+            podDisruptionBudget: policy,
+            scheduling: { replicas: 2 },
+          },
+        })
+      ).toThrow(/gateway.*fixed at maxUnavailable: 1/i);
+      await pulumi.runtime.disconnect();
+    }
+  );
+  it("accepts a Loki gateway policy matching its fixed native budget", async () => {
+    stack({
+      loki: {
+        enabled: true,
+        mode: "distributed",
+        podDisruptionBudget: { maxUnavailable: 1 },
+        scheduling: { replicas: 2 },
+      },
+    });
+    await pulumi.runtime.disconnect();
+    const release = byType(HELM).find((x) => (x.inputs as any).chart === "loki");
+    expect((release?.inputs as any).values.gateway.maxUnavailable).toBeUndefined();
+  });
+  it("uses the gateway autoscaling minimum when deciding PDB ownership", async () => {
+    expect(() =>
+      stack({
+        loki: {
+          enabled: true,
+          mode: "distributed",
+          podDisruptionBudget: { maxUnavailable: 0 },
+          values: { gateway: { autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 5 } } },
+        },
+      })
+    ).toThrow(/gateway.*fixed at maxUnavailable: 1/i);
+    await pulumi.runtime.disconnect();
+  });
+  it("does not add a Nimbus gateway PDB when Loki autoscaling triggers its native PDB", async () => {
+    stack({
+      loki: {
+        enabled: true,
+        mode: "distributed",
+        podDisruptionBudget: {},
+        values: { gateway: { autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 5 } } },
+      },
+    });
+    await pulumi.runtime.disconnect();
+    expect(byType(PDB).some((resource) => resource.name === "obs-loki-gateway-pdb")).toBe(false);
   });
   it("translates percentage minAvailable to the equivalent Loki maxUnavailable count", async () => {
     stack({

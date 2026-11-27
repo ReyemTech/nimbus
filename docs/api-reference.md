@@ -65,6 +65,8 @@ Supported Nimbus-managed long-running controllers and database workloads accept 
 
 When enabled (the default), a single replica gets `minAvailable: 1`; two or more replicas get `maxUnavailable: 1`. Existing replica counts are preserved unless `scheduling.replicas` is set. `minAvailable` and `maxUnavailable` are mutually exclusive and accept nonnegative integers or Kubernetes percentages. Use `enabled: false` to permit eviction during planned maintenance; restore protection after maintenance. A one-replica default can leave `kubectl drain` or node scale-in waiting indefinitely until a replacement is ready or the policy is disabled. This applies to Nimbus-managed single-replica controllers including operator controllers, Argo CD controller/server/repo-server/notifications, cert-manager, Traefik, ExternalDNS, External Secrets, Vault, Trivy Operator, Tailscale operator, WireGuard, access DNS/proxy, Prometheus, Grafana, Alertmanager, Loki, kube-state-metrics, Uptime Kuma, Redis master/tracker, Cluster Autoscaler, Karpenter, and supported Deployment-based EKS add-ons. Components with multiple independently scaled controllers get a separate budget for each.
 
+In distributed Loki mode, the upstream chart hardcodes the gateway PDB to `maxUnavailable: 1` whenever the gateway has more than one minimum replica. Nimbus accepts only a policy that resolves to that same allowance for a multi-replica gateway; other values, including `enabled: false`, fail validation because the chart cannot represent them. The chart's native PDB remains the sole budget for that workload.
+
 ```typescript
 const platform = createPlatformStack("platform", {
   domain: "example.test",

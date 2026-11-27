@@ -17,6 +17,7 @@ import {
   validateEksNodePoolScaling,
 } from "./eks-autoscaling";
 import { createAwsClusterTags } from "./tagging";
+import type { IPodDisruptionBudgetConfig, IPodSchedulingConfig } from "../availability";
 
 /** EKS community Metrics Server add-on configuration. */
 export interface IEksMetricsServerOptions {
@@ -124,12 +125,16 @@ export interface IEksOptions {
     readonly version?: pulumi.Input<string>;
     /** Existing cluster OIDC provider ARN; Nimbus creates one when omitted. */
     readonly oidcProviderArn?: pulumi.Input<string>;
+    readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+    readonly scheduling?: IPodSchedulingConfig;
   };
   /** Shared Karpenter Helm chart and interruption handling options. */
   readonly karpenter?: {
     readonly version?: pulumi.Input<string>;
     readonly namespace?: string;
     readonly interruptionHandling?: boolean;
+    readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
+    readonly scheduling?: IPodSchedulingConfig;
   };
   /** Stable on-demand managed pool that hosts autoscaler controller pods. */
   readonly autoscalerControllerNodePoolName?: string;

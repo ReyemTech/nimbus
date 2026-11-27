@@ -93,6 +93,16 @@ vi.mock("@pulumi/kubernetes", () => ({
       },
     },
   },
+  policy: {
+    v1: {
+      PodDisruptionBudget: class {
+        readonly kind = "k8s.PodDisruptionBudget";
+        constructor(name: string, args: Record<string, unknown>, opts?: unknown) {
+          constructed.resources.push({ kind: "k8s.PodDisruptionBudget", name, args, opts });
+        }
+      },
+    },
+  },
 }));
 
 vi.mock("@pulumi/aws", () => {
@@ -286,38 +296,166 @@ beforeEach(() => {
 });
 
 describe("EKS add-on PDB schema boundaries", () => {
-  it("preserves EKS add-on configuration and does not attach unowned budgets", () => {
+  it("maps budgets through each selected Deployment add-on schema and preserves raw values", () => {
     create({
-      addons: [
-        "metrics-server",
-        "cert-manager",
-        "kube-state-metrics",
-        "prometheus-node-exporter",
-        "aws-node",
-        "kube-proxy",
-      ],
-      metricsServer: { configurationValues: JSON.stringify({ replicas: 2 }) },
+      metricsServer: {
+        configurationValues: JSON.stringify({
+          replicas: 2,
+          resources: { requests: { cpu: "20m" } },
+        }),
+        configurationSchema: schemaSnapshot(schemaWithPdb, "v0.7.2-eksbuild.1"),
+        podDisruptionBudget: { maxUnavailable: 1 },
+      },
       communityAddons: {
-        certManager: { configurationValues: JSON.stringify({ replicaCount: 2 }) },
-        kubeStateMetrics: { configurationValues: JSON.stringify({ replicas: 2 }) },
-        prometheusNodeExporter: { configurationValues: JSON.stringify({}) },
+        certManager: {
+          version: "v1.17.2-eksbuild.1",
+          configurationSchema: schemaSnapshot(schemaWithPdb, "v1.17.2-eksbuild.1"),
+          podDisruptionBudget: { maxUnavailable: 1 },
+        },
+        kubeStateMetrics: {
+          version: "v2.15.0-eksbuild.4",
+          configurationSchema: schemaSnapshot(schemaWithPdb, "v2.15.0-eksbuild.4"),
+          podDisruptionBudget: { maxUnavailable: 1 },
+        },
+        prometheusNodeExporter: {
+          workloadKind: "Deployment",
+          version: "v1.9.1-eksbuild.2",
+          configurationSchema: schemaSnapshot(schemaWithPdb, "v1.9.1-eksbuild.2"),
+          podDisruptionBudget: { maxUnavailable: 1 },
+        },
       },
     });
-
-    const addons = resourcesOf("eks.Addon");
-    expect(addons.map(({ args }) => args.addonName)).toEqual(
-      expect.arrayContaining([
-        "metrics-server",
-        "cert-manager",
-        "kube-state-metrics",
-        "prometheus-node-exporter",
-        "aws-node",
-        "kube-proxy",
-      ])
-    );
-    expect(
-      addons.find(({ args }) => args.addonName === "metrics-server")?.args.configurationValues
-    ).toBe(JSON.stringify({ replicas: 2 }));
+    const addon = resourcesOf("eks.Addon").find(({ args }) => args.addonName === "metrics-server");
+    expect(addon?.args.addonVersion).toBe("v0.7.2-eksbuild.1");
+    expect(JSON.parse(String(addon?.args.configurationValues))).toEqual({
+      replicas: 2,
+      resources: { requests: { cpu: "20m" } },
+      podDisruptionBudget: { maxUnavailable: 1 },
+    });
+    for (const addonName of [
+      "metrics-server",
+      "cert-manager",
+      "kube-state-metrics",
+      "prometheus-node-exporter",
+    ]) {
+      const resource = resourcesOf("eks.Addon").find(({ args }) => args.addonName === addonName);
+      expect(JSON.parse(String(resource?.args.configurationValues))).toMatchObject({
+        podDisruptionBudget: { maxUnavailable: 1 },
+      });
+    }
     expect(resourcesOf("k8s.PodDisruptionBudget")).toHaveLength(0);
   });
+
+  it("uses native schema PDB configuration and rejects caller budget conflicts", () => {
+    const schema = JSON.stringify({
+      type: "object",
+      properties: {
+        deployment: { $ref: "#/definitions/Deployment" },
+      },
+      definitions: {
+        Deployment: {
+          type: "object",
+          properties: {
+            podDisruptionBudget: {
+              type: "object",
+              properties: { maxUnavailable: { type: "integer" } },
+            },
+          },
+        },
+      },
+    });
+    create({
+      metricsServer: {
+        configurationSchema: schemaSnapshot(schema, "v0.7.2-eksbuild.1"),
+        podDisruptionBudget: { maxUnavailable: 1 },
+        configurationValues: JSON.stringify({ replicas: 2, deployment: {} }),
+      },
+    });
+    const addon = resourcesOf("eks.Addon").find(({ args }) => args.addonName === "metrics-server");
+    expect(JSON.parse(String(addon?.args.configurationValues))).toEqual({
+      replicas: 2,
+      deployment: { podDisruptionBudget: { maxUnavailable: 1 } },
+    });
+    expect(resourcesOf("k8s.PodDisruptionBudget")).toHaveLength(0);
+    expect(() =>
+      create({
+        metricsServer: {
+          configurationSchema: schemaSnapshot(schema, "v0.7.2-eksbuild.1"),
+          podDisruptionBudget: { maxUnavailable: 1 },
+          configurationValues: JSON.stringify({ podDisruptionBudget: { maxUnavailable: 0 } }),
+        },
+      })
+    ).toThrow(/already configures a PDB/);
+  });
+
+  it("excludes DaemonSet node exporter and unrelated DaemonSets", () => {
+    create({
+      communityAddons: {
+        prometheusNodeExporter: {
+          configurationSchema: schemaSnapshot(schemaWithoutPdb, "v1.9.1-eksbuild.2"),
+          podDisruptionBudget: { maxUnavailable: 1 },
+        },
+      },
+      addons: ["aws-node", "kube-proxy"],
+    });
+    expect(resourcesOf("k8s.PodDisruptionBudget")).toHaveLength(0);
+    expect(resourcesOf("eks.Addon").map(({ args }) => args.addonName)).toEqual(
+      expect.arrayContaining(["prometheus-node-exporter", "aws-node", "kube-proxy"])
+    );
+  });
+
+  it("rejects a missing schema and a schema snapshot for a different selected version", () => {
+    expect(() => create({ metricsServer: { podDisruptionBudget: { maxUnavailable: 1 } } })).toThrow(
+      /requires the exact configurationSchema/
+    );
+    expect(() =>
+      create({
+        metricsServer: {
+          addonVersion: "v0.7.3-eksbuild.1",
+          configurationSchema: schemaSnapshot(schemaWithoutPdb, "v0.7.2-eksbuild.1"),
+          podDisruptionBudget: { maxUnavailable: 1 },
+        },
+      })
+    ).toThrow(/must match the requested add-on version/);
+  });
+
+  it("rejects an add-on schema with no native PDB support instead of risking a duplicate", () => {
+    expect(() =>
+      create({
+        metricsServer: {
+          addonVersion: "v0.7.2-eksbuild.1",
+          configurationSchema: schemaSnapshot(schemaWithoutPdb, "v0.7.2-eksbuild.1"),
+          podDisruptionBudget: { maxUnavailable: 1 },
+        },
+      })
+    ).toThrow(/has no native PDB configuration/);
+    expect(resourcesOf("eks.Addon").some(({ args }) => args.addonName === "metrics-server")).toBe(
+      false
+    );
+  });
 });
+
+const schemaWithoutPdb = JSON.stringify({
+  type: "object",
+  properties: { replicas: { type: "integer" }, resources: { type: "object" } },
+  additionalProperties: false,
+});
+
+const schemaWithPdb = JSON.stringify({
+  type: "object",
+  properties: {
+    replicas: { type: "integer" },
+    resources: { type: "object" },
+    podDisruptionBudget: {
+      type: "object",
+      properties: {
+        minAvailable: { type: "integer" },
+        maxUnavailable: { type: "integer" },
+      },
+    },
+  },
+});
+
+function schemaSnapshot(schema: string, addonVersion: string) {
+  return { schema, addonVersion };
+}

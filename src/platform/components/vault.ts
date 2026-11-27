@@ -7,6 +7,7 @@
 import * as aws from "@pulumi/aws";
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
+import { createHash } from "node:crypto";
 import type { IPlatformComponentConfig, IVaultConfig } from "../interfaces";
 import { buildPodDisruptionBudgetSpec, resolvePodDisruptionBudget } from "../../availability";
 import { ensureNamespace } from "../../utils/ensure-namespace";
@@ -19,15 +20,67 @@ const VAULT_HA_REPLICAS = 3;
  * Bootstrap script for the Vault sidecar container.
  *
  * Runs on every pod start. All operations are idempotent:
- * - Init (if first start) → store keys in K8s Secret
- * - Unseal (if Shamir) → read keys from K8s Secret
+ * - Init (if first start) → persist only recovery keys on the PVC
+ * - Unseal (if Shamir) → read recovery keys from the PVC
  * - Enable KV-v2 secrets engine
  * - Enable + configure Kubernetes auth
- * - Create ESO policy + role
+ * - Create restricted bootstrap and ESO policies + roles
+ * - Revoke the one-time root token
  * - Create user-policy for human access
  * - Sleep infinity
  */
-const VAULT_BOOTSTRAP_SCRIPT = `#!/bin/sh
+const ESO_SERVICE_ACCOUNT = "external-secrets";
+const ESO_NAMESPACE = "external-secrets";
+const DEFAULT_ESO_AUDIENCE = "vault";
+
+function validateEsoPaths(paths: ReadonlyArray<string>): void {
+  for (const path of paths) {
+    const segments = path.split("/");
+    const valid =
+      path.length > 0 &&
+      !path.startsWith("/") &&
+      !path.endsWith("/") &&
+      segments.every((segment, index) =>
+        segment === "*"
+          ? index === segments.length - 1 && segments.length > 1
+          : /^[A-Za-z0-9._-]+$/.test(segment)
+      ) &&
+      !segments.includes(".") &&
+      !segments.includes("..");
+    if (!valid) {
+      throw new Error(
+        `Invalid Vault ESO path "${path}". Use a relative KV path with optional trailing /*, for example "argocd/ghcr-reyemtech".`
+      );
+    }
+  }
+}
+
+function buildEsoPolicy(paths: ReadonlyArray<string>): string {
+  if (paths.length === 0) {
+    return '# No secret reads are granted until esoSecretPaths is configured.\npath "secret/data/*" { capabilities = ["deny"] }';
+  }
+  return paths.map((path) => `path "secret/data/${path}" { capabilities = ["read"] }`).join("\n");
+}
+
+function buildVaultBootstrapScript(
+  esoSecretPaths: ReadonlyArray<string>,
+  esoAudience: string,
+  vaultServiceAccountName: string
+): string {
+  validateEsoPaths(esoSecretPaths);
+  if (!/^[A-Za-z0-9:/._-]+$/.test(esoAudience)) {
+    throw new Error(
+      "Vault ESO Kubernetes auth audience must contain only letters, numbers, ':', '/', '.', '_' or '-'."
+    );
+  }
+  if (
+    !/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(vaultServiceAccountName) ||
+    vaultServiceAccountName.length > 63
+  ) {
+    throw new Error(`Invalid Vault service account name "${vaultServiceAccountName}".`);
+  }
+  const esoPolicy = buildEsoPolicy(esoSecretPaths);
+  return `#!/bin/sh
 set -e
 export VAULT_ADDR="http://localhost:8200"
 
@@ -48,14 +101,13 @@ json_array() {
   echo "$1" | sed -n 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*\\[\\([^]]*\\)\\].*/\\1/p' | sed 's/"//g; s/ //g' | head -1
 }
 
-# K8s API via wget (available in Alpine)
-SA_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-CA_CERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-NAMESPACE=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+# Short-lived token projected specifically for Vault authentication.
+SA_TOKEN=$(cat /var/run/vault-bootstrap-token/token)
 API="https://kubernetes.default.svc"
 
-# Token persistence — write to PVC so it survives pod restarts
-TOKEN_FILE="/vault/data/.bootstrap-token"
+# Legacy root-token location from prior Nimbus versions. A deployed root token is
+# revoked after migration and is never written here again.
+LEGACY_TOKEN_FILE="/vault/data/.bootstrap-token"
 RECOVERY_FILE="/vault/data/.bootstrap-recovery-keys"
 
 # --- Wait for Vault ---
@@ -89,11 +141,10 @@ if [ "$INITIALIZED" = "false" ]; then
     RECOVERY_KEYS=$(json_array "$INIT_OUTPUT" unseal_keys_b64)
   fi
 
-  # Store on PVC (survives pod restarts)
-  echo "$ROOT_TOKEN" > "$TOKEN_FILE"
+  # Persist only recovery material needed for Shamir unseal, never the root token.
   echo "$RECOVERY_KEYS" > "$RECOVERY_FILE"
-  chmod 600 "$TOKEN_FILE" "$RECOVERY_FILE"
-  echo "Init keys stored on PVC"
+  chmod 600 "$RECOVERY_FILE"
+  echo "Recovery keys stored on PVC"
 
   # Shamir: manually unseal (auto-unseal handles itself)
   if [ "$SEAL_TYPE" = "shamir" ]; then
@@ -108,12 +159,10 @@ if [ "$INITIALIZED" = "false" ]; then
 else
   echo "Vault already initialized (seal_type=$SEAL_TYPE, sealed=$SEALED)"
 
-  # Read root token from PVC
-  if [ -f "$TOKEN_FILE" ]; then
-    ROOT_TOKEN=$(cat "$TOKEN_FILE")
-    echo "Root token loaded from PVC"
-  else
-    echo "WARNING: No token file found at $TOKEN_FILE"
+  # One-time migration path: revoke and remove root tokens persisted by older Nimbus releases.
+  ROOT_TOKEN=""
+  if [ -f "$LEGACY_TOKEN_FILE" ]; then
+    ROOT_TOKEN=$(cat "$LEGACY_TOKEN_FILE")
   fi
 
   # Shamir: unseal if sealed
@@ -143,13 +192,18 @@ while [ $TRIES -lt 60 ]; do
 done
 echo "Vault is unsealed"
 
-if [ -z "$VAULT_TOKEN" ]; then
-  echo "ERROR: No root token available. Cannot configure Vault."
-  echo "Create vault-init-keys secret manually with root-token field."
-  exec sleep infinity
+if [ -n "$ROOT_TOKEN" ]; then
+  export VAULT_TOKEN="$ROOT_TOKEN"
+else
+  # Restart/upgrade path: use a short-lived Vault token minted from this pod's
+  # rotating Kubernetes service-account token and the dedicated bootstrap role.
+  if ! BOOTSTRAP_TOKEN=$(vault write -field=token auth/kubernetes/login \\
+    role=vault-bootstrap jwt="$SA_TOKEN" 2>/dev/null); then
+    echo "ERROR: Vault bootstrap authentication failed; no secret values were logged."
+    exec sleep infinity
+  fi
+  export VAULT_TOKEN="$BOOTSTRAP_TOKEN"
 fi
-
-vault login "$VAULT_TOKEN" > /dev/null 2>&1
 
 # --- Configure secrets engines + auth ---
 
@@ -162,21 +216,42 @@ vault auth list | grep -q "kubernetes/" || vault auth enable kubernetes
 
 # Configure K8s auth
 vault write auth/kubernetes/config \\
-  token_reviewer_jwt="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \\
-  kubernetes_host="https://kubernetes.default.svc" \\
-  kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+  kubernetes_host="https://kubernetes.default.svc"
 echo "K8s auth configured"
 
 # ESO policy + role
 vault policy write eso - <<'EOPOLICY'
-path "secret/data/*" { capabilities = ["read"] }
+${esoPolicy}
 EOPOLICY
 
+# Restricted policy for this Vault pod to re-apply Nimbus-managed auth settings.
+# It cannot read or write application secret data.
+vault policy write vault-bootstrap - <<'EOPOLICY'
+path "sys/mounts" { capabilities = ["read"] }
+path "sys/mounts/secret" { capabilities = ["create", "read", "update"] }
+path "sys/auth" { capabilities = ["read"] }
+path "sys/auth/kubernetes" { capabilities = ["create", "read", "update"] }
+path "auth/kubernetes/config" { capabilities = ["create", "read", "update"] }
+path "auth/kubernetes/role/eso" { capabilities = ["create", "read", "update"] }
+path "auth/kubernetes/role/vault-bootstrap" { capabilities = ["create", "read", "update"] }
+path "sys/policies/acl/eso" { capabilities = ["create", "read", "update"] }
+path "sys/policies/acl/user-policy" { capabilities = ["create", "read", "update"] }
+path "sys/policies/acl/vault-bootstrap" { capabilities = ["create", "read", "update"] }
+EOPOLICY
+
+vault write auth/kubernetes/role/vault-bootstrap \\
+  bound_service_account_names=${vaultServiceAccountName} \\
+  bound_service_account_namespaces=vault \\
+  audience=vault \\
+  policies=vault-bootstrap \\
+  ttl=1h
+
 vault write auth/kubernetes/role/eso \\
-  bound_service_account_names=external-secrets \\
-  bound_service_account_namespaces="*" \\
+  bound_service_account_names=${ESO_SERVICE_ACCOUNT} \\
+  bound_service_account_namespaces=${ESO_NAMESPACE} \\
+  audience=${esoAudience} \\
   policies=eso \\
-  ttl=24h
+  ttl=1h
 echo "ESO policy and role ready"
 
 # User policy (CRUD for humans)
@@ -184,9 +259,18 @@ vault policy write user-policy - <<'EOPOLICY'
 path "secret/data/*" { capabilities = ["create", "read", "update", "delete", "list"] }
 EOPOLICY
 
+# Remove the legacy root token on upgraded installations; fresh installs also
+# discard the one-time root token held only in this process.
+if [ -n "$ROOT_TOKEN" ]; then
+  vault token revoke -self
+  rm -f "$LEGACY_TOKEN_FILE"
+fi
+unset ROOT_TOKEN VAULT_TOKEN BOOTSTRAP_TOKEN
+
 echo "Bootstrap complete — sleeping"
 exec sleep infinity
 `;
+}
 
 /**
  * Build the HCL config string for Vault server.
@@ -467,6 +551,22 @@ export function deployVault(
   const ingressHost = config.ingressHost ?? `vault.${domain}`;
   const certName = domain.replace(/\./g, "-");
   const bootstrap = config.bootstrap ?? true;
+  const esoSecretPaths = [...new Set(config.esoSecretPaths ?? [])].sort();
+  const esoAudience = config.esoKubernetesAuthAudience ?? DEFAULT_ESO_AUDIENCE;
+  const customServerValues = (config.values?.server as Record<string, unknown> | undefined) ?? {};
+  const customServiceAccountValues =
+    (customServerValues["serviceAccount"] as Record<string, unknown> | undefined) ?? {};
+  const vaultServiceAccountName =
+    config.serviceAccountName ??
+    (typeof customServiceAccountValues["name"] === "string"
+      ? customServiceAccountValues["name"]
+      : "vault");
+  const bootstrapScript = buildVaultBootstrapScript(
+    esoSecretPaths,
+    esoAudience,
+    vaultServiceAccountName
+  );
+  const bootstrapConfigMapName = `vault-bootstrap-${createHash("sha256").update(bootstrapScript).digest("hex").slice(0, 12)}`;
 
   // Auto-unseal: provision cloud resources + build seal stanza
   let sealStanza: string | pulumi.Output<string> | undefined;
@@ -505,15 +605,15 @@ export function deployVault(
     const bootstrapConfigMap = new k8s.core.v1.ConfigMap(
       `${name}-vault-bootstrap-script`,
       {
-        metadata: { name: "vault-bootstrap", namespace: "vault" },
-        data: { "bootstrap.sh": VAULT_BOOTSTRAP_SCRIPT },
+        metadata: { name: bootstrapConfigMapName, namespace: "vault" },
+        data: { "bootstrap.sh": bootstrapScript },
       },
       { provider }
     );
     vaultDependencies.push(bootstrapConfigMap);
 
     // Token review delegation (for K8s auth config)
-    new k8s.rbac.v1.ClusterRoleBinding(
+    const authDelegator = new k8s.rbac.v1.ClusterRoleBinding(
       `${name}-vault-auth-delegator`,
       {
         metadata: { name: "vault-auth-delegator" },
@@ -522,10 +622,11 @@ export function deployVault(
           kind: "ClusterRole",
           name: "system:auth-delegator",
         },
-        subjects: [{ kind: "ServiceAccount", name: "vault", namespace: "vault" }],
+        subjects: [{ kind: "ServiceAccount", name: vaultServiceAccountName, namespace: "vault" }],
       },
       { provider }
     );
+    vaultDependencies.push(authDelegator);
 
     // Secret CRUD in vault namespace (for storing init keys)
     const secretRole = new k8s.rbac.v1.Role(
@@ -555,7 +656,7 @@ export function deployVault(
           kind: "Role",
           name: "vault-secret-manager",
         },
-        subjects: [{ kind: "ServiceAccount", name: "vault", namespace: "vault" }],
+        subjects: [{ kind: "ServiceAccount", name: vaultServiceAccountName, namespace: "vault" }],
       },
       { provider, dependsOn: [secretRole] }
     );
@@ -563,6 +664,7 @@ export function deployVault(
 
   // Build server values
   const serverValues: Record<string, unknown> = {
+    updateStrategyType: "RollingUpdate",
     standalone: { enabled: !ha },
     ha: ha
       ? {
@@ -611,6 +713,11 @@ export function deployVault(
         volumeMounts: [
           { name: "bootstrap-script", mountPath: "/scripts" },
           { name: "data", mountPath: "/vault/data" },
+          {
+            name: "vault-bootstrap-token",
+            mountPath: "/var/run/vault-bootstrap-token",
+            readOnly: true,
+          },
         ],
         resources: {
           requests: { cpu: "1m", memory: "64Mi" },
@@ -621,7 +728,21 @@ export function deployVault(
     serverValues["volumes"] = [
       {
         name: "bootstrap-script",
-        configMap: { name: "vault-bootstrap", defaultMode: 493 },
+        configMap: { name: bootstrapConfigMapName, defaultMode: 493 },
+      },
+      {
+        name: "vault-bootstrap-token",
+        projected: {
+          sources: [
+            {
+              serviceAccountToken: {
+                audience: esoAudience,
+                expirationSeconds: 3600,
+                path: "token",
+              },
+            },
+          ],
+        },
       },
     ];
   }
@@ -648,6 +769,10 @@ export function deployVault(
     server: {
       ...serverValues,
       ...rawServerValues,
+      serviceAccount: {
+        ...customServiceAccountValues,
+        name: vaultServiceAccountName,
+      },
       ha: {
         ...(serverValues.ha as Record<string, unknown>),
         ...((rawServerValues.ha as Record<string, unknown> | undefined) ?? {}),

@@ -96,6 +96,17 @@ function deployToCluster(
   config: IPlatformStackConfig,
   cluster: ICluster
 ): IPlatformStack {
+  if (
+    config.vault?.enabled &&
+    config.vault.bootstrap !== false &&
+    config.externalSecrets?.enabled &&
+    !config.vault.esoSecretPaths?.length
+  ) {
+    throw new Error(
+      'Vault and External Secrets require vault.esoSecretPaths with the KV-v2 paths ESO may read, e.g. ["argocd/ghcr-reyemtech"].'
+    );
+  }
+
   const components: Record<string, k8s.helm.v3.Release> = {};
   const providerResources: Record<string, pulumi.Resource> = {};
   const provider = cluster.provider;
@@ -705,6 +716,11 @@ function deployToCluster(
                 kubernetes: {
                   mountPath: "kubernetes",
                   role: "eso",
+                  serviceAccountRef: {
+                    name: "external-secrets",
+                    namespace: "external-secrets",
+                    audiences: [config.vault?.esoKubernetesAuthAudience ?? "vault"],
+                  },
                 },
               },
             },

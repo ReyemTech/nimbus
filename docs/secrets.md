@@ -427,9 +427,9 @@ pg.secretRef("password") // { secretKeyRef: { name: "pgsql-main-superuser", key:
 Nimbus auto-configures the full Vault + ESO pipeline:
 
 1. **Vault deployment** — Helm chart with auto-unseal (AWS KMS)
-2. **Bootstrap sidecar** — initializes Vault, enables KV-v2, configures K8s auth, creates ESO role
+2. **Bootstrap sidecar** — initializes Vault, enables KV-v2, and reconciles Kubernetes auth roles and policies
 3. **External Secrets Operator** — Helm chart with fixed service account name `external-secrets`
-4. **ClusterSecretStore** — `vault-backend`, authenticates to Vault via K8s auth with role `eso`
+4. **ClusterSecretStore** — `vault-backend`, requests a short-lived `vault`-audience token for the ESO service account and authenticates through role `eso`
 
 All of this is configured automatically when both `vault` and `externalSecrets` are enabled in the platform stack:
 
@@ -439,11 +439,40 @@ const platform = createPlatformStack("reyemtech", {
   domain: "reyem.ca",
   vault: {
     enabled: true,
+    serviceAccountName: "vault",
+    // KV-v2 paths are relative to the `secret` mount; add every ESO path.
+    esoSecretPaths: ["argocd/ghcr-reyemtech"],
     autoUnseal: { provider: "awskms", region: "us-east-1", awsProvider },
   },
   externalSecrets: { enabled: true },
 });
 ```
+
+Nimbus binds the Vault `eso` role only to `external-secrets` in the
+`external-secrets` namespace, with audience `vault` by default. Its KV-v2 policy
+grants read access only to paths listed in `esoSecretPaths`; it grants no list
+or write access. When Vault and ESO use Nimbus bootstrap, omitting this list
+fails deployment rather than granting broad access.
+
+Vault uses its rotating Kubernetes ServiceAccount token for TokenReview. Nimbus
+keeps the Vault ServiceAccount name and `system:auth-delegator` binding aligned.
+ESO receives a separate short-lived projected token. Nimbus does not persist a
+root token: bootstrap uses the initial token in memory, creates a restricted
+one-hour bootstrap role for later reconciliation, and revokes the root token.
+On upgrade it revokes and removes the legacy root-token file. Existing
+Kubernetes auth mounts and userpass users remain enabled.
+
+### Upgrade and migration
+
+Before upgrading an existing Vault + ESO stack, add every path used by
+ExternalSecrets to `vault.esoSecretPaths`. For the GHCR ExternalSecret, add
+`"argocd/ghcr-reyemtech"`. The preview shows a bootstrap ConfigMap name change
+and a Vault pod-template update. Nimbus rolls the Vault server so bootstrap
+reconciles automatically; standalone mode has a brief restart window, while HA
+restarts one pod at a time. The upgrade corrects TokenReview identity, narrows
+the ESO role, and removes the legacy root-token file without disabling
+Kubernetes auth or userpass. With `vault.bootstrap: false`, manage these Vault
+auth settings externally.
 
 ### Vault Paths Convention
 

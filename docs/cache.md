@@ -48,7 +48,7 @@ Standalone creates one Valkey pod with persistence and no Sentinel or HAProxy. C
 
 ### Availability and placement
 
-Nimbus enables chart-managed PodDisruptionBudgets for the Valkey, Sentinel, and HAProxy workloads. Each allows at most one unavailable pod by default; Sentinel's budget must also preserve quorum. Standalone mode uses a Nimbus-managed PDB that keeps its single pod available, which can block node drains or autoscaler scale-in. Set `podDisruptionBudget: { enabled: false }` to permit planned evictions.
+When `metrics: true`, Nimbus enables the exporter, creates a matching ServiceMonitor, and installs the Valkey alert rule. Nimbus enables chart-managed PodDisruptionBudgets for the Valkey, Sentinel, and HAProxy workloads. Each allows at most one unavailable pod by default; Sentinel's budget must also preserve quorum. Standalone mode uses a Nimbus-managed PDB that keeps its single pod available, which can block node drains or autoscaler scale-in. Set `podDisruptionBudget: { enabled: false }` to permit planned evictions.
 
 `scheduling.replicas` controls the number of Valkey read replicas (in addition to the primary) in replication mode. `scheduling.spread` applies placement rules to Valkey, Sentinel, and HAProxy pods so the groups can spread across nodes or topology zones.
 

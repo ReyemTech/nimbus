@@ -101,6 +101,27 @@ describe("cache engines", () => {
     expect(
       values.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution
     ).toBeDefined();
+    expect(
+      values.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0]
+        .labelSelector.matchLabels
+    ).toMatchObject({
+      "nimbus/cache": "sessions",
+      "app.kubernetes.io/component": "valkey",
+    });
+    expect(values.metrics.service.labels).toMatchObject({ "nimbus/cache": "sessions" });
+    const serviceMonitor = resources.find(
+      (resource) => (resource.inputs as any).kind === "ServiceMonitor"
+    );
+    expect(serviceMonitor?.inputs).toMatchObject({
+      apiVersion: "monitoring.coreos.com/v1",
+      kind: "ServiceMonitor",
+      metadata: { name: "sessions-valkey-metrics", namespace: "observability" },
+      spec: {
+        namespaceSelector: { matchNames: ["data"] },
+        selector: { matchLabels: { "nimbus/cache": "sessions" } },
+        endpoints: [{ port: "metrics", interval: "30s" }],
+      },
+    });
     expect(byType(DEPLOYMENT)).toHaveLength(0);
     expect(byType(PDB)).toHaveLength(0);
     expect(cache.engine).toBe("valkey");

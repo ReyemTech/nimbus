@@ -102,7 +102,12 @@ export function createValkeyCache(
   });
 
   const cacheSelector = { "nimbus/cache": name };
-  const basePlacement = chartPodPlacement(config.scheduling?.spread, cacheSelector, {}, "Valkey");
+  const basePlacement = chartPodPlacement(
+    config.scheduling?.spread,
+    { ...cacheSelector, "app.kubernetes.io/component": "valkey" },
+    {},
+    "Valkey"
+  );
   const sentinelPlacement = chartPodPlacement(
     config.scheduling?.spread,
     { ...cacheSelector, "app.kubernetes.io/component": "sentinel" },
@@ -135,7 +140,10 @@ export function createValkeyCache(
     podDisruptionBudget: chartBudget(nodeBudget),
     service: { type: "ClusterIP", port: VALKEY_PORT },
     ...basePlacement,
-    metrics: { enabled: config.metrics ?? false },
+    metrics: {
+      enabled: config.metrics ?? false,
+      ...(config.metrics ? { service: { labels: cacheSelector } } : {}),
+    },
     replica: {
       enabled: architecture === "replication",
       replicas: nodeReplicas,
@@ -208,6 +216,25 @@ export function createValkeyCache(
   }
 
   if (config.metrics) {
+    new k8s.apiextensions.CustomResource(
+      `${name}-valkey-service-monitor`,
+      {
+        apiVersion: "monitoring.coreos.com/v1",
+        kind: "ServiceMonitor",
+        metadata: {
+          name: `${name}-valkey-metrics`,
+          namespace: "observability",
+          labels: { "app.kubernetes.io/managed-by": "nimbus" },
+        },
+        spec: {
+          namespaceSelector: { matchNames: [CACHE_NAMESPACE] },
+          selector: { matchLabels: cacheSelector },
+          endpoints: [{ port: "metrics", interval: "30s" }],
+        },
+      },
+      { provider, dependsOn: [release] }
+    );
+
     createPrometheusRule(
       `${name}-valkey-alerts`,
       "observability",

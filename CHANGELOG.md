@@ -1,3 +1,16 @@
+# [3.19.0](https://github.com/ReyemTech/nimbus/compare/v3.18.0...v3.19.0) (2026-11-27)
+
+
+### Bug Fixes
+
+* **cache:** address Valkey review findings ([47e321b](https://github.com/ReyemTech/nimbus/commit/47e321b9c6994e370722d6fc6d15618b76912c67))
+* **cache:** update Valkey connection Secrets ([8758bcd](https://github.com/ReyemTech/nimbus/commit/8758bcd9847182b9362040872d8a833612db3f8e))
+
+
+### Features
+
+* **cache:** add Valkey Helm engine ([ab10489](https://github.com/ReyemTech/nimbus/commit/ab10489c6902b88c43cc1a876a7c33a9f35e04d7))
+
 # [3.18.0](https://github.com/ReyemTech/nimbus/compare/v3.17.0...v3.18.0) (2026-11-27)
 
 

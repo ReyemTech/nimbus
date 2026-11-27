@@ -105,6 +105,14 @@ export function createObservabilityStack(
       throw new Error(
         "Alertmanager Nimbus podDisruptionBudget conflicts with raw Helm PDB settings"
       );
+    if (
+      !cluster.eksAddons?.includes("kube-state-metrics") &&
+      config.kubeStateMetrics?.podDisruptionBudget?.enabled !== false &&
+      hasRawPdb(config.prometheus?.values?.kubeStateMetrics)
+    )
+      throw new Error(
+        "kube-state-metrics podDisruptionBudget conflicts with Helm values.kubeStateMetrics"
+      );
     components["kube-prometheus-stack"] = deployKubePrometheusStack(
       name,
       namespace,
@@ -154,14 +162,14 @@ export function createObservabilityStack(
         provider,
         components["kube-prometheus-stack"]
       );
-    if (config.kubeStateMetrics && !cluster.eksAddons?.includes("kube-state-metrics"))
+    if (!cluster.eksAddons?.includes("kube-state-metrics"))
       addChartBudget(
         `${name}-kube-state-metrics-pdb`,
         namespace,
         "kube-state-metrics",
         instance,
-        config.kubeStateMetrics.podDisruptionBudget,
-        config.kubeStateMetrics.scheduling?.replicas ?? 1,
+        config.kubeStateMetrics?.podDisruptionBudget,
+        config.kubeStateMetrics?.scheduling?.replicas ?? 1,
         provider,
         components["kube-prometheus-stack"]
       );
@@ -735,18 +743,19 @@ function deployKubePrometheusStack(
     "alertmanagerSpec",
     "Alertmanager"
   );
-  if (kubeStateMetrics && managedEksAddons?.includes("kube-state-metrics") !== true) {
+  if (managedEksAddons?.includes("kube-state-metrics") !== true) {
+    const kubeStateMetricsConfig = kubeStateMetrics ?? {};
     const values = (stackValues.kubeStateMetrics as Record<string, unknown>) ?? {};
     const raw = (prometheus?.values?.kubeStateMetrics as Record<string, unknown>) ?? {};
-    if (kubeStateMetrics.scheduling?.replicas !== undefined) {
+    if (kubeStateMetricsConfig.scheduling?.replicas !== undefined) {
       if (raw.replicas !== undefined)
         throw new Error(
           "kube-state-metrics scheduling.replicas conflicts with Helm values.kubeStateMetrics.replicas"
         );
-      values.replicas = kubeStateMetrics.scheduling.replicas;
+      values.replicas = kubeStateMetricsConfig.scheduling.replicas;
     }
     if (
-      kubeStateMetrics.podDisruptionBudget?.enabled !== false &&
+      kubeStateMetricsConfig.podDisruptionBudget?.enabled !== false &&
       raw.podDisruptionBudget !== undefined
     ) {
       throw new Error(
@@ -756,7 +765,7 @@ function deployKubePrometheusStack(
     Object.assign(
       values,
       chartPodPlacement(
-        kubeStateMetrics.scheduling?.spread,
+        kubeStateMetricsConfig.scheduling?.spread,
         { "app.kubernetes.io/name": "kube-state-metrics" },
         raw,
         "kube-state-metrics"

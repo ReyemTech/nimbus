@@ -108,9 +108,24 @@ describe("observability workload disruption budgets", () => {
     expect((kps?.inputs as any).values.alertmanager.alertmanagerSpec.replicas).toBe(2);
     expect((kps?.inputs as any).values.kubeStateMetrics.replicas).toBe(2);
   });
+  it("protects default kube-state-metrics when its typed config is omitted", async () => {
+    stack({ prometheus: { enabled: true } });
+    await pulumi.runtime.disconnect();
+
+    expect(byType(PDB).map((x) => (x.inputs as any).spec)).toContainEqual({
+      minAvailable: 1,
+      selector: {
+        matchLabels: {
+          "app.kubernetes.io/name": "kube-state-metrics",
+          "app.kubernetes.io/instance": "obs-kube-prometheus-stack",
+        },
+      },
+    });
+  });
   it("honors opt-out and keeps Loki workload spread scoped", async () => {
     stack({
       prometheus: { enabled: true, podDisruptionBudget: { enabled: false } },
+      kubeStateMetrics: { podDisruptionBudget: { enabled: false } },
       loki: {
         enabled: true,
         podDisruptionBudget: { enabled: false },
@@ -172,6 +187,34 @@ describe("observability workload disruption budgets", () => {
         },
       })
     ).toThrow(/conflicts with raw Helm PDB/);
+  });
+  it("rejects raw kube-state-metrics PDB when Nimbus default protection is active", () => {
+    expect(() =>
+      stack({
+        prometheus: {
+          enabled: true,
+          values: { kubeStateMetrics: { podDisruptionBudget: { enabled: true } } },
+        },
+      })
+    ).toThrow(/kube-state-metrics podDisruptionBudget conflicts with Helm values/);
+  });
+  it("leaves kube-state-metrics PDB ownership to the EKS add-on", async () => {
+    stack({
+      cluster: { ...cluster(), eksAddons: ["kube-state-metrics"] } as any,
+      prometheus: {
+        enabled: true,
+        values: { kubeStateMetrics: { podDisruptionBudget: { enabled: true } } },
+      },
+    });
+    await pulumi.runtime.disconnect();
+
+    expect(
+      byType(PDB).some(
+        (x) =>
+          (x.inputs as any).spec.selector.matchLabels["app.kubernetes.io/name"] ===
+          "kube-state-metrics"
+      )
+    ).toBe(false);
   });
   it("maps distributed Loki policy only to chart-defined microservices", async () => {
     stack({

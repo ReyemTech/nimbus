@@ -9,7 +9,9 @@ describe("pod disruption budget policy", () => {
 
   it("preserves explicit integer and percentage values", () => {
     expect(resolvePodDisruptionBudget({ minAvailable: 2 }, 3)).toEqual({ minAvailable: 2 });
-    expect(resolvePodDisruptionBudget({ maxUnavailable: "25%" }, 4)).toEqual({ maxUnavailable: "25%" });
+    expect(resolvePodDisruptionBudget({ maxUnavailable: "25%" }, 4)).toEqual({
+      maxUnavailable: "25%",
+    });
   });
 
   it("returns undefined when disabled", () => {

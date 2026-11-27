@@ -59,6 +59,32 @@ Factories accept provider shorthand (`"aws"`), an explicit target (`{ provider: 
 
 Cluster, network, DNS, and other provider-backed result types expose their native Pulumi resource through `nativeResource`. Cluster results also expose their Kubernetes provider for direct Kubernetes resources.
 
+## Pod disruption budgets and scheduling
+
+Supported Nimbus-managed long-running controllers and database workloads accept `podDisruptionBudget`. This policy governs Kubernetes **voluntary evictions** requested through the Eviction API, including node drains and Cluster Autoscaler or Karpenter scale-in. It does not prevent involuntary loss from node, zone, or control-plane failure, and it does not guarantee application availability.
+
+When enabled (the default), a single replica gets `minAvailable: 1`; two or more replicas get `maxUnavailable: 1`. Existing replica counts are preserved unless `scheduling.replicas` is set. `minAvailable` and `maxUnavailable` are mutually exclusive and accept nonnegative integers or Kubernetes percentages. Use `enabled: false` to permit eviction during planned maintenance; restore protection after maintenance. A one-replica default can leave `kubectl drain` or node scale-in waiting indefinitely until a replacement is ready or the policy is disabled. This applies to Nimbus-managed single-replica controllers including operator controllers, Argo CD controller/server/repo-server/notifications, cert-manager, Traefik, ExternalDNS, External Secrets, Vault, Trivy Operator, Tailscale operator, WireGuard, access DNS/proxy, Prometheus, Grafana, Alertmanager, Loki, kube-state-metrics, Uptime Kuma, Redis master/tracker, Cluster Autoscaler, Karpenter, and supported Deployment-based EKS add-ons. Components with multiple independently scaled controllers get a separate budget for each.
+
+```typescript
+const platform = createPlatformStack("platform", {
+  domain: "example.test",
+  podDisruptionBudget: { enabled: false }, // temporary maintenance opt-out
+});
+
+const operator = createOperator("cloudnative-pg", {
+  cluster,
+  podDisruptionBudget: { enabled: true }, // operator controller policy
+});
+const database = operator.createCluster("orders", {
+  replicas: 3,
+  scheduling: {
+    spread: { strategy: "topology-spread", mode: "preferred" },
+  },
+});
+```
+
+For workloads with multiple replicas, configure pod anti-affinity or topology spread where supported so a permitted disruption does not leave all replicas on one node. Nimbus does not silently increase replicas. CloudNativePG, MariaDB Operator, and MinIO Operator own their database workload budgets through their native CRDs; Nimbus does not layer a standalone PDB over them. CNPG exposes its native enable/disable control rather than arbitrary numeric bounds. Neo4j has no supported Nimbus workload PDB/spread path in the pinned chart. DaemonSets and short-lived Jobs/CronJobs are excluded. The Descheduler remains a CronJob and receives no PDB; PDB or scheduling requests for it are unsupported. EKS add-on configuration is available only where the selected AWS schema exposes a safe native PDB field; unsupported schemas, schema/version mismatches, existing add-on budgets, and DaemonSet add-ons are rejected or left to AWS ownership. These settings are not exposed by every Nimbus chart path: unsupported raw chart PDB fields must not be combined with typed Nimbus policy.
+
 ## Database operators
 
 ### `createOperator(type, config)`

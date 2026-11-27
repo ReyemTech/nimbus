@@ -59,6 +59,7 @@
     "format:check": "prettier --check 'src/**/*.ts' 'tests/**/*.ts'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:integration:pdb": "vitest run tests/integration/pod-disruption-budget-eviction.test.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "docs:api": "typedoc",

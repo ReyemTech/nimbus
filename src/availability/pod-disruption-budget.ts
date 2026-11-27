@@ -22,7 +22,7 @@ export type ResolvedPodDisruptionBudget =
 /** Resolve and validate a PDB budget for the desired replica count. */
 export function resolvePodDisruptionBudget(
   config: IPodDisruptionBudgetConfig = {},
-  replicas: number,
+  replicas: number
 ): ResolvedPodDisruptionBudget | undefined {
   if (!Number.isInteger(replicas) || replicas < 1) {
     throw new Error("Pod disruption budget replicas must be a positive integer");
@@ -35,7 +35,8 @@ export function resolvePodDisruptionBudget(
   const value = config.minAvailable ?? config.maxUnavailable;
   if (value !== undefined) {
     if (typeof value === "number") {
-      if (!Number.isInteger(value) || value < 0) throw new Error("PDB values must be nonnegative integers or percentages");
+      if (!Number.isInteger(value) || value < 0)
+        throw new Error("PDB values must be nonnegative integers or percentages");
     } else if (!/^\d+%$/.test(value)) {
       throw new Error("PDB percentage values must be a nonnegative integer followed by %");
     }
@@ -50,7 +51,7 @@ export function resolvePodDisruptionBudget(
 export function buildPodDisruptionBudgetSpec(
   config: IPodDisruptionBudgetConfig,
   selector: Record<string, string>,
-  replicas: number,
+  replicas: number
 ) {
   const budget = resolvePodDisruptionBudget(config, replicas);
   if (!budget) return undefined;

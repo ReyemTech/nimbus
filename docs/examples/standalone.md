@@ -1,5 +1,22 @@
 ## Standalone Resources (No Cluster Required)
 
+## Pod disruption budget
+
+Supported controllers default to voluntary eviction protection: one replica uses `minAvailable: 1`, and multiple replicas use `maxUnavailable: 1`. A singleton policy can block node drains and autoscaler scale-in until a replacement is ready. For planned maintenance, set `podDisruptionBudget: { enabled: false }` on the affected component and restore protection afterward.
+
+```typescript
+const operator = createOperator("cloudnative-pg", {
+  cluster,
+  podDisruptionBudget: { enabled: true }, // database operator controller
+});
+const pg = operator.createCluster("orders", {
+  replicas: 3,
+  scheduling: { spread: { strategy: "topology-spread", mode: "preferred" } },
+});
+```
+
+`minAvailable` and `maxUnavailable` are mutually exclusive and accept a nonnegative integer or percentage. Nimbus preserves replica defaults and does not scale a workload up automatically. CloudNativePG, MariaDB Operator, and MinIO Operator own database workload budgets through their CRDs; Nimbus does not create duplicate standalone database PDBs. CNPG only exposes its native enable/disable switch. The pinned Neo4j chart path is unsupported. Jobs, CronJobs, and DaemonSets have no Nimbus PDB; the Descheduler remains a CronJob. EKS add-ons are configurable only when their version-matched AWS schema supports a native PDB and no existing budget conflicts. PDBs cover voluntary evictions, not node or zone failure.
+
 Every factory function is independent — you don't need a cluster to create a state backend, DNS zone, secrets store, or network:
 
 ```typescript

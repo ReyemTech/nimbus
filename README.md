@@ -50,6 +50,8 @@ For a scaffolded project, run `npx @reyemtech/nimbus new my-infra aws`.
 
 ## Documentation
 
+Supported Nimbus-managed controllers default to a PodDisruptionBudget for voluntary evictions: single replicas require one available pod; multi-replica workloads allow one unavailable pod. Single-replica budgets can block node drains and autoscaler scale-in until a replacement is ready. Set `podDisruptionBudget: { enabled: false }` for planned maintenance. For multi-replica workloads, configure spreading where supported. Database operators own their database workload budgets; jobs, CronJobs, DaemonSets, and unsupported chart paths are excluded. See the [PDB API and behavior reference](docs/api-reference.md#pod-disruption-budgets-and-scheduling).
+
 Start at the [documentation index](docs/README.md). It links to [provider guides](docs/providers/), [examples](docs/examples.md), [Kubernetes access](docs/guides/kubernetes-access.md), and the [API reference](docs/api-reference.md). AWS EKS users can also see the [private Route 53 and Ingress visibility guide](docs/providers/aws.md#private-route-53-zones-and-ingress-dns-visibility).
 
 ## Development

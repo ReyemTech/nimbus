@@ -33,6 +33,13 @@ export function deployOAuth2Proxy(
   const instance = `${name}-oauth2-proxy`;
   const raw = config.values ?? {};
   const replicas = config.scheduling?.replicas ?? (raw.replicaCount as number | undefined) ?? 1;
+  if (config.podDisruptionBudget !== undefined && raw.podDisruptionBudget !== undefined) {
+    throw new Error("podDisruptionBudget conflicts with Helm values.podDisruptionBudget");
+  }
+  const resolvedBudget =
+    config.podDisruptionBudget === undefined
+      ? undefined
+      : resolvePodDisruptionBudget(config.podDisruptionBudget, replicas);
 
   const release = new k8s.helm.v3.Release(
     instance,
@@ -71,27 +78,16 @@ export function deployOAuth2Proxy(
         ...(config.scheduling?.replicas !== undefined
           ? { replicaCount: config.scheduling.replicas }
           : {}),
+        ...(config.podDisruptionBudget !== undefined
+          ? {
+              podDisruptionBudget: resolvedBudget
+                ? { enabled: true, ...resolvedBudget }
+                : { enabled: false },
+            }
+          : {}),
       },
     },
     { provider }
   );
-  const budget = resolvePodDisruptionBudget(config.podDisruptionBudget ?? {}, replicas);
-  if (budget)
-    new k8s.policy.v1.PodDisruptionBudget(
-      `${instance}-pdb`,
-      {
-        metadata: { name: instance, namespace: "traefik" },
-        spec: {
-          ...budget,
-          selector: {
-            matchLabels: {
-              "app.kubernetes.io/name": "oauth2-proxy",
-              "app.kubernetes.io/instance": instance,
-            },
-          },
-        },
-      },
-      { provider, dependsOn: [release] }
-    );
   return release;
 }

@@ -81,6 +81,16 @@ describe("access workload availability resources", () => {
       "access-dns",
       "access-proxy",
     ]);
+    budgets.length = 0;
+    deployAccessDns(
+      "off",
+      "iad",
+      { enabled: true, podDisruptionBudget: { enabled: false } },
+      "access",
+      provider,
+      []
+    );
+    expect(budgets).toHaveLength(0);
   });
   it("creates controller budgets after their Helm releases", () => {
     deployTailscale("t", {
@@ -107,5 +117,80 @@ describe("access workload availability resources", () => {
     expect(budgets.map((x) => x.args.metadata.name)).toEqual(["tailscale-operator", "wireguard"]);
     expect(budgets[0].opts.dependsOn).toContain(releases[0]);
     expect(budgets[1].opts.dependsOn).toContain(releases[1]);
+    expect(budgets[0].args.spec.selector.matchLabels).toEqual({ app: "operator" });
+    expect(budgets[1].args.spec.selector.matchLabels).toEqual({ app: "w-wireguard-wireguard" });
+    expect(releases[1].args.values.replicaCount).toBeUndefined();
+  });
+  it("maps WireGuard replicas and rejects unsupported controller spread", () => {
+    deployWireGuard("w", {
+      cluster: { provider } as any,
+      provider: "wireguard",
+      wireguard: {
+        endpoint: "vpn.example.com",
+        serverCidr: "10.0.0.0/24",
+        routes: [],
+        peers: [],
+        scheduling: { replicas: 2 },
+        podDisruptionBudget: {},
+      },
+    });
+    expect(releases.at(0)?.args.values.replicaCount).toBe(2);
+    expect(budgets.at(0)?.args.spec.maxUnavailable).toBe(1);
+    expect(() =>
+      deployWireGuard("conflict", {
+        cluster: { provider } as any,
+        provider: "wireguard",
+        wireguard: {
+          endpoint: "vpn.example.com",
+          serverCidr: "10.0.0.0/24",
+          routes: [],
+          peers: [],
+          scheduling: { replicas: 2 },
+          values: { replicaCount: 3 },
+        },
+      })
+    ).toThrow(/scheduling.replicas conflicts with Helm values.replicaCount/);
+    expect(() =>
+      deployWireGuard("x", {
+        cluster: { provider } as any,
+        provider: "wireguard",
+        wireguard: {
+          endpoint: "vpn.example.com",
+          serverCidr: "10.0.0.0/24",
+          routes: [],
+          peers: [],
+          scheduling: { spread: { strategy: "topology-spread" } },
+        },
+      })
+    ).toThrow(/scheduling.spread is not supported/);
+  });
+  it("rejects Tailscale scheduling because its chart fixes one replica and has no spread values", () => {
+    expect(() =>
+      deployTailscale("t", {
+        cluster: { provider } as any,
+        provider: "tailscale",
+        tailscale: {
+          oauthClientId: "id",
+          oauthClientSecret: "secret",
+          routes: [],
+          scheduling: { replicas: 2 },
+        },
+      })
+    ).toThrow(/scheduling is not supported/);
+    expect(releases).toHaveLength(0);
+  });
+  it("honors controller PDB opt-out", () => {
+    deployWireGuard("w", {
+      cluster: { provider } as any,
+      provider: "wireguard",
+      wireguard: {
+        endpoint: "vpn.example.com",
+        serverCidr: "10.0.0.0/24",
+        routes: [],
+        peers: [],
+        podDisruptionBudget: { enabled: false },
+      },
+    });
+    expect(budgets).toHaveLength(0);
   });
 });

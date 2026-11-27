@@ -28,7 +28,25 @@ export function deployDescheduler(
 
   const instance = `${name}-descheduler`;
   const raw = config.values ?? {};
+  const kind = raw.kind ?? "CronJob";
+  const typedBudget = config.podDisruptionBudget;
+  const schedulingRequested = Boolean(
+    config.scheduling?.replicas !== undefined || config.scheduling?.spread
+  );
+  if (kind !== "Deployment" && typedBudget?.enabled !== false && typedBudget !== undefined) {
+    throw new Error("Descheduler podDisruptionBudget requires values.kind: Deployment");
+  }
+  if (kind !== "Deployment" && schedulingRequested) {
+    throw new Error("Descheduler scheduling requires values.kind: Deployment");
+  }
+  if (typedBudget !== undefined && raw.podDisruptionBudget !== undefined) {
+    throw new Error("podDisruptionBudget conflicts with Helm values.podDisruptionBudget");
+  }
   const replicas = config.scheduling?.replicas ?? (raw.replicas as number | undefined) ?? 1;
+  const budget =
+    kind === "Deployment" && typedBudget !== undefined
+      ? resolvePodDisruptionBudget(typedBudget, replicas)
+      : undefined;
   const release = new k8s.helm.v3.Release(
     `${name}-descheduler`,
     {
@@ -42,6 +60,9 @@ export function deployDescheduler(
       values: {
         deschedulerPolicy: { strategies: strategyValues },
         ...raw,
+        ...(typedBudget !== undefined
+          ? { podDisruptionBudget: budget ? { enabled: true, ...budget } : { enabled: false } }
+          : {}),
         ...chartPodPlacement(
           config.scheduling?.spread,
           { "app.kubernetes.io/name": "descheduler", "app.kubernetes.io/instance": instance },
@@ -55,23 +76,5 @@ export function deployDescheduler(
     },
     { provider }
   );
-  const budget = resolvePodDisruptionBudget(config.podDisruptionBudget ?? {}, replicas);
-  if (budget)
-    new k8s.policy.v1.PodDisruptionBudget(
-      `${instance}-pdb`,
-      {
-        metadata: { name: instance, namespace: "kube-system" },
-        spec: {
-          ...budget,
-          selector: {
-            matchLabels: {
-              "app.kubernetes.io/name": "descheduler",
-              "app.kubernetes.io/instance": instance,
-            },
-          },
-        },
-      },
-      { provider, dependsOn: [release] }
-    );
   return release;
 }

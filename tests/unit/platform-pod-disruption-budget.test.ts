@@ -47,19 +47,17 @@ afterEach(reset);
 const componentCases = [
   {
     name: "descheduler",
-    run: (config: any) => deployDescheduler("test", config, mockProvider, "1.0.0"),
+    run: (config: any) =>
+      deployDescheduler(
+        "test",
+        { ...config, values: { kind: "Deployment", ...config.values } },
+        mockProvider,
+        "1.0.0"
+      ),
     release: "test-descheduler",
-    fallback: [
-      {
-        namespace: "kube-system",
-        selector: {
-          "app.kubernetes.io/name": "descheduler",
-          "app.kubernetes.io/instance": "test-descheduler",
-        },
-      },
-    ],
+    nativePaths: [["podDisruptionBudget"]],
     replicaPaths: [["replicas"]],
-    rawValues: { replicas: 2 },
+    rawValues: { kind: "Deployment", replicas: 2 },
     spreadPaths: [
       [
         "topologySpreadConstraints",
@@ -82,15 +80,7 @@ const componentCases = [
         "1.0.0"
       ),
     release: "test-oauth2-proxy",
-    fallback: [
-      {
-        namespace: "traefik",
-        selector: {
-          "app.kubernetes.io/name": "oauth2-proxy",
-          "app.kubernetes.io/instance": "test-oauth2-proxy",
-        },
-      },
-    ],
+    nativePaths: [["podDisruptionBudget"]],
     replicaPaths: [["replicaCount"]],
     rawValues: { replicaCount: 2 },
     spreadPaths: [
@@ -651,6 +641,71 @@ describe.each(componentCases)(
     });
   }
 );
+
+it("keeps Descheduler in CronJob mode and rejects requested PDB/scheduling", () => {
+  expect(() =>
+    deployDescheduler("test", { podDisruptionBudget: {} }, mockProvider, "1.0.0")
+  ).toThrow(/requires values.kind: Deployment/);
+  expect(releases).toHaveLength(0);
+  expect(budgets).toHaveLength(0);
+  deployDescheduler("test", {}, mockProvider, "1.0.0");
+  expect(releases[0]!.args.values.kind).toBeUndefined();
+  expect(budgets).toHaveLength(0);
+});
+it("rejects OAuth2 Proxy raw and typed PDB conflicts", () => {
+  expect(() =>
+    deployOAuth2Proxy(
+      "test",
+      {
+        provider: "google",
+        clientId: "id",
+        clientSecret: "secret",
+        podDisruptionBudget: {},
+        values: { podDisruptionBudget: { enabled: false } },
+      },
+      "example.com",
+      mockProvider,
+      "1.0.0"
+    )
+  ).toThrow(/podDisruptionBudget conflicts with Helm values/);
+  expect(releases).toHaveLength(0);
+});
+it("keeps raw Trivy operator values while applying typed replicas and spread", () => {
+  deployTrivyOperator(
+    "test",
+    {
+      podDisruptionBudget: {},
+      scheduling: {
+        replicas: 3,
+        spread: {
+          strategy: "topology-spread",
+          mode: "required",
+          topologyKey: "topology.kubernetes.io/zone",
+        },
+      },
+      values: { operator: { scanJobTimeout: "20m", replicas: 2 } },
+    },
+    mockProvider,
+    "1.0.0"
+  );
+  const operator = releases[0]!.args.values.operator;
+  expect(operator.scanJobTimeout).toBe("20m");
+  expect(operator.replicas).toBe(3);
+  expect(operator.topologySpreadConstraints).toEqual([
+    {
+      maxSkew: 1,
+      topologyKey: "topology.kubernetes.io/zone",
+      whenUnsatisfiable: "DoNotSchedule",
+      labelSelector: {
+        matchLabels: {
+          "app.kubernetes.io/name": "trivy-operator",
+          "app.kubernetes.io/instance": "test-trivy-operator",
+        },
+      },
+    },
+  ]);
+  expect(budgets[0]!.args.spec.maxUnavailable).toBe(1);
+});
 
 it("keeps Argo CD native PDBs per controller and a separate notifications PDB", () => {
   deployArgocd(

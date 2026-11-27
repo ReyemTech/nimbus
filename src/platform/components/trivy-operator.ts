@@ -28,6 +28,7 @@ export function deployTrivyOperator(
       namespace: "trivy-system",
       createNamespace: true,
       values: {
+        ...raw,
         operator: {
           scanJobTimeout: "10m",
           scanJobsConcurrentLimit: 5,
@@ -46,7 +47,6 @@ export function deployTrivyOperator(
           // Report unfixed CVEs too, so exposure is visible before a patch exists.
           ignoreUnfixed: false,
         },
-        ...raw,
       },
     },
     { provider }

@@ -59,6 +59,18 @@ export function deployWireGuard(name: string, config: IWireGuardGatewayConfig): 
   const prefix = config.hostnamePrefix ?? name;
   const listenPort = config.wireguard.listenPort ?? DEFAULT_PORT;
   const nsResource = ensureNamespace(NAMESPACE, k8sProvider);
+  if (config.wireguard.scheduling?.spread !== undefined) {
+    throw new Error(
+      "WireGuard scheduling.spread is not supported because the chart hard-codes topology spread constraints"
+    );
+  }
+  const rawValues = config.wireguard.values ?? {};
+  const rawReplicas = rawValues.replicaCount;
+  const typedReplicas = config.wireguard.scheduling?.replicas;
+  if (typedReplicas !== undefined && rawReplicas !== undefined && typedReplicas !== rawReplicas) {
+    throw new Error("scheduling.replicas conflicts with Helm values.replicaCount");
+  }
+  const replicas = typedReplicas ?? (typeof rawReplicas === "number" ? rawReplicas : 1);
 
   const helmRelease = new k8s.helm.v3.Release(
     `${name}-wireguard`,
@@ -89,12 +101,12 @@ export function deployWireGuard(name: string, config: IWireGuardGatewayConfig): 
           enabled: true,
           size: "100Mi",
         },
-        ...config.wireguard.values,
+        ...rawValues,
+        ...(typedReplicas !== undefined ? { replicaCount: typedReplicas } : {}),
       },
     },
     { provider: k8sProvider, dependsOn: [nsResource] }
   );
-  const replicas = config.wireguard.scheduling?.replicas ?? 1;
   const budget = resolvePodDisruptionBudget(config.wireguard.podDisruptionBudget ?? {}, replicas);
   if (budget)
     new k8s.policy.v1.PodDisruptionBudget(
@@ -105,8 +117,7 @@ export function deployWireGuard(name: string, config: IWireGuardGatewayConfig): 
           ...budget,
           selector: {
             matchLabels: {
-              "app.kubernetes.io/instance": "wireguard",
-              "app.kubernetes.io/name": "wireguard",
+              app: `${name}-wireguard-wireguard`,
             },
           },
         },

@@ -25,6 +25,14 @@ export function deployTailscale(name: string, config: ITailscaleGatewayConfig): 
   const provider = config.cluster.provider;
   const prefix = config.hostnamePrefix ?? name;
   const tags = config.tailscale.tags ?? ["tag:k8s"];
+  if (
+    config.tailscale.scheduling?.replicas !== undefined ||
+    config.tailscale.scheduling?.spread !== undefined
+  ) {
+    throw new Error(
+      "Tailscale scheduling is not supported by its Helm chart (replicas are fixed at 1 and placement values are unavailable)"
+    );
+  }
   const nsResource = ensureNamespace(NAMESPACE, provider);
 
   // Tailscale Operator Helm chart — uses OAuth client credentials
@@ -51,11 +59,7 @@ export function deployTailscale(name: string, config: ITailscaleGatewayConfig): 
     },
     { provider, dependsOn: [nsResource] }
   );
-  const replicas = config.tailscale.scheduling?.replicas ?? 1;
-  const operatorBudget = resolvePodDisruptionBudget(
-    config.tailscale.podDisruptionBudget ?? {},
-    replicas
-  );
+  const operatorBudget = resolvePodDisruptionBudget(config.tailscale.podDisruptionBudget ?? {}, 1);
   if (operatorBudget)
     new k8s.policy.v1.PodDisruptionBudget(
       `${name}-tailscale-operator-pdb`,
@@ -65,8 +69,7 @@ export function deployTailscale(name: string, config: ITailscaleGatewayConfig): 
           ...operatorBudget,
           selector: {
             matchLabels: {
-              "app.kubernetes.io/name": "operator",
-              "app.kubernetes.io/instance": "tailscale-operator",
+              app: "operator",
             },
           },
         },

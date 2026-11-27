@@ -173,7 +173,7 @@ describe("observability workload disruption budgets", () => {
       })
     ).toThrow(/conflicts with raw Helm PDB/);
   });
-  it("maps distributed Loki policy to independently selected long-running components", async () => {
+  it("maps distributed Loki policy only to chart-defined microservices", async () => {
     stack({
       loki: {
         enabled: true,
@@ -186,17 +186,80 @@ describe("observability workload disruption budgets", () => {
     const release = byType(HELM).find((x) => (x.inputs as any).chart === "loki");
     expect((release?.inputs as any).values).toMatchObject({
       deploymentMode: "Distributed",
-      read: { replicas: 2 },
-      write: { replicas: 2 },
-      backend: { replicas: 2 },
+      distributor: { replicas: 2 },
+      ingester: { replicas: 2 },
+      querier: { replicas: 2 },
+      queryFrontend: { replicas: 2 },
+      queryScheduler: { replicas: 2 },
+      indexGateway: { replicas: 2 },
+      read: { replicas: 0 },
+      write: { replicas: 0 },
+      backend: { replicas: 0 },
     });
-    const read = byType(PDB).find((x) => x.name === "obs-loki-read-pdb");
-    expect((read?.inputs as any).spec.selector.matchLabels).toEqual({
+    const distributor = byType(PDB).find((x) => x.name === "obs-loki-distributor-pdb");
+    expect((distributor?.inputs as any).spec.selector.matchLabels).toEqual({
       "app.kubernetes.io/name": "loki",
       "app.kubernetes.io/instance": "obs-loki",
-      "app.kubernetes.io/component": "read",
+      "app.kubernetes.io/component": "distributor",
     });
-    expect(byType(PDB)).toHaveLength(12);
+    expect(byType(PDB)).toHaveLength(8);
+  });
+  it("merges raw distributed component values with typed replicas and placement", async () => {
+    stack({
+      loki: {
+        enabled: true,
+        mode: "distributed",
+        podDisruptionBudget: {},
+        scheduling: { replicas: 2, spread: { strategy: "topology-spread", mode: "required" } },
+        values: { queryFrontend: { maxConcurrent: 8 } },
+      },
+    });
+    await pulumi.runtime.disconnect();
+    const release = byType(HELM).find((x) => (x.inputs as any).chart === "loki");
+    expect((release?.inputs as any).values.queryFrontend).toMatchObject({
+      replicas: 2,
+      maxConcurrent: 8,
+      topologySpreadConstraints: [expect.objectContaining({ whenUnsatisfiable: "DoNotSchedule" })],
+    });
+  });
+  it("rejects raw native Loki PDB settings when Nimbus owns the policy", () => {
+    expect(() =>
+      stack({
+        loki: {
+          enabled: true,
+          mode: "distributed",
+          podDisruptionBudget: {},
+          values: { distributor: { maxUnavailable: 1 } },
+        },
+      })
+    ).toThrow(/Loki component native PDB conflicts with Nimbus/);
+  });
+  it("rejects conflicting typed and raw distributed replica counts", () => {
+    expect(() =>
+      stack({
+        loki: {
+          enabled: true,
+          mode: "distributed",
+          podDisruptionBudget: {},
+          scheduling: { replicas: 2 },
+          values: { queryFrontend: { replicas: 3 } },
+        },
+      })
+    ).toThrow(/scheduling.replicas conflicts with Helm values.queryFrontend.replicas/);
+  });
+  it("allows raw Loki PDB settings when Nimbus policy is opted out", async () => {
+    stack({
+      loki: {
+        enabled: true,
+        mode: "distributed",
+        podDisruptionBudget: { enabled: false },
+        values: { distributor: { maxUnavailable: 1 } },
+      },
+    });
+    await pulumi.runtime.disconnect();
+    const release = byType(HELM).find((x) => (x.inputs as any).chart === "loki");
+    expect((release?.inputs as any).values.distributor.maxUnavailable).toBe(1);
+    expect(byType(PDB)).toHaveLength(0);
   });
   it("matches Uptime Kuma nameOverride in its registered PDB selector", async () => {
     stack({

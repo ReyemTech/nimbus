@@ -133,3 +133,61 @@ npx prettier --check <all changed source and test files> passed
 The official Uptime Kuma chart source is at [dirsigler/uptime-kuma-helm](https://github.com/dirsigler/uptime-kuma-helm). Its Deployment template currently sets `replicas: 1`, and its values expose affinity but not replica count or topology spread. The configured repository URL is the legacy GitHub Pages endpoint and `version` remains user-selectable; this test environment could not fetch/render the remote chart. Therefore there is no Helm render assertion in this report: the behavior is handled by rejecting unsupported typed fields, and resource-level Pulumi mock tests verify those failures and registered selectors. This does not validate arbitrary future upstream chart changes.
 
 The distributed Loki workload set, default replica counts, and label selectors are mapped from the Grafana Loki chart's controller naming conventions. Remote chart rendering was unavailable in this environment, so chart-version-specific rendered manifests remain unverified.
+
+## Round 2
+
+Base: `47e6cb5`
+
+### RED
+
+Command:
+
+```text
+npm test -- tests/unit/observability-pod-disruption-budget.test.ts
+```
+
+Actual result before the fix:
+
+```text
+Test Files  1 failed (1)
+Tests       4 failed | 7 passed (11)
+Exit code   1
+```
+
+The failing regressions proved that SimpleScalable `read`/`write`/`backend` received distributed PDBs, raw typed workload settings replaced generated replicas and spread, component native PDB values were accepted alongside Nimbus PDBs, and opted-out policy still created Nimbus PDBs.
+
+### GREEN
+
+Focused command:
+
+```text
+npm test -- tests/unit/observability-pod-disruption-budget.test.ts
+```
+
+Actual result:
+
+```text
+Test Files  1 passed (1)
+Tests       12 passed (12)
+Duration    775ms
+Exit code    0
+```
+
+Full suite command: `npm test`
+
+Actual result:
+
+```text
+Test Files  49 passed (49)
+Tests       1032 passed (1032)
+Duration    7.76s
+Exit code    0
+```
+
+`npm run typecheck`, targeted ESLint, and Prettier check all passed.
+
+### Mapping evidence
+
+Distributed mode now scopes Nimbus budgets to the eight individual chart microservices: compactor (1), distributor (3), index gateway (2), ingester (3), querier (3), query frontend (2), query scheduler (2), and gateway (1). Optional pattern-ingester and ruler budgets are added only when their chart values explicitly enable them. SimpleScalable read/write/backend values are kept at zero; conflicting nonzero raw replica settings are rejected. Raw per-component values merge with typed replica/spread values, and conflicting raw replica counts are rejected. Nimbus native-PDB collision validation is applied only when the typed policy is active; opted-out policy allows chart-owned PDB values.
+
+These counts and mode distinctions follow the [official Loki microservices installation docs](https://grafana.com/docs/loki/latest/setup/install/helm/install-microservices/) and [official chart values reference](https://grafana.com/docs/loki/latest/setup/install/helm/reference/). The docs note that distributed mode requires object storage. This task's tests inspect Pulumi registrations and chart values, not a remote Helm render, so actual manifests for a user-selected chart version are still unverified.

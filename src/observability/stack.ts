@@ -209,23 +209,35 @@ export function createObservabilityStack(
 
   // 3. Loki (log aggregation)
   if (config.loki?.enabled) {
+    const lokiMode = config.loki.mode ?? "single-binary";
+    if (
+      hasActivePdbPolicy(config.loki.podDisruptionBudget) &&
+      ((lokiMode === "distributed" && hasLokiComponentPdb(config.loki.values)) ||
+        (lokiMode === "single-binary" && hasRawPdb(config.loki.values?.singleBinary)))
+    ) {
+      throw new Error("Loki component native PDB conflicts with Nimbus podDisruptionBudget");
+    }
     components["loki"] = deployLoki(name, namespace, config.loki, provider, cluster.storageTiers);
-    if ((config.loki.mode ?? "single-binary") === "distributed") {
+    if (lokiMode === "distributed") {
       const distributed = [
-        ["read", "read", 3],
-        ["write", "write", 3],
-        ["backend", "backend", 3],
-        ["gateway", "gateway", 1],
         ["compactor", "compactor", 1],
         ["distributor", "distributor", 3],
+        ["indexGateway", "index-gateway", 2],
         ["ingester", "ingester", 3],
         ["querier", "querier", 3],
-        ["queryFrontend", "query-frontend", 1],
-        ["queryScheduler", "query-scheduler", 1],
-        ["indexGateway", "index-gateway", 2],
-        ["ruler", "ruler", 1],
+        ["queryFrontend", "query-frontend", 2],
+        ["queryScheduler", "query-scheduler", 2],
+        ["gateway", "gateway", 1],
       ] as const;
-      for (const [key, workload, defaultReplicas] of distributed) {
+      const enabled: Array<readonly [string, string, number]> = [...distributed];
+      for (const [key, workload] of [
+        ["patternIngester", "pattern-ingester"],
+        ["ruler", "ruler"],
+      ] as const) {
+        const values = config.loki.values?.[key] as Record<string, unknown> | undefined;
+        if (values?.enabled === true) enabled.push([key, workload, 1]);
+      }
+      for (const [key, workload, defaultReplicas] of enabled) {
         const values = config.loki.values?.[key] as Record<string, unknown> | undefined;
         const replicas =
           config.loki.scheduling?.replicas ??
@@ -466,6 +478,37 @@ export function createObservabilityStack(
   }
 
   return { name, cluster, components, exposedServices };
+}
+
+function hasActivePdbPolicy(policy: IPodDisruptionBudgetConfig | undefined): boolean {
+  return policy !== undefined && policy.enabled !== false;
+}
+
+function hasLokiComponentPdb(values: ILokiConfig["values"]): boolean {
+  if (!values) return false;
+  const componentKeys = [
+    "compactor",
+    "distributor",
+    "indexGateway",
+    "ingester",
+    "querier",
+    "queryFrontend",
+    "queryScheduler",
+    "gateway",
+    "patternIngester",
+    "ruler",
+  ];
+  return componentKeys.some((key) => {
+    const component = values[key] as Record<string, unknown> | undefined;
+    if (!component) return false;
+    if ((key === "patternIngester" || key === "ruler") && component.enabled !== true) return false;
+    const native = component.podDisruptionBudget as Record<string, unknown> | undefined;
+    return (
+      component.maxUnavailable !== undefined ||
+      component.minAvailable !== undefined ||
+      (native !== undefined && native.enabled !== false)
+    );
+  });
 }
 
 function deployKubePrometheusStack(
@@ -901,53 +944,7 @@ function deployLoki(
     };
   }
 
-  if (mode === "distributed") {
-    lokiValues["deploymentMode"] = "Distributed";
-    for (const [key, fallback] of Object.entries({
-      read: 3,
-      write: 3,
-      backend: 3,
-      gateway: 1,
-      compactor: 1,
-      distributor: 3,
-      ingester: 3,
-      querier: 3,
-      queryFrontend: 1,
-      queryScheduler: 1,
-      indexGateway: 2,
-      ruler: 1,
-    })) {
-      const raw = config.values?.[key] as Record<string, unknown> | undefined;
-      if (
-        config.scheduling?.replicas !== undefined &&
-        typeof raw?.replicas === "number" &&
-        raw.replicas !== config.scheduling.replicas
-      ) {
-        throw new Error(`Loki scheduling.replicas conflicts with Helm values.${key}.replicas`);
-      }
-      lokiValues[key] = {
-        ...raw,
-        ...(config.scheduling?.replicas !== undefined
-          ? { replicas: config.scheduling.replicas }
-          : {}),
-        ...chartPodPlacement(
-          config.scheduling?.spread,
-          {
-            "app.kubernetes.io/name": "loki",
-            "app.kubernetes.io/instance": `${name}-loki`,
-            "app.kubernetes.io/component": key.replace(
-              /[A-Z]/g,
-              (letter) => `-${letter.toLowerCase()}`
-            ),
-          },
-          raw ?? {},
-          `Loki ${key}`
-        ),
-      };
-      if (typeof raw?.replicas === "number") lokiValues[key].replicas = raw.replicas;
-      else if (config.scheduling?.replicas === undefined) lokiValues[key].replicas = fallback;
-    }
-  }
+  if (mode === "distributed") lokiValues["deploymentMode"] = "Distributed";
 
   return new k8s.helm.v3.Release(
     `${name}-loki`,
@@ -959,6 +956,56 @@ function deployLoki(
       createNamespace: false,
       values: (() => {
         const values = { ...lokiValues, ...config.values };
+        if (mode === "distributed") {
+          for (const key of ["read", "write", "backend"]) {
+            const raw = (config.values?.[key] as Record<string, unknown> | undefined) ?? {};
+            if (typeof raw.replicas === "number" && raw.replicas !== 0) {
+              throw new Error(
+                `Loki distributed mode requires values.${key}.replicas to be 0; ${key} is a SimpleScalable target`
+              );
+            }
+            values[key] = { ...raw, replicas: 0 };
+          }
+          const distributed = [
+            ["compactor", "compactor", 1],
+            ["distributor", "distributor", 3],
+            ["indexGateway", "index-gateway", 2],
+            ["ingester", "ingester", 3],
+            ["querier", "querier", 3],
+            ["queryFrontend", "query-frontend", 2],
+            ["queryScheduler", "query-scheduler", 2],
+            ["gateway", "gateway", 1],
+          ] as const;
+          for (const [key, workload, defaultReplicas] of distributed) {
+            const raw = (config.values?.[key] as Record<string, unknown> | undefined) ?? {};
+            if (
+              config.scheduling?.replicas !== undefined &&
+              typeof raw.replicas === "number" &&
+              raw.replicas !== config.scheduling.replicas
+            ) {
+              throw new Error(
+                `Loki scheduling.replicas conflicts with Helm values.${key}.replicas`
+              );
+            }
+            const replicas =
+              config.scheduling?.replicas ??
+              (typeof raw.replicas === "number" ? raw.replicas : defaultReplicas);
+            values[key] = {
+              ...raw,
+              replicas,
+              ...chartPodPlacement(
+                config.scheduling?.spread,
+                {
+                  "app.kubernetes.io/name": "loki",
+                  "app.kubernetes.io/instance": `${name}-loki`,
+                  "app.kubernetes.io/component": workload,
+                },
+                raw,
+                `Loki ${key}`
+              ),
+            };
+          }
+        }
         if (config.scheduling?.replicas !== undefined) {
           const rawSingleBinary = (config.values?.singleBinary as Record<string, unknown>) ?? {};
           if (rawSingleBinary.replicas !== undefined)

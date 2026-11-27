@@ -9,6 +9,7 @@ import type { IExternalDnsConfig, IPlatformComponentConfig } from "../interfaces
 import { buildPodDisruptionBudgetSpec } from "../../availability";
 import { assertNever } from "../../types";
 import { ensureNamespace } from "../../utils/ensure-namespace";
+import { chartPodPlacement } from "./scheduling";
 
 function addAvailability(
   release: k8s.helm.v3.Release,
@@ -33,24 +34,6 @@ function addAvailability(
         { provider, dependsOn: [release] }
       );
   }
-}
-
-function topologySpread(
-  config: IPlatformComponentConfig,
-  selector: Record<string, string>
-): Record<string, unknown> {
-  const spread = config.scheduling?.spread;
-  if (!spread) return {};
-  return {
-    topologySpreadConstraints: [
-      {
-        maxSkew: 1,
-        topologyKey: spread.topologyKey ?? "kubernetes.io/hostname",
-        whenUnsatisfiable: spread.mode === "required" ? "DoNotSchedule" : "ScheduleAnyway",
-        labelSelector: { matchLabels: selector },
-      },
-    ],
-  };
 }
 
 function desiredReplicas(
@@ -106,7 +89,10 @@ export function deployExternalDns(
   };
 
   if (envOverrides) {
-    values["env"] = envOverrides;
+    const userEnv = Array.isArray(values.env) ? (values.env as Record<string, unknown>[]) : [];
+    const merged = new Map(userEnv.map((entry) => [entry.name, entry]));
+    for (const entry of envOverrides) merged.set(entry.name, entry);
+    values.env = [...merged.values()];
   }
   const instance = `${name}-external-dns`;
   const selector = {
@@ -120,8 +106,7 @@ export function deployExternalDns(
     "replicaCount"
   );
   Object.assign(values, {
-    ...config.values,
-    ...topologySpread(config, selector),
+    ...chartPodPlacement(config.scheduling?.spread, selector, config.values ?? {}, "External DNS"),
     ...(config.scheduling?.replicas !== undefined
       ? { replicaCount: config.scheduling.replicas }
       : {}),

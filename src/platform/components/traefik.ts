@@ -9,6 +9,7 @@ import type * as pulumi from "@pulumi/pulumi";
 import type { IPlatformComponentConfig } from "../interfaces";
 import { resolvePodDisruptionBudget } from "../../availability";
 import { ensureNamespace } from "../../utils/ensure-namespace";
+import { chartPodPlacement } from "./scheduling";
 
 function nativeBudget(
   config: IPlatformComponentConfig,
@@ -23,24 +24,6 @@ function nativeBudget(
   }
   const budget = resolvePodDisruptionBudget(config.podDisruptionBudget ?? {}, replicas);
   return budget ? { enabled: true, ...budget } : { enabled: false };
-}
-
-function topologySpread(
-  config: IPlatformComponentConfig,
-  selector: Record<string, string>
-): Record<string, unknown> {
-  const spread = config.scheduling?.spread;
-  if (!spread) return {};
-  return {
-    topologySpreadConstraints: [
-      {
-        maxSkew: 1,
-        topologyKey: spread.topologyKey ?? "kubernetes.io/hostname",
-        whenUnsatisfiable: spread.mode === "required" ? "DoNotSchedule" : "ScheduleAnyway",
-        labelSelector: { matchLabels: selector },
-      },
-    ],
-  };
 }
 
 function desiredReplicas(
@@ -97,7 +80,7 @@ export function deployTraefik(
         ? { replicas: config.scheduling.replicas }
         : {}),
     },
-    ...topologySpread(config ?? {}, selector),
+    ...chartPodPlacement(config?.scheduling?.spread, selector, config?.values ?? {}, "Traefik"),
     podDisruptionBudget: nativeBudget(config ?? {}, replicas, config?.values?.podDisruptionBudget),
   };
   const release = new k8s.helm.v3.Release(

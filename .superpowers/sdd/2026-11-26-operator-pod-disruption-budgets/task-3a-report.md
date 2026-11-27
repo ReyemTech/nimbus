@@ -49,3 +49,20 @@ Tests additionally assert full topology-spread objects per managed workload and 
 - Lint: `npx eslint src/platform/interfaces.ts src/platform/components/argocd.ts src/platform/components/cert-manager.ts src/platform/components/external-dns.ts src/platform/components/external-secrets.ts src/platform/components/traefik.ts src/platform/components/vault.ts tests/unit/platform-pod-disruption-budget.test.ts tests/unit/platform-stack.test.ts` → passed (exit 0).
 - Format: `npx prettier --check src/platform/interfaces.ts src/platform/components/argocd.ts src/platform/components/cert-manager.ts src/platform/components/external-dns.ts src/platform/components/external-secrets.ts src/platform/components/traefik.ts src/platform/components/vault.ts tests/unit/platform-pod-disruption-budget.test.ts tests/unit/platform-stack.test.ts` → `All matched files use Prettier code style!`.
 - Diff whitespace check: `git diff --check` → passed (no output, exit 0).
+
+## Round 2 review fixes
+
+External DNS now merges user `values.env` entries with generated Route53 entries by environment variable name. Generated values replace a user entry with the same name, while unrelated user entries remain in the Helm release. The stack integration test now supplies a custom environment variable alongside managed Route53 credentials and verifies all four entries.
+
+Vault rejects explicit `ha` settings that contradict `values.server.ha.enabled`, before registering resources. All six platform chart components now use the shared placement translator: `topology-spread` produces per-workload topology constraints and `pod-anti-affinity` produces preferred or required chart affinity with workload labels. When typed placement is supplied, conflicting raw affinity or topology-spread values are rejected for every managed workload path, including Argo CD's global chart values. Raw placement remains intact when typed spread is absent.
+
+### Round 2 TDD and verification
+
+- RED: `npm test -- --run tests/unit/platform-pod-disruption-budget.test.ts tests/unit/platform-stack.test.ts` → **2 files: 1 failed, 1 passed; 14 tests failed, 59 passed**. Failures covered missing anti-affinity mapping, lack of raw placement conflict checks for all six components, Vault's explicit/raw HA contradiction, and dropped Route53 environment values.
+- Additional stack RED: `npm test -- --run tests/unit/platform-stack.test.ts` → **1 test failed, 31 passed**. The Route53 test expected four environment entries but received only three.
+- Focused GREEN: `npm test -- --run tests/unit/platform-stack.test.ts tests/unit/platform-pod-disruption-budget.test.ts` → **2 files passed, 73 tests passed**.
+- Full suite: `npm test` → **47 files passed, 987 tests passed**.
+- Typecheck: `npm run typecheck` → passed (`tsc --noEmit`, exit 0).
+- Lint: `npx eslint src/platform/components/scheduling.ts src/platform/components/argocd.ts src/platform/components/cert-manager.ts src/platform/components/external-dns.ts src/platform/components/external-secrets.ts src/platform/components/traefik.ts src/platform/components/vault.ts tests/unit/platform-pod-disruption-budget.test.ts tests/unit/platform-stack.test.ts` → passed (exit 0).
+- Format: `npx prettier --check src/platform/components/scheduling.ts src/platform/components/argocd.ts src/platform/components/cert-manager.ts src/platform/components/external-dns.ts src/platform/components/external-secrets.ts src/platform/components/traefik.ts src/platform/components/vault.ts tests/unit/platform-pod-disruption-budget.test.ts tests/unit/platform-stack.test.ts` → `All matched files use Prettier code style!`.
+- Chart rendering remains unavailable for the reasons documented above; native rendered selectors are still unverified.

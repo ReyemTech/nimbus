@@ -957,6 +957,7 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
       externalDns: {
         dnsProvider: "route53",
         domainFilters: ["reyem.tech"],
+        values: { env: [{ name: "CUSTOM_FLAG", value: "enabled" }] },
       },
     });
 
@@ -966,8 +967,10 @@ describe("platform stack — Route53 IAM auto-provisioning", () => {
     const env = (ednsRelease!.args.values as Record<string, unknown>)["env"] as Array<
       Record<string, unknown>
     >;
-    expect(env).toHaveLength(3);
+    expect(env).toHaveLength(4);
+    expect(env).toContainEqual({ name: "CUSTOM_FLAG", value: "enabled" });
     expect(env.map((e) => e["name"])).toEqual([
+      "CUSTOM_FLAG",
       "AWS_ACCESS_KEY_ID",
       "AWS_SECRET_ACCESS_KEY",
       "AWS_REGION",

@@ -9,6 +9,7 @@ import type * as pulumi from "@pulumi/pulumi";
 import type { IPlatformComponentConfig } from "../interfaces";
 import { resolvePodDisruptionBudget } from "../../availability";
 import { ensureNamespace } from "../../utils/ensure-namespace";
+import { chartPodPlacement } from "./scheduling";
 
 function nativeBudget(
   config: IPlatformComponentConfig,
@@ -23,24 +24,6 @@ function nativeBudget(
   }
   const budget = resolvePodDisruptionBudget(config.podDisruptionBudget ?? {}, replicas);
   return budget ? { enabled: true, ...budget } : { enabled: false };
-}
-
-function topologySpread(
-  config: IPlatformComponentConfig,
-  selector: Record<string, string>
-): Record<string, unknown> {
-  const spread = config.scheduling?.spread;
-  if (!spread) return {};
-  return {
-    topologySpreadConstraints: [
-      {
-        maxSkew: 1,
-        topologyKey: spread.topologyKey ?? "kubernetes.io/hostname",
-        whenUnsatisfiable: spread.mode === "required" ? "DoNotSchedule" : "ScheduleAnyway",
-        labelSelector: { matchLabels: selector },
-      },
-    ],
-  };
 }
 
 function desiredReplicas(
@@ -128,7 +111,7 @@ export function deployCertManager(
       replicaCount,
       config?.values?.podDisruptionBudget
     ),
-    ...topologySpread(config ?? {}, selector),
+    ...chartPodPlacement(config?.scheduling?.spread, selector, rawValues, "cert-manager"),
     webhook: {
       ...(rawWebhook ?? {}),
       ...(config?.scheduling?.replicas !== undefined
@@ -139,10 +122,12 @@ export function deployCertManager(
         webhookReplicas,
         rawWebhook?.podDisruptionBudget
       ),
-      ...topologySpread(config ?? {}, {
-        "app.kubernetes.io/name": "webhook",
-        "app.kubernetes.io/instance": instance,
-      }),
+      ...chartPodPlacement(
+        config?.scheduling?.spread,
+        { "app.kubernetes.io/name": "webhook", "app.kubernetes.io/instance": instance },
+        rawWebhook ?? {},
+        "cert-manager webhook"
+      ),
     },
     cainjector: {
       ...(rawCainjector ?? {}),
@@ -154,10 +139,12 @@ export function deployCertManager(
         cainjectorReplicas,
         rawCainjector?.podDisruptionBudget
       ),
-      ...topologySpread(config ?? {}, {
-        "app.kubernetes.io/name": "cainjector",
-        "app.kubernetes.io/instance": instance,
-      }),
+      ...chartPodPlacement(
+        config?.scheduling?.spread,
+        { "app.kubernetes.io/name": "cainjector", "app.kubernetes.io/instance": instance },
+        rawCainjector ?? {},
+        "cert-manager cainjector"
+      ),
     },
     ...(podIdentityAssociation && {
       serviceAccount: { name: certManagerServiceAccountName(config), ...serviceAccountValues },

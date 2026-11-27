@@ -8,6 +8,7 @@ import * as k8s from "@pulumi/kubernetes";
 import type { IPlatformComponentConfig } from "../interfaces";
 import { buildPodDisruptionBudgetSpec, resolvePodDisruptionBudget } from "../../availability";
 import { ensureNamespace } from "../../utils/ensure-namespace";
+import { chartPodPlacement } from "./scheduling";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -50,24 +51,6 @@ function addAvailability(
         { provider, dependsOn: [release] }
       );
   }
-}
-
-function topologySpread(
-  config: IPlatformComponentConfig,
-  selector: Record<string, string>
-): Record<string, unknown> {
-  const spread = config.scheduling?.spread;
-  if (!spread) return {};
-  return {
-    topologySpreadConstraints: [
-      {
-        maxSkew: 1,
-        topologyKey: spread.topologyKey ?? "kubernetes.io/hostname",
-        whenUnsatisfiable: spread.mode === "required" ? "DoNotSchedule" : "ScheduleAnyway",
-        labelSelector: { matchLabels: selector },
-      },
-    ],
-  };
 }
 
 function desiredReplicas(
@@ -152,7 +135,7 @@ export function deployArgocd(
       ...(chartKey !== "notifications" && config.scheduling?.replicas !== undefined
         ? { replicas: config.scheduling.replicas }
         : {}),
-      ...topologySpread(config, selector),
+      ...chartPodPlacement(config.scheduling?.spread, selector, existing ?? {}, "Argo CD"),
       ...(["controller", "server", "repoServer"].includes(chartKey)
         ? {
             pdb: nativeBudget(
@@ -164,19 +147,12 @@ export function deployArgocd(
         : {}),
     };
   }
-  if (config.scheduling?.spread) {
-    const spread = config.scheduling.spread;
-    values.global = {
-      ...((values.global as Record<string, unknown> | undefined) ?? {}),
-      topologySpreadConstraints: [
-        {
-          maxSkew: 1,
-          topologyKey: spread.topologyKey ?? "kubernetes.io/hostname",
-          whenUnsatisfiable: spread.mode === "required" ? "DoNotSchedule" : "ScheduleAnyway",
-        },
-      ],
-    };
-  }
+  chartPodPlacement(
+    config.scheduling?.spread,
+    {},
+    (values.global as Record<string, unknown> | undefined) ?? {},
+    "Argo CD global"
+  );
   const release = new k8s.helm.v3.Release(
     `${name}-argocd`,
     {

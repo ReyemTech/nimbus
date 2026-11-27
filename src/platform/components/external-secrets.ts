@@ -8,6 +8,7 @@ import * as k8s from "@pulumi/kubernetes";
 import type { IPlatformComponentConfig } from "../interfaces";
 import { resolvePodDisruptionBudget } from "../../availability";
 import { ensureNamespace } from "../../utils/ensure-namespace";
+import { chartPodPlacement } from "./scheduling";
 
 function nativeBudget(
   config: IPlatformComponentConfig,
@@ -22,24 +23,6 @@ function nativeBudget(
   }
   const budget = resolvePodDisruptionBudget(config.podDisruptionBudget ?? {}, replicas);
   return budget ? { enabled: true, ...budget } : { enabled: false };
-}
-
-function topologySpread(
-  config: IPlatformComponentConfig,
-  selector: Record<string, string>
-): Record<string, unknown> {
-  const spread = config.scheduling?.spread;
-  if (!spread) return {};
-  return {
-    topologySpreadConstraints: [
-      {
-        maxSkew: 1,
-        topologyKey: spread.topologyKey ?? "kubernetes.io/hostname",
-        whenUnsatisfiable: spread.mode === "required" ? "DoNotSchedule" : "ScheduleAnyway",
-        labelSelector: { matchLabels: selector },
-      },
-    ],
-  };
 }
 
 function desiredReplicas(
@@ -98,7 +81,7 @@ export function deployExternalSecrets(
     serviceAccount: { name: "external-secrets" },
     crds: { createClusterExternalSecret: true, createClusterSecretStore: true },
     ...rawValues,
-    ...topologySpread(config, selector),
+    ...chartPodPlacement(config.scheduling?.spread, selector, rawValues, "External Secrets"),
     ...(config.scheduling?.replicas !== undefined
       ? { replicaCount: config.scheduling.replicas }
       : {}),
@@ -117,10 +100,15 @@ export function deployExternalSecrets(
         ? { replicaCount: config.scheduling.replicas }
         : {}),
       podDisruptionBudget: nativeBudget(config, webhookReplicas, rawWebhook?.podDisruptionBudget),
-      ...topologySpread(config, {
-        "app.kubernetes.io/name": "external-secrets-webhook",
-        "app.kubernetes.io/instance": instance,
-      }),
+      ...chartPodPlacement(
+        config.scheduling?.spread,
+        {
+          "app.kubernetes.io/name": "external-secrets-webhook",
+          "app.kubernetes.io/instance": instance,
+        },
+        rawWebhook ?? {},
+        "External Secrets webhook"
+      ),
     },
     certController: {
       ...(rawCertController ?? {}),
@@ -132,10 +120,15 @@ export function deployExternalSecrets(
         certControllerReplicas,
         rawCertController?.podDisruptionBudget
       ),
-      ...topologySpread(config, {
-        "app.kubernetes.io/name": "external-secrets-cert-controller",
-        "app.kubernetes.io/instance": instance,
-      }),
+      ...chartPodPlacement(
+        config.scheduling?.spread,
+        {
+          "app.kubernetes.io/name": "external-secrets-cert-controller",
+          "app.kubernetes.io/instance": instance,
+        },
+        rawCertController ?? {},
+        "External Secrets cert-controller"
+      ),
     },
   };
   const release = new k8s.helm.v3.Release(

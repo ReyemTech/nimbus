@@ -55,6 +55,12 @@ const componentCases = [
         { "app.kubernetes.io/name": "traefik", "app.kubernetes.io/instance": "test-traefik" },
       ],
     ],
+    placementPaths: [
+      [
+        "affinity",
+        { "app.kubernetes.io/name": "traefik", "app.kubernetes.io/instance": "test-traefik" },
+      ],
+    ],
   },
   {
     name: "cert-manager",
@@ -89,6 +95,28 @@ const componentCases = [
         },
       ],
     ],
+    placementPaths: [
+      [
+        "affinity",
+        {
+          "app.kubernetes.io/name": "cert-manager",
+          "app.kubernetes.io/instance": "test-cert-manager",
+        },
+      ],
+      [
+        "webhook",
+        "affinity",
+        { "app.kubernetes.io/name": "webhook", "app.kubernetes.io/instance": "test-cert-manager" },
+      ],
+      [
+        "cainjector",
+        "affinity",
+        {
+          "app.kubernetes.io/name": "cainjector",
+          "app.kubernetes.io/instance": "test-cert-manager",
+        },
+      ],
+    ],
   },
   {
     name: "external-dns",
@@ -109,6 +137,15 @@ const componentCases = [
     spreadPaths: [
       [
         "topologySpreadConstraints",
+        {
+          "app.kubernetes.io/name": "external-dns",
+          "app.kubernetes.io/instance": "test-external-dns",
+        },
+      ],
+    ],
+    placementPaths: [
+      [
+        "affinity",
         {
           "app.kubernetes.io/name": "external-dns",
           "app.kubernetes.io/instance": "test-external-dns",
@@ -160,6 +197,31 @@ const componentCases = [
         },
       ],
     ],
+    placementPaths: [
+      [
+        "affinity",
+        {
+          "app.kubernetes.io/name": "external-secrets",
+          "app.kubernetes.io/instance": "test-external-secrets",
+        },
+      ],
+      [
+        "webhook",
+        "affinity",
+        {
+          "app.kubernetes.io/name": "external-secrets-webhook",
+          "app.kubernetes.io/instance": "test-external-secrets",
+        },
+      ],
+      [
+        "certController",
+        "affinity",
+        {
+          "app.kubernetes.io/name": "external-secrets-cert-controller",
+          "app.kubernetes.io/instance": "test-external-secrets",
+        },
+      ],
+    ],
   },
   {
     name: "argocd",
@@ -199,7 +261,6 @@ const componentCases = [
       applicationSet: { replicas: 2 },
     },
     spreadPaths: [
-      ["global", "topologySpreadConstraints", undefined],
       [
         "controller",
         "topologySpreadConstraints",
@@ -238,6 +299,45 @@ const componentCases = [
         },
       ],
     ],
+    placementPaths: [
+      [
+        "controller",
+        "affinity",
+        {
+          "app.kubernetes.io/name": "argocd-application-controller",
+          "app.kubernetes.io/instance": "test-argocd",
+        },
+      ],
+      [
+        "server",
+        "affinity",
+        { "app.kubernetes.io/name": "argocd-server", "app.kubernetes.io/instance": "test-argocd" },
+      ],
+      [
+        "repoServer",
+        "affinity",
+        {
+          "app.kubernetes.io/name": "argocd-repo-server",
+          "app.kubernetes.io/instance": "test-argocd",
+        },
+      ],
+      [
+        "applicationSet",
+        "affinity",
+        {
+          "app.kubernetes.io/name": "argocd-applicationset-controller",
+          "app.kubernetes.io/instance": "test-argocd",
+        },
+      ],
+      [
+        "notifications",
+        "affinity",
+        {
+          "app.kubernetes.io/name": "argocd-notifications-controller",
+          "app.kubernetes.io/instance": "test-argocd",
+        },
+      ],
+    ],
   },
   {
     name: "vault",
@@ -267,6 +367,17 @@ const componentCases = [
         },
       ],
     ],
+    placementPaths: [
+      [
+        "server",
+        "affinity",
+        {
+          "app.kubernetes.io/name": "vault",
+          "app.kubernetes.io/instance": "test-vault",
+          "app.kubernetes.io/component": "server",
+        },
+      ],
+    ],
   },
 ];
 
@@ -278,6 +389,7 @@ describe.each(componentCases)(
     nativePaths = [],
     nativePathsHa = [],
     replicaPaths,
+    placementPaths = [],
     rawValues = {},
     spreadPaths = [],
     fallback = [],
@@ -351,6 +463,61 @@ describe.each(componentCases)(
             selector: { matchLabels: fallback[1]!.selector },
           });
         }
+      }
+    });
+
+    it("maps pod anti-affinity to each managed workload", () => {
+      run({
+        enabled: true,
+        scheduling: { spread: { strategy: "pod-anti-affinity", mode: "required" } },
+        ha: true,
+        bootstrap: false,
+      });
+      const chartValues = releases.find((entry) => entry.name === release)!.args.values;
+      for (const check of placementPaths as any[]) {
+        const path = check.slice(0, -1) as string[];
+        const selector = check[check.length - 1] as Record<string, string>;
+        expect(path.reduce((value: any, key: string) => value?.[key], chartValues)).toEqual({
+          podAntiAffinity: {
+            requiredDuringSchedulingIgnoredDuringExecution: [
+              {
+                topologyKey: "kubernetes.io/hostname",
+                labelSelector: { matchLabels: selector },
+                matchLabelKeys: ["app.kubernetes.io/instance"],
+              },
+            ],
+          },
+        });
+      }
+    });
+
+    it("rejects conflicts between typed and raw placement values", () => {
+      const cases = placementPaths.flatMap((check: any[]) => {
+        const path = check.slice(0, -1) as string[];
+        return ["affinity", "topologySpreadConstraints"].map((kind) => ({
+          path: [...path.slice(0, -1), kind],
+          kind,
+        }));
+      });
+      if (release === "test-argocd") {
+        cases.push({
+          path: ["global", "topologySpreadConstraints"],
+          kind: "topologySpreadConstraints",
+        });
+      }
+      for (const { path, kind } of cases) {
+        reset();
+        const values: Record<string, any> = {};
+        setNested(values, path, kind === "affinity" ? {} : []);
+        expect(() =>
+          run({
+            enabled: true,
+            scheduling: { spread: { strategy: "topology-spread", mode: "required" } },
+            values,
+            ha: true,
+            bootstrap: false,
+          })
+        ).toThrow(/scheduling\.spread conflicts with Helm pod spread values/);
       }
     });
 
@@ -441,3 +608,44 @@ it("rejects unsafe Vault standalone scaling before registering resources", () =>
   expect(releases).toHaveLength(0);
   expect(budgets).toHaveLength(0);
 });
+
+it("rejects Vault standalone mode when raw Helm values enable HA", () => {
+  expect(() =>
+    deployVault(
+      "test",
+      { ha: false, values: { server: { ha: { enabled: true, replicas: 3 } } }, bootstrap: false },
+      "example.com",
+      mockProvider,
+      "1.0.0"
+    )
+  ).toThrow(/ha conflicts with Helm values\.server\.ha\.enabled/);
+  expect(releases).toHaveLength(0);
+  expect(budgets).toHaveLength(0);
+});
+
+it("preserves user External DNS environment and generated Route53 credentials", () => {
+  deployExternalDns(
+    "test",
+    {
+      dnsProvider: "route53",
+      values: { env: [{ name: "CUSTOM_FLAG", value: "enabled" }] },
+    },
+    mockProvider,
+    "1.0.0",
+    [
+      { name: "AWS_ACCESS_KEY_ID", value: "managed-key" },
+      { name: "AWS_SECRET_ACCESS_KEY", value: "managed-secret" },
+    ]
+  );
+  const env = releases[0]!.args.values.env as Array<Record<string, unknown>>;
+  expect(env).toContainEqual({ name: "CUSTOM_FLAG", value: "enabled" });
+  expect(env).toContainEqual({ name: "AWS_ACCESS_KEY_ID", value: "managed-key" });
+  expect(env).toContainEqual({ name: "AWS_SECRET_ACCESS_KEY", value: "managed-secret" });
+});
+
+function setNested(target: Record<string, any>, path: string[], value: unknown): void {
+  const leaf = path.pop();
+  let cursor = target;
+  for (const key of path) cursor = cursor[key] ??= {};
+  if (leaf) cursor[leaf] = value;
+}

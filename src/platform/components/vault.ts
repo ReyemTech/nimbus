@@ -10,6 +10,7 @@ import * as pulumi from "@pulumi/pulumi";
 import type { IPlatformComponentConfig, IVaultConfig } from "../interfaces";
 import { buildPodDisruptionBudgetSpec, resolvePodDisruptionBudget } from "../../availability";
 import { ensureNamespace } from "../../utils/ensure-namespace";
+import { chartPodPlacement } from "./scheduling";
 
 /** Number of Vault replicas in HA mode (Raft consensus requires odd count). */
 const VAULT_HA_REPLICAS = 3;
@@ -397,24 +398,6 @@ function vaultHaBudget(
   );
 }
 
-function topologySpread(
-  config: IPlatformComponentConfig,
-  selector: Record<string, string>
-): Record<string, unknown> {
-  const spread = config.scheduling?.spread;
-  if (!spread) return {};
-  return {
-    topologySpreadConstraints: [
-      {
-        maxSkew: 1,
-        topologyKey: spread.topologyKey ?? "kubernetes.io/hostname",
-        whenUnsatisfiable: spread.mode === "required" ? "DoNotSchedule" : "ScheduleAnyway",
-        labelSelector: { matchLabels: selector },
-      },
-    ],
-  };
-}
-
 function desiredReplicas(
   typed: number | undefined,
   raw: unknown,
@@ -445,6 +428,13 @@ export function deployVault(
   const rawHaValues = (rawServerValues.ha as Record<string, unknown> | undefined) ?? {};
   if (config.ha === false && (config.scheduling?.replicas ?? 1) > 1) {
     throw new Error("Vault standalone mode supports only one replica; enable HA to scale Vault");
+  }
+  if (
+    config.ha !== undefined &&
+    rawHaValues.enabled !== undefined &&
+    config.ha !== rawHaValues.enabled
+  ) {
+    throw new Error("ha conflicts with Helm values.server.ha.enabled");
   }
   if (
     config.scheduling?.replicas !== undefined &&
@@ -630,11 +620,16 @@ export function deployVault(
 
   Object.assign(
     serverValues,
-    topologySpread(config, {
-      "app.kubernetes.io/name": "vault",
-      "app.kubernetes.io/instance": `${name}-vault`,
-      "app.kubernetes.io/component": "server",
-    })
+    chartPodPlacement(
+      config.scheduling?.spread,
+      {
+        "app.kubernetes.io/name": "vault",
+        "app.kubernetes.io/instance": `${name}-vault`,
+        "app.kubernetes.io/component": "server",
+      },
+      rawServerValues,
+      "Vault server"
+    )
   );
 
   ensureNamespace("vault", provider);

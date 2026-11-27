@@ -225,7 +225,10 @@ export function createObservabilityStack(
         ["queryScheduler", "query-scheduler", 2],
         ["gateway", "gateway", 1],
       ] as const;
-      const enabled: Array<readonly [string, string, number]> = [...distributed];
+      const rawGateway = config.loki.values?.gateway as Record<string, unknown> | undefined;
+      const enabled: Array<readonly [string, string, number]> = distributed.filter(
+        ([key]) => key !== "gateway" || rawGateway?.enabled !== false
+      );
       for (const [key, workload] of [
         ["patternIngester", "pattern-ingester"],
         ["ruler", "ruler"],

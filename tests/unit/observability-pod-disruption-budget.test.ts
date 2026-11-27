@@ -307,6 +307,19 @@ describe("observability workload disruption budgets", () => {
     const release = byType(HELM).find((x) => (x.inputs as any).chart === "loki");
     expect((release?.inputs as any).values.gateway.maxUnavailable).toBeUndefined();
   });
+  it("skips gateway budget validation when the distributed Loki gateway is disabled", async () => {
+    stack({
+      loki: {
+        enabled: true,
+        mode: "distributed",
+        podDisruptionBudget: { enabled: false },
+        scheduling: { replicas: 2 },
+        values: { gateway: { enabled: false } },
+      },
+    });
+    await pulumi.runtime.disconnect();
+    expect(byType(PDB).some((resource) => resource.name === "obs-loki-gateway-pdb")).toBe(false);
+  });
   it("uses the gateway autoscaling minimum when deciding PDB ownership", async () => {
     expect(() =>
       stack({

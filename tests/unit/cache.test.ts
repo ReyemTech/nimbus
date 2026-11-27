@@ -37,10 +37,10 @@ beforeEach(() => {
 import { createCache } from "../../src/cache/cache";
 
 const byType = (type: string) => resources.filter((resource) => resource.type === type);
-const readOutput = <T>(output: pulumi.Output<T>): Promise<T> =>
+const readOutput = <T>(input: pulumi.Input<T>): Promise<T> =>
   new Promise((resolve) => {
-    output.apply((value) => {
-      resolve(value);
+    pulumi.output(input).apply((value) => {
+      resolve(value as T);
       return value;
     });
   });
@@ -129,6 +129,16 @@ describe("cache engines", () => {
     expect(await readOutput(cache.endpoint)).toBe(
       "sessions-valkey-actual-haproxy.data.svc.cluster.local"
     );
+    const appConnectionSecret = byType(SECRET).find(
+      (resource) =>
+        (resource.inputs as any).metadata?.name === "sessions-valkey" &&
+        (resource.inputs as any).metadata?.namespace === "apps"
+    );
+    const appSecretData = (appConnectionSecret?.inputs as any).stringData.value;
+    expect(await readOutput(appSecretData.host)).toBe(await readOutput(cache.endpoint));
+    expect(await readOutput(appSecretData.uri)).toContain(
+      `@${await readOutput(cache.endpoint)}:6379`
+    );
     expect(cache.secretRef).toEqual({ path: "data/sessions-valkey-auth", key: "default" });
     expect(
       byType(SECRET).some(
@@ -140,13 +150,21 @@ describe("cache engines", () => {
   it("creates a standalone PDB and reports the write service port", async () => {
     const cache = createCache(
       "local",
-      cacheConfig({ architecture: "standalone", podDisruptionBudget: {} }),
+      cacheConfig({ architecture: "standalone", podDisruptionBudget: {}, namespaces: ["apps"] }),
       provider
     );
     await pulumi.runtime.disconnect();
 
     expect(await readOutput(cache.port)).toBe(6379);
     expect(await readOutput(cache.endpoint)).toBe("local-valkey-actual.data.svc.cluster.local");
+    const appConnectionSecret = byType(SECRET).find(
+      (resource) =>
+        (resource.inputs as any).metadata?.name === "local-valkey" &&
+        (resource.inputs as any).metadata?.namespace === "apps"
+    );
+    expect(await readOutput((appConnectionSecret?.inputs as any).stringData.value.host)).toBe(
+      await readOutput(cache.endpoint)
+    );
     expect((byType(HELM)[0]?.inputs as any).values.replica.enabled).toBe(false);
     expect((byType(HELM)[0]?.inputs as any).values.sentinel.enabled).toBe(false);
     expect((byType(HELM)[0]?.inputs as any).values.haproxy.enabled).toBe(false);

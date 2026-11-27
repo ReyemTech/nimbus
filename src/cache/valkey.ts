@@ -279,7 +279,7 @@ export function createValkeyCache(
             .apply(([host, password]) => `redis://default:${password}@${host}:${VALKEY_PORT}`),
         },
       },
-      { provider, dependsOn: [release, target], ignoreChanges: ["data", "stringData"] }
+      { provider, dependsOn: [release, target] }
     );
     secrets[targetNamespace] = pulumi.output(appSecretName);
   }

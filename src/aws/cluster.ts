@@ -166,7 +166,6 @@ const DEFAULT_ADDONS = ["vpc-cni", "coredns", "kube-proxy"];
 interface AddonPdbSettings {
   readonly policy: IPodDisruptionBudgetConfig | undefined;
   readonly schema: IEksAddonConfigurationSchema | undefined;
-  readonly version: pulumi.Input<string> | undefined;
   readonly workloadKind: "Deployment" | "DaemonSet";
 }
 
@@ -178,7 +177,6 @@ function communityPdbSettings(
     ? {
         policy: settings.podDisruptionBudget,
         schema: settings.configurationSchema,
-        version: settings.version,
         workloadKind,
       }
     : undefined;
@@ -399,7 +397,6 @@ export function createEksCluster(
         ? {
             policy: options.metricsServer.podDisruptionBudget,
             schema: options.metricsServer.configurationSchema,
-            version: options.metricsServer.addonVersion,
             workloadKind: "Deployment",
           }
         : undefined,

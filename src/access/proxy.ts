@@ -15,6 +15,7 @@ import * as pulumi from "@pulumi/pulumi";
 import type { IExposedService } from "../types";
 import type { IAccessDnsConfig } from "./interfaces";
 import { resolvePodDisruptionBudget } from "../availability";
+import { buildPodPlacement } from "../operator/availability";
 
 /**
  * Build Nginx config from exposed services.
@@ -111,20 +112,7 @@ export function deployAccessProxy(
           metadata: { labels },
           spec: {
             ...(availability?.scheduling?.spread
-              ? {
-                  topologySpreadConstraints: [
-                    {
-                      topologyKey:
-                        availability.scheduling.spread.topologyKey ?? "kubernetes.io/hostname",
-                      maxSkew: 1,
-                      whenUnsatisfiable:
-                        availability.scheduling.spread.mode === "required"
-                          ? "DoNotSchedule"
-                          : "ScheduleAnyway",
-                      labelSelector: { matchLabels: labels },
-                    },
-                  ],
-                }
+              ? buildPodPlacement(availability.scheduling.spread, labels)
               : {}),
             containers: [
               {

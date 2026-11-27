@@ -91,13 +91,16 @@ export function createObservabilityStack(
   }
 
   if (prometheusEnabled || grafanaEnabled || alertmanagerEnabled) {
-    if (config.prometheus?.podDisruptionBudget && hasRawPdb(config.prometheus.values?.prometheus))
+    if (
+      config.prometheus?.podDisruptionBudget?.enabled !== false &&
+      hasRawPdb(config.prometheus?.values?.prometheus)
+    )
       throw new Error("Prometheus Nimbus podDisruptionBudget conflicts with raw Helm PDB settings");
-    if (config.grafana?.podDisruptionBudget && hasRawPdb(config.grafana.values))
+    if (config.grafana?.podDisruptionBudget?.enabled !== false && hasRawPdb(config.grafana?.values))
       throw new Error("Grafana Nimbus podDisruptionBudget conflicts with raw Helm PDB settings");
     if (
-      config.alertmanager?.podDisruptionBudget &&
-      hasRawPdb(config.alertmanager.values?.alertmanager)
+      config.alertmanager?.podDisruptionBudget?.enabled !== false &&
+      hasRawPdb(config.alertmanager?.values?.alertmanager)
     )
       throw new Error(
         "Alertmanager Nimbus podDisruptionBudget conflicts with raw Helm PDB settings"
@@ -211,7 +214,7 @@ export function createObservabilityStack(
   if (config.loki?.enabled) {
     const lokiMode = config.loki.mode ?? "single-binary";
     if (
-      hasActivePdbPolicy(config.loki.podDisruptionBudget) &&
+      config.loki.podDisruptionBudget?.enabled !== false &&
       ((lokiMode === "distributed" && hasLokiComponentPdb(config.loki.values)) ||
         (lokiMode === "single-binary" && hasRawPdb(config.loki.values?.singleBinary)))
     ) {
@@ -480,10 +483,6 @@ export function createObservabilityStack(
   return { name, cluster, components, exposedServices };
 }
 
-function hasActivePdbPolicy(policy: IPodDisruptionBudgetConfig | undefined): boolean {
-  return policy !== undefined && policy.enabled !== false;
-}
-
 function hasLokiComponentPdb(values: ILokiConfig["values"]): boolean {
   if (!values) return false;
   const componentKeys = [
@@ -746,7 +745,10 @@ function deployKubePrometheusStack(
         );
       values.replicas = kubeStateMetrics.scheduling.replicas;
     }
-    if (kubeStateMetrics.podDisruptionBudget && raw.podDisruptionBudget !== undefined) {
+    if (
+      kubeStateMetrics.podDisruptionBudget?.enabled !== false &&
+      raw.podDisruptionBudget !== undefined
+    ) {
       throw new Error(
         "kube-state-metrics podDisruptionBudget conflicts with Helm values.kubeStateMetrics.podDisruptionBudget"
       );
@@ -859,9 +861,8 @@ function addChartBudget(
   dependsOn: k8s.helm.v3.Release,
   workload?: string
 ): void {
-  if (!policy) return;
   const manifest = buildPodDisruptionBudgetSpec(
-    policy,
+    policy ?? {},
     {
       "app.kubernetes.io/name": component,
       "app.kubernetes.io/instance": instance,
@@ -1133,7 +1134,7 @@ function deployUptimeKuma(
     );
   if (config.scheduling?.spread?.strategy === "topology-spread")
     throw new Error("Uptime Kuma chart does not support topology-spread scheduling");
-  if (config.podDisruptionBudget && hasRawPdb(config.values))
+  if (config.podDisruptionBudget?.enabled !== false && hasRawPdb(config.values))
     throw new Error("Uptime Kuma Nimbus podDisruptionBudget conflicts with raw Helm PDB settings");
 
   const ns = ensureNamespace(ukNamespace, provider);

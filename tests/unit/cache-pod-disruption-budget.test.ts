@@ -40,7 +40,6 @@ describe("cache workload disruption budgets", () => {
         mode: "helm",
         architecture: "replication",
         replicas: 3,
-        podDisruptionBudget: {},
         scheduling: { replicas: 4, spread: { strategy: "pod-anti-affinity", mode: "required" } },
       } as any,
       provider as any

@@ -13,6 +13,7 @@ import * as pulumi from "@pulumi/pulumi";
 import type { IAccessDnsConfig } from "./interfaces";
 import type { IExposedService } from "../types";
 import { resolvePodDisruptionBudget } from "../availability";
+import { buildPodPlacement } from "../operator/availability";
 
 /** CoreDNS deployment output. */
 export interface IAccessDns {
@@ -104,20 +105,7 @@ export function deployAccessDns(
           metadata: { labels },
           spec: {
             ...(availability?.scheduling?.spread
-              ? {
-                  topologySpreadConstraints: [
-                    {
-                      topologyKey:
-                        availability.scheduling.spread.topologyKey ?? "kubernetes.io/hostname",
-                      maxSkew: 1,
-                      whenUnsatisfiable:
-                        availability.scheduling.spread.mode === "required"
-                          ? "DoNotSchedule"
-                          : "ScheduleAnyway",
-                      labelSelector: { matchLabels: labels },
-                    },
-                  ],
-                }
+              ? buildPodPlacement(availability.scheduling.spread, labels)
               : {}),
             containers: [
               {

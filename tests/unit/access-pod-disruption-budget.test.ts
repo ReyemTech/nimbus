@@ -73,6 +73,51 @@ describe("access workload availability resources", () => {
     });
     expect(budgets[0].opts.dependsOn).toContain(deployments[0]);
   });
+  it.each(["pod-anti-affinity", "topology-spread"] as const)(
+    "maps DNS %s scheduling strategy",
+    (strategy) => {
+      deployAccessDns(
+        "dns-placement",
+        "iad",
+        {
+          enabled: true,
+          scheduling: { replicas: 2, spread: { strategy, mode: "required" } },
+        },
+        "access",
+        provider,
+        []
+      );
+      const podSpec = deployments.at(-1)?.args.spec.template.spec;
+      if (strategy === "pod-anti-affinity") {
+        expect(
+          podSpec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution
+        ).toEqual([expect.objectContaining({ topologyKey: "kubernetes.io/hostname" })]);
+        expect(podSpec.topologySpreadConstraints).toBeUndefined();
+      } else {
+        expect(podSpec.topologySpreadConstraints).toHaveLength(1);
+        expect(podSpec.affinity).toBeUndefined();
+      }
+    }
+  );
+  it.each(["pod-anti-affinity", "topology-spread"] as const)(
+    "maps proxy %s scheduling strategy",
+    (strategy) => {
+      deployAccessProxy("proxy-placement", [], "iad.internal", "access", provider, [], {
+        enabled: true,
+        scheduling: { replicas: 2, spread: { strategy, mode: "required" } },
+      });
+      const podSpec = deployments.at(-1)?.args.spec.template.spec;
+      if (strategy === "pod-anti-affinity") {
+        expect(
+          podSpec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution
+        ).toEqual([expect.objectContaining({ topologyKey: "kubernetes.io/hostname" })]);
+        expect(podSpec.topologySpreadConstraints).toBeUndefined();
+      } else {
+        expect(podSpec.topologySpreadConstraints).toHaveLength(1);
+        expect(podSpec.affinity).toBeUndefined();
+      }
+    }
+  );
   it("keeps DNS and proxy budgets separate and honors opt-out", () => {
     const dnsConfig = { enabled: true, podDisruptionBudget: {}, scheduling: { replicas: 2 } };
     deployAccessDns("t", "iad", dnsConfig, "access", provider, []);

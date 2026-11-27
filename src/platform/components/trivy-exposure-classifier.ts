@@ -243,9 +243,7 @@ export function createTrivyExposureClassifier(
     },
     { ...options, dependsOn: [binding, script, ...(dependsOn ? [dependsOn] : [])] }
   );
-  const budget = config.podDisruptionBudget
-    ? resolvePodDisruptionBudget(config.podDisruptionBudget, replicas)
-    : undefined;
+  const budget = resolvePodDisruptionBudget(config.podDisruptionBudget ?? {}, replicas);
   if (budget) {
     const spec = buildPodDisruptionBudgetSpec(config.podDisruptionBudget ?? {}, selector, replicas);
     new k8s.policy.v1.PodDisruptionBudget(

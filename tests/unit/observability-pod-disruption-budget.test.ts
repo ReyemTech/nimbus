@@ -46,11 +46,11 @@ const byType = (type: string) => resources.filter((r) => r.type === type);
 describe("observability workload disruption budgets", () => {
   it("creates default one and multiple replica budgets with isolated selectors", async () => {
     stack({
-      prometheus: { enabled: true, podDisruptionBudget: {}, scheduling: { replicas: 3 } },
-      grafana: { enabled: true, podDisruptionBudget: {} },
-      alertmanager: { enabled: true, podDisruptionBudget: {}, scheduling: { replicas: 2 } },
-      loki: { enabled: true, podDisruptionBudget: {}, scheduling: { replicas: 2 } },
-      kubeStateMetrics: { podDisruptionBudget: {}, scheduling: { replicas: 2 } },
+      prometheus: { enabled: true, scheduling: { replicas: 3 } },
+      grafana: { enabled: true },
+      alertmanager: { enabled: true, scheduling: { replicas: 2 } },
+      loki: { enabled: true, scheduling: { replicas: 2 } },
+      kubeStateMetrics: { scheduling: { replicas: 2 } },
     });
     await pulumi.runtime.disconnect();
     expect(byType(PDB).map((x) => (x.inputs as any).spec)).toEqual(
@@ -331,5 +331,13 @@ describe("observability workload disruption budgets", () => {
     await pulumi.runtime.disconnect();
     expect(byType(HELM).some((x) => (x.inputs as any).chart === "alloy")).toBe(true);
     expect(byType(PDB)).toHaveLength(0);
+  });
+  it("protects the Trivy exposure classifier by default", async () => {
+    createTrivyExposureClassifier("obs", {}, provider);
+    await pulumi.runtime.disconnect();
+    expect(byType(PDB).map((resource) => (resource.inputs as any).spec)).toContainEqual({
+      minAvailable: 1,
+      selector: { matchLabels: { app: "trivy-exposure-classifier" } },
+    });
   });
 });

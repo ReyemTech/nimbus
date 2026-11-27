@@ -89,6 +89,7 @@ export function createCache(
   const storageGb = config.storageGb ?? 8;
   const replicas = config.replicas ?? 2;
   const redisReplicas = config.scheduling?.replicas ?? replicas;
+  const pdbPolicy = config.podDisruptionBudget ?? {};
   const memoryLimit = config.memory ?? "256Mi";
   const memoryRequest = parseMemoryRequest(memoryLimit);
 
@@ -114,9 +115,7 @@ export function createCache(
         requests: { cpu: "100m", memory: memoryRequest },
         limits: { memory: memoryLimit },
       },
-      ...(config.podDisruptionBudget
-        ? { pdb: redisChartBudget(config.podDisruptionBudget, 1) }
-        : {}),
+      pdb: redisChartBudget(pdbPolicy, 1),
       ...chartPodPlacement(
         config.scheduling?.spread,
         {
@@ -145,9 +144,7 @@ export function createCache(
         requests: { cpu: "100m", memory: memoryRequest },
         limits: { memory: memoryLimit },
       },
-      ...(config.podDisruptionBudget
-        ? { pdb: redisChartBudget(config.podDisruptionBudget, redisReplicas) }
-        : {}),
+      pdb: redisChartBudget(pdbPolicy, redisReplicas),
       ...chartPodPlacement(
         config.scheduling?.spread,
         {
@@ -304,12 +301,10 @@ export function createCache(
       { provider, dependsOn: [release, ns] }
     );
     const trackerReplicas = config.scheduling?.replicas ?? 1;
-    const trackerBudget = config.podDisruptionBudget
-      ? resolvePodDisruptionBudget(config.podDisruptionBudget, trackerReplicas)
-      : undefined;
-    if (trackerBudget && config.podDisruptionBudget) {
+    const trackerBudget = resolvePodDisruptionBudget(pdbPolicy, trackerReplicas);
+    if (trackerBudget) {
       const spec = buildPodDisruptionBudgetSpec(
-        config.podDisruptionBudget ?? {},
+        pdbPolicy,
         { app: `${name}-master-tracker` },
         trackerReplicas
       );

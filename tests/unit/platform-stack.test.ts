@@ -1072,7 +1072,16 @@ describe("platform stack — ClusterSecretStore", () => {
     expect(script).toContain("vault token revoke -self");
     expect(script).toContain("auth/kubernetes/login");
     expect(script).toContain("/var/run/vault-bootstrap-token/token");
-    expect(script).not.toContain('echo "$ROOT_TOKEN" >');
+    expect(script).toContain('INIT_OUTPUT_TMP_FILE="${INIT_OUTPUT_FILE}.tmp"');
+    expect(script).toContain('> "$INIT_OUTPUT_TMP_FILE"');
+    expect(script).toContain('mv "$INIT_OUTPUT_TMP_FILE" "$INIT_OUTPUT_FILE"');
+    expect(script).toContain('ROOT_TOKEN=$(json_field "$(cat "$INIT_OUTPUT_FILE")" root_token)');
+    expect(script).toContain('RECOVERY_KEYS=$(json_array "$INIT_OUTPUT" recovery_keys_b64)');
+    expect(script).toContain("vault token lookup >/dev/null 2>&1");
+    expect(script).toContain(
+      'rm -f "$LEGACY_TOKEN_FILE" "$INIT_OUTPUT_FILE" "$INIT_OUTPUT_TMP_FILE"'
+    );
+    expect(script).not.toContain('echo "$ROOT_TOKEN"');
 
     const configMapName = bootstrap.args.metadata.name as string;
     expect(configMapName).toMatch(/^vault-bootstrap-[a-f0-9]{12}$/);

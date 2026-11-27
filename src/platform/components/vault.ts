@@ -84,6 +84,7 @@ function buildVaultBootstrapScript(
   const esoPolicy = buildEsoPolicy(esoSecretPaths);
   return `#!/bin/sh
 set -e
+umask 077
 export VAULT_ADDR="http://localhost:8200"
 
 # --- Helpers (no jq/curl — vault image is minimal Alpine) ---
@@ -107,8 +108,11 @@ json_array() {
 SA_TOKEN=$(cat /var/run/vault-bootstrap-token/token)
 API="https://kubernetes.default.svc"
 
-# Legacy root-token location from prior Nimbus versions. A deployed root token is
-# revoked after migration and is never written here again.
+# Transient init handoff permits bootstrap to resume if this sidecar restarts
+# after Vault initializes but before the restricted bootstrap role is created.
+INIT_OUTPUT_FILE="/vault/data/.bootstrap-init-output.json"
+INIT_OUTPUT_TMP_FILE="\${INIT_OUTPUT_FILE}.tmp"
+# Legacy root-token location from prior Nimbus versions.
 LEGACY_TOKEN_FILE="/vault/data/.bootstrap-token"
 RECOVERY_FILE="/vault/data/.bootstrap-recovery-keys"
 
@@ -129,12 +133,16 @@ if [ "$INITIALIZED" = "false" ]; then
   # Detect seal type from text output (more reliable when uninitialized)
   SEAL_TYPE_TEXT=$(vault status 2>&1 | grep "Seal Type" | awk '{print $NF}')
   echo "Initializing Vault (seal_type=$SEAL_TYPE_TEXT)..."
+  rm -f "$INIT_OUTPUT_TMP_FILE"
   if [ "$SEAL_TYPE_TEXT" = "shamir" ]; then
-    INIT_OUTPUT=$(vault operator init -key-shares=5 -key-threshold=3 -format=json)
+    vault operator init -key-shares=5 -key-threshold=3 -format=json > "$INIT_OUTPUT_TMP_FILE"
   else
     # Auto-unseal (awskms, azurekeyvault, gcpckms): use recovery keys
-    INIT_OUTPUT=$(vault operator init -recovery-shares=5 -recovery-threshold=3 -format=json)
+    vault operator init -recovery-shares=5 -recovery-threshold=3 -format=json > "$INIT_OUTPUT_TMP_FILE"
   fi
+  chmod 600 "$INIT_OUTPUT_TMP_FILE"
+  mv "$INIT_OUTPUT_TMP_FILE" "$INIT_OUTPUT_FILE"
+  INIT_OUTPUT=$(cat "$INIT_OUTPUT_FILE")
   ROOT_TOKEN=$(json_field "$INIT_OUTPUT" root_token)
 
   # Auto-unseal uses recovery_keys_b64; Shamir uses unseal_keys_b64
@@ -143,10 +151,10 @@ if [ "$INITIALIZED" = "false" ]; then
     RECOVERY_KEYS=$(json_array "$INIT_OUTPUT" unseal_keys_b64)
   fi
 
-  # Persist only recovery material needed for Shamir unseal, never the root token.
+  # Persist recovery material needed for Shamir unseal.
   echo "$RECOVERY_KEYS" > "$RECOVERY_FILE"
   chmod 600 "$RECOVERY_FILE"
-  echo "Recovery keys stored on PVC"
+  echo "Vault recovery material stored on PVC"
 
   # Shamir: manually unseal (auto-unseal handles itself)
   if [ "$SEAL_TYPE" = "shamir" ]; then
@@ -161,16 +169,41 @@ if [ "$INITIALIZED" = "false" ]; then
 else
   echo "Vault already initialized (seal_type=$SEAL_TYPE, sealed=$SEALED)"
 
-  # One-time migration path: revoke and remove root tokens persisted by older Nimbus releases.
+  # Resume interrupted first bootstrap, or migrate a legacy persisted root token.
   ROOT_TOKEN=""
   if [ -f "$LEGACY_TOKEN_FILE" ]; then
     ROOT_TOKEN=$(cat "$LEGACY_TOKEN_FILE")
+  elif [ -f "$INIT_OUTPUT_FILE" ]; then
+    ROOT_TOKEN=$(json_field "$(cat "$INIT_OUTPUT_FILE")" root_token)
+  elif [ -f "$INIT_OUTPUT_TMP_FILE" ]; then
+    ROOT_TOKEN=$(json_field "$(cat "$INIT_OUTPUT_TMP_FILE")" root_token)
+  fi
+
+  # Recover the seal keys too if the sidecar restarted before saving them.
+  RECOVERY_KEYS=""
+  if [ -f "$RECOVERY_FILE" ]; then
+    RECOVERY_KEYS=$(cat "$RECOVERY_FILE")
+  elif [ -f "$INIT_OUTPUT_FILE" ]; then
+    INIT_OUTPUT=$(cat "$INIT_OUTPUT_FILE")
+    RECOVERY_KEYS=$(json_array "$INIT_OUTPUT" recovery_keys_b64)
+    if [ -z "$RECOVERY_KEYS" ]; then
+      RECOVERY_KEYS=$(json_array "$INIT_OUTPUT" unseal_keys_b64)
+    fi
+  elif [ -f "$INIT_OUTPUT_TMP_FILE" ]; then
+    INIT_OUTPUT=$(cat "$INIT_OUTPUT_TMP_FILE")
+    RECOVERY_KEYS=$(json_array "$INIT_OUTPUT" recovery_keys_b64)
+    if [ -z "$RECOVERY_KEYS" ]; then
+      RECOVERY_KEYS=$(json_array "$INIT_OUTPUT" unseal_keys_b64)
+    fi
+  fi
+  if [ -n "$RECOVERY_KEYS" ] && [ ! -f "$RECOVERY_FILE" ]; then
+    printf '%s\n' "$RECOVERY_KEYS" > "$RECOVERY_FILE"
+    chmod 600 "$RECOVERY_FILE"
   fi
 
   # Shamir: unseal if sealed
-  if [ "$SEALED" = "true" ] && [ "$SEAL_TYPE" = "shamir" ] && [ -f "$RECOVERY_FILE" ]; then
+  if [ "$SEALED" = "true" ] && [ "$SEAL_TYPE" = "shamir" ] && [ -n "$RECOVERY_KEYS" ]; then
     echo "Unsealing (Shamir)..."
-    RECOVERY_KEYS=$(cat "$RECOVERY_FILE")
     for i in 1 2 3; do
       KEY=$(echo "$RECOVERY_KEYS" | cut -d',' -f$i)
       vault operator unseal "$KEY"
@@ -196,13 +229,20 @@ echo "Vault is unsealed"
 
 if [ -n "$ROOT_TOKEN" ]; then
   export VAULT_TOKEN="$ROOT_TOKEN"
+  if ! vault token lookup >/dev/null 2>&1; then
+    ROOT_TOKEN=""
+  fi
+fi
+
+if [ -n "$ROOT_TOKEN" ]; then
+  export VAULT_TOKEN="$ROOT_TOKEN"
 else
   # Restart/upgrade path: use a short-lived Vault token minted from this pod's
   # rotating Kubernetes service-account token and the dedicated bootstrap role.
   if ! BOOTSTRAP_TOKEN=$(vault write -field=token auth/kubernetes/login \\
     role=vault-bootstrap jwt="$SA_TOKEN" 2>/dev/null); then
     echo "ERROR: Vault bootstrap authentication failed; no secret values were logged."
-    exec sleep infinity
+    exit 1
   fi
   export VAULT_TOKEN="$BOOTSTRAP_TOKEN"
 fi
@@ -261,12 +301,13 @@ vault policy write user-policy - <<'EOPOLICY'
 path "secret/data/*" { capabilities = ["create", "read", "update", "delete", "list"] }
 EOPOLICY
 
-# Remove the legacy root token on upgraded installations; fresh installs also
-# discard the one-time root token held only in this process.
+# Revoke any root token used for bootstrap, then remove all transient handoff
+# files. If the sidecar restarts between revoke and cleanup, it falls back to the
+# already-created restricted bootstrap role and cleans up on the next pass.
 if [ -n "$ROOT_TOKEN" ]; then
   vault token revoke -self
-  rm -f "$LEGACY_TOKEN_FILE"
 fi
+rm -f "$LEGACY_TOKEN_FILE" "$INIT_OUTPUT_FILE" "$INIT_OUTPUT_TMP_FILE"
 unset ROOT_TOKEN VAULT_TOKEN BOOTSTRAP_TOKEN
 
 echo "Bootstrap complete — sleeping"

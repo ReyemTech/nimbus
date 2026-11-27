@@ -457,12 +457,14 @@ Vault uses its rotating Kubernetes ServiceAccount token for TokenReview. Nimbus
 uses the stable `vault` ServiceAccount and keeps its `system:auth-delegator`
 binding and bootstrap role aligned. Do not override
 `values.server.serviceAccount.name`; changing this identity would strand the
-bootstrap role after root-token revocation.
-ESO receives a separate short-lived projected token. Nimbus does not persist a
-root token: bootstrap uses the initial token in memory, creates a restricted
-one-hour bootstrap role for later reconciliation, and revokes the root token.
-On upgrade it revokes and removes the legacy root-token file. Existing
-Kubernetes auth mounts and userpass users remain enabled.
+bootstrap role after root-token revocation. ESO receives a separate short-lived
+projected token. During first bootstrap, Nimbus writes Vault's init response to
+a mode-600 temporary file on the Vault data PVC so a restarted sidecar can
+resume. After setup succeeds, it revokes the root token and removes the handoff
+file. It never writes token values to logs, Pulumi outputs, or Pulumi state. A
+failed bootstrap keeps the handoff until reconciliation succeeds. On upgrade,
+Nimbus also revokes and removes the legacy root-token file. Existing Kubernetes
+auth mounts and userpass users remain enabled.
 
 ### Upgrade and migration
 

@@ -1,3 +1,32 @@
+# [3.18.0](https://github.com/ReyemTech/nimbus/compare/v3.17.0...v3.18.0) (2026-11-27)
+
+
+### Bug Fixes
+
+* address Task 3B review findings ([40235e4](https://github.com/ReyemTech/nimbus/commit/40235e4dab110303e90c60fc7b93f34acdff3353))
+* check merged kube-state-metrics helm values ([32f2648](https://github.com/ReyemTech/nimbus/commit/32f2648c7e76140370724b23c1cac19e5afee2e6))
+* close Task 3B round two findings ([6532e18](https://github.com/ReyemTech/nimbus/commit/6532e182ca84fb40f06615763cf09ba7ec141478))
+* complete default PDB coverage and access spread mapping ([aeb3e4b](https://github.com/ReyemTech/nimbus/commit/aeb3e4b207d05b3e0b48d01f479c86e05e5519e3))
+* correct access workload availability counts ([ba0bfe7](https://github.com/ReyemTech/nimbus/commit/ba0bfe7a4617406608ca979583b616f60a481385))
+* correct workload PDB selectors and Loki replicas ([90edb95](https://github.com/ReyemTech/nimbus/commit/90edb958bde551073ddd43e915ac70246e363925))
+* map distributed Loki budgets to microservices ([e123d4f](https://github.com/ReyemTech/nimbus/commit/e123d4fdcaa91ae7688bba5fd5382516a89b67ba))
+* merge optional Loki availability settings ([92c4da4](https://github.com/ReyemTech/nimbus/commit/92c4da432d3ac9d29ca577d903dc17d61742ba9a))
+* preserve platform chart scheduling values ([f7b165c](https://github.com/ReyemTech/nimbus/commit/f7b165c605c741d882a4cfd8b9e186e5149629e8))
+* protect default kube-state-metrics deployment ([0274f37](https://github.com/ReyemTech/nimbus/commit/0274f3758c7a388fed8b107414c8cc673b742704))
+* reconcile MariaDB disruption budget changes ([5e225e5](https://github.com/ReyemTech/nimbus/commit/5e225e506ee88b987bb26e02d721173d90467971))
+* validate EKS add-on PDB schemas ([7152fbf](https://github.com/ReyemTech/nimbus/commit/7152fbf889699aed8a01b16c1ed3760b4708591a))
+
+
+### Features
+
+* add disruption budgets to database operators ([d011160](https://github.com/ReyemTech/nimbus/commit/d011160da9f112de80d91744066ee28e4c2f00f2))
+* add disruption budgets to observability controllers ([cfd1fcb](https://github.com/ReyemTech/nimbus/commit/cfd1fcb5ceb590bb9c458827f5fa7c7a9b8a7ffe))
+* add disruption budgets to observability controllers ([7f94c9e](https://github.com/ReyemTech/nimbus/commit/7f94c9e16f50b5d69e16d131a930674a64f15c7e))
+* add platform controller disruption budgets ([0854bc1](https://github.com/ReyemTech/nimbus/commit/0854bc17d7ff3a1e6ceb0678c93f2069ce29ae05))
+* add remaining controller disruption budgets ([0b356c2](https://github.com/ReyemTech/nimbus/commit/0b356c2ef5e106a812abcb6dae7daa516a24194a))
+* add typed pod disruption budget policy ([2fee0f1](https://github.com/ReyemTech/nimbus/commit/2fee0f136a4f38a5fa3dc58b201a24dfa8a1b2b8))
+* protect EKS controllers from voluntary eviction ([bedb20f](https://github.com/ReyemTech/nimbus/commit/bedb20f30e321a177c77ee2909db134e42a323a1))
+
 # [3.17.0](https://github.com/ReyemTech/nimbus/compare/v3.16.2...v3.17.0) (2026-11-26)
 
 

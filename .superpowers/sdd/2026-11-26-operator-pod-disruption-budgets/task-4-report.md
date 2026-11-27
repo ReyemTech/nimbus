@@ -70,3 +70,66 @@ No Helm chart packages or rendered templates are vendored in this checkout. The 
 
 The Nimbus-managed PDB selectors for chart workloads use the standard chart name/instance labels; Loki single-binary additionally selects its component label. The uptime Kuma chart is not vendored, so its selector/value paths could not be confirmed against the exact deployed chart version. Loki distributed mode has multiple independent controllers; shared typed PDB/scheduling input now fails fast in that mode rather than creating an unmatched single-binary budget. Per-workload distributed Loki policies remain unsupported. This checkout cannot verify those chart selectors against the rendered release manifests.
 
+# Task 4 Round 1 Fix Report
+
+Base: `6e7065d`
+
+## RED
+
+Command:
+
+```text
+npm test -- tests/unit/observability-pod-disruption-budget.test.ts tests/unit/cache-pod-disruption-budget.test.ts
+```
+
+Result after migrating the suite to Pulumi resource mocks: **failed as expected**. New expectations showed that Uptime Kuma accepted unsupported `scheduling.replicas` and raw native PDB conflicts were not rejected. The first mock-harness pass also exposed a test setup issue (the cache provider argument and mocked namespace were not real Pulumi resources); the harness was corrected before GREEN.
+
+## GREEN
+
+Focused command:
+
+```text
+npm test -- tests/unit/observability-pod-disruption-budget.test.ts tests/unit/cache-pod-disruption-budget.test.ts
+```
+
+Actual result:
+
+```text
+Test Files  2 passed (2)
+Tests       10 passed (10)
+Duration    919ms
+Exit code    0
+```
+
+Full suite command: `npm test`
+
+Actual result:
+
+```text
+Test Files  49 passed (49)
+Tests       1028 passed (1028)
+Duration    7.74s
+Exit code    0
+```
+
+Additional verification:
+
+```text
+npm run typecheck                                      passed
+npx eslint <all changed source and test files>         passed
+npx prettier --check <all changed source and test files> passed
+```
+
+## Changes
+
+- Converted observability/cache tests to `pulumi.runtime.setMocks`; assertions inspect registered Helm releases, Deployments, and PDBs.
+- Distributed Loki now maps shared scheduling and PDB policy independently to read, write, backend, gateway, compactor, distributor, ingester, querier, query frontend, query scheduler, index gateway, and ruler, with component selectors and replica counts.
+- Nimbus rejects Uptime Kuma replica and topology-spread requests because the official chart Deployment template hard-codes one replica and exposes affinity only. It derives the PDB and affinity name selector from `nameOverride`.
+- Nimbus rejects raw chart PDB settings when a Nimbus-owned PDB policy is configured for Prometheus, Grafana, Alertmanager, and Uptime Kuma.
+- Redis tracker PDB now depends on the tracker Deployment.
+
+## Chart evidence and limits
+
+The official Uptime Kuma chart source is at [dirsigler/uptime-kuma-helm](https://github.com/dirsigler/uptime-kuma-helm). Its Deployment template currently sets `replicas: 1`, and its values expose affinity but not replica count or topology spread. The configured repository URL is the legacy GitHub Pages endpoint and `version` remains user-selectable; this test environment could not fetch/render the remote chart. Therefore there is no Helm render assertion in this report: the behavior is handled by rejecting unsupported typed fields, and resource-level Pulumi mock tests verify those failures and registered selectors. This does not validate arbitrary future upstream chart changes.
+
+The distributed Loki workload set, default replica counts, and label selectors are mapped from the Grafana Loki chart's controller naming conventions. Remote chart rendering was unavailable in this environment, so chart-version-specific rendered manifests remain unverified.

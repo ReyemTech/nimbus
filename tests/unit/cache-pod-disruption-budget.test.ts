@@ -1,73 +1,37 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { afterEach, describe, expect, it, vi } from "vitest";
-const releases: any[] = [];
-const budgets: any[] = [];
-const deployments: any[] = [];
-vi.mock("../../src/utils/ensure-namespace", () => ({ ensureNamespace: () => ({}) }));
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as pulumi from "@pulumi/pulumi";
+import * as k8s from "@pulumi/kubernetes";
+const resources: pulumi.runtime.MockResourceArgs[] = [];
+const HELM = "kubernetes:helm.sh/v3:Release";
+const PDB = "kubernetes:policy/v1:PodDisruptionBudget";
+const DEPLOYMENT = "kubernetes:apps/v1:Deployment";
 vi.mock("../../src/nimbus", () => ({ nimbus: { register: () => {} } }));
 vi.mock("../../src/observability/alerts", () => ({ createPrometheusRule: () => {} }));
-vi.mock("@pulumi/kubernetes", () => {
-  class Resource {
-    constructor(
-      public name: string,
-      public args: any,
-      public opts: any
-    ) {}
-  }
-  class Release extends Resource {
-    status = {
-      apply: (fn: (v: any) => any) => ({ apply: (f: any) => f(fn({ name: this.name })) }),
-    };
-    constructor(n: string, a: any, o: any) {
-      super(n, a, o);
-      releases.push(this);
-    }
-  }
-  class Pdb extends Resource {
-    constructor(n: string, a: any, o: any) {
-      super(n, a, o);
-      budgets.push(this);
-    }
-  }
-  class Deployment extends Resource {
-    constructor(n: string, a: any, o: any) {
-      super(n, a, o);
-      deployments.push(this);
-    }
-  }
-  class Generic extends Resource {
-    data = { apply: (fn: any) => fn({}) };
-  }
-  return {
-    helm: { v3: { Release } },
-    policy: { v1: { PodDisruptionBudget: Pdb } },
-    apps: { v1: { Deployment } },
-    core: {
-      v1: {
-        Namespace: Generic,
-        ConfigMap: Generic,
-        Service: Generic,
-        Secret: Generic,
-        ServiceAccount: Generic,
-      },
+let provider: k8s.Provider;
+beforeEach(() => {
+  resources.length = 0;
+  pulumi.runtime.setMocks({
+    newResource: (args) => {
+      resources.push(args);
+      return {
+        id: args.name,
+        state: {
+          ...args.inputs,
+          name: `${args.name}-actual`,
+          status: { name: `${args.name}-actual` },
+          data: {},
+        },
+      };
     },
-    rbac: { v1: { Role: Generic, RoleBinding: Generic } },
-    apiextensions: { CustomResource: Generic },
-  };
+    call: () => ({}),
+  });
+  provider = new k8s.Provider("test-cache", {});
 });
-vi.mock("@pulumi/pulumi", () => ({
-  output: (v: any) => ({ apply: (fn: any) => fn(v) }),
-  all: (vs: any[]) => ({ apply: (fn: any) => fn(vs) }),
-  interpolate: (s: any) => s,
-}));
 import { createCache } from "../../src/cache/cache";
-afterEach(() => {
-  releases.length = 0;
-  budgets.length = 0;
-  deployments.length = 0;
-});
+const byType = (type: string) => resources.filter((r) => r.type === type);
 describe("cache workload disruption budgets", () => {
-  it("maps Redis master and replica availability separately", () => {
+  it("maps Redis master and replica availability separately", async () => {
     createCache(
       "sessions",
       {
@@ -79,9 +43,14 @@ describe("cache workload disruption budgets", () => {
         podDisruptionBudget: {},
         scheduling: { replicas: 4, spread: { strategy: "pod-anti-affinity", mode: "required" } },
       } as any,
-      {} as any
+      provider as any
     );
-    const values = releases[0].args.values;
+    await pulumi.runtime.disconnect();
+    const release = byType(HELM)[0];
+    const pdb = byType(PDB)[0];
+    expect(release).toBeDefined();
+    expect(pdb).toBeDefined();
+    const values = (release?.inputs as any).values;
     expect(values.master.pdb).toEqual({ create: true, minAvailable: 1 });
     expect(values.replica.replicaCount).toBe(4);
     expect(values.replica.pdb).toEqual({ create: true, maxUnavailable: 1 });
@@ -89,12 +58,12 @@ describe("cache workload disruption budgets", () => {
       values.replica.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[0]
         .labelSelector.matchLabels
     ).toMatchObject({ "app.kubernetes.io/component": "replica" });
-    expect(budgets[0].args.spec).toEqual({
+    expect((pdb?.inputs as any).spec).toEqual({
       maxUnavailable: 1,
       selector: { matchLabels: { app: "sessions-master-tracker" } },
     });
   });
-  it("adds availability to Nimbus tracker and honors cache opt-out", () => {
+  it("adds availability to Nimbus tracker and honors cache opt-out", async () => {
     createCache(
       "sessions",
       {
@@ -105,11 +74,14 @@ describe("cache workload disruption budgets", () => {
         podDisruptionBudget: { enabled: false },
         scheduling: { replicas: 2 },
       } as any,
-      {} as any
+      provider as any
     );
-    expect(deployments[0].args.spec.replicas).toBe(2);
-    expect(releases[0].args.values.master.pdb).toEqual({ create: false });
-    expect(releases[0].args.values.replica.pdb).toEqual({ create: false });
-    expect(budgets).toHaveLength(0);
+    await pulumi.runtime.disconnect();
+    const deployment = byType(DEPLOYMENT)[0];
+    const release = byType(HELM)[0];
+    expect((deployment?.inputs as any).spec.replicas).toBe(2);
+    expect((release?.inputs as any).values.master.pdb).toEqual({ create: false });
+    expect((release?.inputs as any).values.replica.pdb).toEqual({ create: false });
+    expect(byType(PDB)).toHaveLength(0);
   });
 });

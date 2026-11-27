@@ -259,7 +259,7 @@ export function createCache(
       { provider, dependsOn: [ns] }
     );
 
-    new k8s.apps.v1.Deployment(
+    const trackerDeployment = new k8s.apps.v1.Deployment(
       `${name}-redis-master-tracker`,
       {
         metadata: { name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE },
@@ -319,7 +319,7 @@ export function createCache(
           metadata: { name: `${name}-master-tracker`, namespace: CACHE_NAMESPACE },
           spec: spec?.spec,
         },
-        { provider, dependsOn: [release] }
+        { provider, dependsOn: [trackerDeployment] }
       );
     }
 

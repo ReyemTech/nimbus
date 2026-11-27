@@ -91,6 +91,17 @@ export function createObservabilityStack(
   }
 
   if (prometheusEnabled || grafanaEnabled || alertmanagerEnabled) {
+    if (config.prometheus?.podDisruptionBudget && hasRawPdb(config.prometheus.values?.prometheus))
+      throw new Error("Prometheus Nimbus podDisruptionBudget conflicts with raw Helm PDB settings");
+    if (config.grafana?.podDisruptionBudget && hasRawPdb(config.grafana.values))
+      throw new Error("Grafana Nimbus podDisruptionBudget conflicts with raw Helm PDB settings");
+    if (
+      config.alertmanager?.podDisruptionBudget &&
+      hasRawPdb(config.alertmanager.values?.alertmanager)
+    )
+      throw new Error(
+        "Alertmanager Nimbus podDisruptionBudget conflicts with raw Helm PDB settings"
+      );
     components["kube-prometheus-stack"] = deployKubePrometheusStack(
       name,
       namespace,
@@ -198,26 +209,52 @@ export function createObservabilityStack(
 
   // 3. Loki (log aggregation)
   if (config.loki?.enabled) {
-    if (
-      config.loki.mode === "distributed" &&
-      (config.loki.podDisruptionBudget || config.loki.scheduling)
-    ) {
-      throw new Error(
-        "Loki distributed mode requires per-workload availability settings; shared scheduling and podDisruptionBudget are supported only in single-binary mode"
+    components["loki"] = deployLoki(name, namespace, config.loki, provider, cluster.storageTiers);
+    if ((config.loki.mode ?? "single-binary") === "distributed") {
+      const distributed = [
+        ["read", "read", 3],
+        ["write", "write", 3],
+        ["backend", "backend", 3],
+        ["gateway", "gateway", 1],
+        ["compactor", "compactor", 1],
+        ["distributor", "distributor", 3],
+        ["ingester", "ingester", 3],
+        ["querier", "querier", 3],
+        ["queryFrontend", "query-frontend", 1],
+        ["queryScheduler", "query-scheduler", 1],
+        ["indexGateway", "index-gateway", 2],
+        ["ruler", "ruler", 1],
+      ] as const;
+      for (const [key, workload, defaultReplicas] of distributed) {
+        const values = config.loki.values?.[key] as Record<string, unknown> | undefined;
+        const replicas =
+          config.loki.scheduling?.replicas ??
+          (typeof values?.replicas === "number" ? values.replicas : defaultReplicas);
+        addChartBudget(
+          `${name}-loki-${workload}-pdb`,
+          namespace,
+          "loki",
+          `${name}-loki`,
+          config.loki.podDisruptionBudget,
+          replicas,
+          provider,
+          components["loki"],
+          workload
+        );
+      }
+    } else {
+      addChartBudget(
+        `${name}-loki-pdb`,
+        namespace,
+        "loki",
+        `${name}-loki`,
+        config.loki.podDisruptionBudget,
+        config.loki.scheduling?.replicas ?? 1,
+        provider,
+        components["loki"],
+        "single-binary"
       );
     }
-    components["loki"] = deployLoki(name, namespace, config.loki, provider, cluster.storageTiers);
-    addChartBudget(
-      `${name}-loki-pdb`,
-      namespace,
-      "loki",
-      `${name}-loki`,
-      config.loki.podDisruptionBudget,
-      config.loki.scheduling?.replicas ?? 1,
-      provider,
-      components["loki"],
-      "single-binary"
-    );
   }
 
   // 4. Alloy (log/metric collector)
@@ -365,7 +402,9 @@ export function createObservabilityStack(
     addChartBudget(
       `${name}-uptime-kuma-pdb`,
       "uptime-kuma",
-      "uptime-kuma",
+      String(config.uptimeKuma.values?.nameOverride ?? "uptime-kuma")
+        .slice(0, 63)
+        .replace(/-+$/, ""),
       `${name}-uptime-kuma`,
       config.uptimeKuma.podDisruptionBudget,
       config.uptimeKuma.scheduling?.replicas ?? 1,
@@ -795,6 +834,12 @@ function addChartBudget(
   );
 }
 
+function hasRawPdb(values: unknown): boolean {
+  if (typeof values !== "object" || values === null) return false;
+  if (Object.prototype.hasOwnProperty.call(values, "podDisruptionBudget")) return true;
+  return Object.values(values).some((value) => hasRawPdb(value));
+}
+
 function deployLoki(
   name: string,
   namespace: string,
@@ -854,6 +899,54 @@ function deployLoki(
       size: `${storageGb}Gi`,
       ...(lokiStorageClass ? { storageClass: lokiStorageClass } : {}),
     };
+  }
+
+  if (mode === "distributed") {
+    lokiValues["deploymentMode"] = "Distributed";
+    for (const [key, fallback] of Object.entries({
+      read: 3,
+      write: 3,
+      backend: 3,
+      gateway: 1,
+      compactor: 1,
+      distributor: 3,
+      ingester: 3,
+      querier: 3,
+      queryFrontend: 1,
+      queryScheduler: 1,
+      indexGateway: 2,
+      ruler: 1,
+    })) {
+      const raw = config.values?.[key] as Record<string, unknown> | undefined;
+      if (
+        config.scheduling?.replicas !== undefined &&
+        typeof raw?.replicas === "number" &&
+        raw.replicas !== config.scheduling.replicas
+      ) {
+        throw new Error(`Loki scheduling.replicas conflicts with Helm values.${key}.replicas`);
+      }
+      lokiValues[key] = {
+        ...raw,
+        ...(config.scheduling?.replicas !== undefined
+          ? { replicas: config.scheduling.replicas }
+          : {}),
+        ...chartPodPlacement(
+          config.scheduling?.spread,
+          {
+            "app.kubernetes.io/name": "loki",
+            "app.kubernetes.io/instance": `${name}-loki`,
+            "app.kubernetes.io/component": key.replace(
+              /[A-Z]/g,
+              (letter) => `-${letter.toLowerCase()}`
+            ),
+          },
+          raw ?? {},
+          `Loki ${key}`
+        ),
+      };
+      if (typeof raw?.replicas === "number") lokiValues[key].replicas = raw.replicas;
+      else if (config.scheduling?.replicas === undefined) lokiValues[key].replicas = fallback;
+    }
   }
 
   return new k8s.helm.v3.Release(
@@ -979,9 +1072,14 @@ function deployUptimeKuma(
 ): k8s.helm.v3.Release {
   const ukNamespace = "uptime-kuma";
   const subdomain = config.subdomain ?? "uptime";
-  if (config.scheduling?.replicas !== undefined && config.values?.replicaCount !== undefined) {
-    throw new Error("Uptime Kuma scheduling.replicas conflicts with Helm values.replicaCount");
-  }
+  if (config.scheduling?.replicas !== undefined)
+    throw new Error(
+      "Uptime Kuma chart hard-codes one replica and does not support scheduling.replicas"
+    );
+  if (config.scheduling?.spread?.strategy === "topology-spread")
+    throw new Error("Uptime Kuma chart does not support topology-spread scheduling");
+  if (config.podDisruptionBudget && hasRawPdb(config.values))
+    throw new Error("Uptime Kuma Nimbus podDisruptionBudget conflicts with raw Helm PDB settings");
 
   const ns = ensureNamespace(ukNamespace, provider);
 
@@ -1025,18 +1123,19 @@ function deployUptimeKuma(
         },
         serviceMonitor: { enabled: true },
         ...config.values,
-        ...(config.scheduling?.replicas !== undefined
-          ? { replicaCount: config.scheduling.replicas }
+        ...(config.scheduling?.spread
+          ? chartPodPlacement(
+              config.scheduling.spread,
+              {
+                "app.kubernetes.io/name": String(config.values?.nameOverride ?? "uptime-kuma")
+                  .slice(0, 63)
+                  .replace(/-+$/, ""),
+                "app.kubernetes.io/instance": `${name}-uptime-kuma`,
+              },
+              config.values ?? {},
+              "Uptime Kuma"
+            )
           : {}),
-        ...chartPodPlacement(
-          config.scheduling?.spread,
-          {
-            "app.kubernetes.io/name": "uptime-kuma",
-            "app.kubernetes.io/instance": `${name}-uptime-kuma`,
-          },
-          config.values ?? {},
-          "Uptime Kuma"
-        ),
       },
     },
     { provider, dependsOn: [ns] }

@@ -17,9 +17,14 @@ export function chartPodPlacement(
   }
 
   const topologyKey = spread.topologyKey ?? "kubernetes.io/hostname";
+  // The Pulumi Helm Release name is generated, so same-release values cannot
+  // know the rendered instance label. Chart workload names are stable labels.
+  const stableSelector = Object.fromEntries(
+    Object.entries(selector).filter(([key]) => key !== "app.kubernetes.io/instance")
+  );
   const term = {
     topologyKey,
-    labelSelector: { matchLabels: selector },
+    labelSelector: { matchLabels: stableSelector },
   };
   if (spread.strategy === "pod-anti-affinity") {
     return {
@@ -28,14 +33,12 @@ export function chartPodPlacement(
         podAntiAffinity:
           spread.mode === "required"
             ? {
-                requiredDuringSchedulingIgnoredDuringExecution: [
-                  { ...term, matchLabelKeys: ["app.kubernetes.io/instance"] },
-                ],
+                requiredDuringSchedulingIgnoredDuringExecution: [{ ...term }],
               }
             : {
                 preferredDuringSchedulingIgnoredDuringExecution: [
                   {
-                    podAffinityTerm: { ...term, matchLabelKeys: ["app.kubernetes.io/instance"] },
+                    podAffinityTerm: { ...term },
                     weight: 100,
                   },
                 ],

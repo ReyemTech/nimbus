@@ -1,3 +1,5 @@
+import type * as pulumi from "@pulumi/pulumi";
+
 /** Policy for voluntary disruption protection on a managed workload. */
 export interface IPodDisruptionBudgetConfig {
   enabled?: boolean;
@@ -50,7 +52,7 @@ export function resolvePodDisruptionBudget(
 /** Build the Kubernetes policy/v1 PDB manifest for a workload selector. */
 export function buildPodDisruptionBudgetSpec(
   config: IPodDisruptionBudgetConfig,
-  selector: Record<string, string>,
+  selector: Record<string, pulumi.Input<string>>,
   replicas: number
 ) {
   const budget = resolvePodDisruptionBudget(config, replicas);

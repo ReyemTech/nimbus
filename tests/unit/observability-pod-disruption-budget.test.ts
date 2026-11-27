@@ -59,26 +59,8 @@ describe("observability workload disruption budgets", () => {
           maxUnavailable: 1,
           selector: {
             matchLabels: {
-              "app.kubernetes.io/name": "prometheus",
-              "app.kubernetes.io/instance": "obs-kube-prometheus-stack",
-            },
-          },
-        },
-        {
-          maxUnavailable: 1,
-          selector: {
-            matchLabels: {
-              "app.kubernetes.io/name": "alertmanager",
-              "app.kubernetes.io/instance": "obs-kube-prometheus-stack",
-            },
-          },
-        },
-        {
-          maxUnavailable: 1,
-          selector: {
-            matchLabels: {
               "app.kubernetes.io/name": "loki",
-              "app.kubernetes.io/instance": "obs-loki",
+              "app.kubernetes.io/instance": "obs-loki-actual",
               "app.kubernetes.io/component": "single-binary",
             },
           },
@@ -88,7 +70,7 @@ describe("observability workload disruption budgets", () => {
           selector: {
             matchLabels: {
               "app.kubernetes.io/name": "kube-state-metrics",
-              "app.kubernetes.io/instance": "obs-kube-prometheus-stack",
+              "app.kubernetes.io/instance": "obs-kube-prometheus-stack-actual",
             },
           },
         },
@@ -97,7 +79,7 @@ describe("observability workload disruption budgets", () => {
           selector: {
             matchLabels: {
               "app.kubernetes.io/name": "grafana",
-              "app.kubernetes.io/instance": "obs-kube-prometheus-stack",
+              "app.kubernetes.io/instance": "obs-kube-prometheus-stack-actual",
             },
           },
         },
@@ -107,17 +89,36 @@ describe("observability workload disruption budgets", () => {
     expect((kps?.inputs as any).values.prometheus.prometheusSpec.replicas).toBe(3);
     expect((kps?.inputs as any).values.alertmanager.alertmanagerSpec.replicas).toBe(2);
     expect((kps?.inputs as any).values.kubeStateMetrics.replicas).toBe(2);
+    expect((kps?.inputs as any).values.prometheus.podDisruptionBudget).toEqual({
+      enabled: true,
+      maxUnavailable: 1,
+    });
+    expect((kps?.inputs as any).values.alertmanager.podDisruptionBudget).toEqual({
+      enabled: true,
+      maxUnavailable: 1,
+    });
+    expect(
+      byType(PDB).some((resource) => {
+        const labels = (resource.inputs as any).spec.selector.matchLabels;
+        return ["prometheus", "alertmanager"].includes(labels["app.kubernetes.io/name"]);
+      })
+    ).toBe(false);
   });
   it("protects default kube-state-metrics when its typed config is omitted", async () => {
     stack({ prometheus: { enabled: true } });
     await pulumi.runtime.disconnect();
 
+    const kps = byType(HELM).find((x) => (x.inputs as any).chart === "kube-prometheus-stack");
+    expect((kps?.inputs as any).values.prometheus.podDisruptionBudget).toEqual({
+      enabled: true,
+      minAvailable: 1,
+    });
     expect(byType(PDB).map((x) => (x.inputs as any).spec)).toContainEqual({
       minAvailable: 1,
       selector: {
         matchLabels: {
           "app.kubernetes.io/name": "kube-state-metrics",
-          "app.kubernetes.io/instance": "obs-kube-prometheus-stack",
+          "app.kubernetes.io/instance": "obs-kube-prometheus-stack-actual",
         },
       },
     });
@@ -134,11 +135,13 @@ describe("observability workload disruption budgets", () => {
     });
     await pulumi.runtime.disconnect();
     expect(byType(PDB)).toHaveLength(0);
+    const kps = byType(HELM).find((x) => (x.inputs as any).chart === "kube-prometheus-stack");
+    expect((kps?.inputs as any).values.prometheus.podDisruptionBudget).toEqual({ enabled: false });
     const loki = byType(HELM).find((x) => (x.inputs as any).chart === "loki");
     expect(
       (loki?.inputs as any).values.singleBinary.topologySpreadConstraints[0].labelSelector
         .matchLabels
-    ).toEqual({ "app.kubernetes.io/name": "loki", "app.kubernetes.io/instance": "obs-loki" });
+    ).toEqual({ "app.kubernetes.io/name": "loki" });
   });
 
   it("rejects replica scheduling unsupported by the pinned Uptime Kuma chart", () => {
@@ -252,6 +255,7 @@ describe("observability workload disruption budgets", () => {
     const release = byType(HELM).find((x) => (x.inputs as any).chart === "loki");
     expect((release?.inputs as any).values).toMatchObject({
       deploymentMode: "Distributed",
+      singleBinary: { replicas: 0 },
       distributor: { replicas: 2 },
       ingester: { replicas: 2 },
       querier: { replicas: 2 },
@@ -265,10 +269,22 @@ describe("observability workload disruption budgets", () => {
     const distributor = byType(PDB).find((x) => x.name === "obs-loki-distributor-pdb");
     expect((distributor?.inputs as any).spec.selector.matchLabels).toEqual({
       "app.kubernetes.io/name": "loki",
-      "app.kubernetes.io/instance": "obs-loki",
+      "app.kubernetes.io/instance": "obs-loki-actual",
       "app.kubernetes.io/component": "distributor",
     });
     expect(byType(PDB)).toHaveLength(8);
+  });
+  it("applies typed replica count to single-binary Loki only", async () => {
+    stack({
+      loki: {
+        enabled: true,
+        scheduling: { replicas: 3 },
+      },
+    });
+    await pulumi.runtime.disconnect();
+
+    const release = byType(HELM).find((x) => (x.inputs as any).chart === "loki");
+    expect((release?.inputs as any).values.singleBinary.replicas).toBe(3);
   });
   it("merges raw distributed component values with typed replicas and placement", async () => {
     stack({
@@ -391,6 +407,26 @@ describe("observability workload disruption budgets", () => {
     expect((pdb?.inputs as any).spec.selector.matchLabels["app.kubernetes.io/name"]).toBe(
       "custom-kuma"
     );
+    expect((pdb?.inputs as any).spec.selector.matchLabels["app.kubernetes.io/instance"]).toBe(
+      "obs-uptime-kuma-actual"
+    );
+  });
+  it("uses the Uptime Kuma pod name for scheduling selector", async () => {
+    stack({
+      uptimeKuma: {
+        enabled: true,
+        scheduling: { spread: { strategy: "pod-anti-affinity", mode: "preferred" } },
+        mariadbCluster: { createDatabase: () => ({ secrets: {} }) } as any,
+      },
+    });
+    await pulumi.runtime.disconnect();
+
+    const release = byType(HELM).find((x) => (x.inputs as any).chart === "uptime-kuma");
+    expect(
+      (release?.inputs as any).values.affinity.podAntiAffinity
+        .preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.labelSelector
+        .matchLabels
+    ).toEqual({ "app.kubernetes.io/name": "uptime-kuma" });
   });
   it("does not add disruption budgets to Alloy DaemonSets", async () => {
     stack({ alloy: { enabled: true } });

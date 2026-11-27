@@ -344,17 +344,11 @@ describe("EKS autoscaler disruption settings", () => {
     expect(caValues.podDisruptionBudget).toEqual({ enabled: false });
     expect(
       object(object(array(caValues.topologySpreadConstraints)[0]).labelSelector).matchLabels
-    ).toEqual({
-      "app.kubernetes.io/name": "cluster-autoscaler",
-      "app.kubernetes.io/instance": "prod-cluster-autoscaler",
-    });
+    ).toEqual({ "app.kubernetes.io/name": "cluster-autoscaler" });
     expect(object(kpValues.podDisruptionBudget).maxUnavailable).toBe(1);
     expect(
       object(object(array(kpValues.topologySpreadConstraints)[0]).labelSelector).matchLabels
-    ).toEqual({
-      "app.kubernetes.io/name": "karpenter",
-      "app.kubernetes.io/instance": "prod-karpenter",
-    });
+    ).toEqual({ "app.kubernetes.io/name": "karpenter" });
   });
 });
 

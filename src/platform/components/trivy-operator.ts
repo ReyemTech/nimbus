@@ -64,7 +64,7 @@ export function deployTrivyOperator(
           selector: {
             matchLabels: {
               "app.kubernetes.io/name": "trivy-operator",
-              "app.kubernetes.io/instance": instance,
+              "app.kubernetes.io/instance": release.status.apply((status) => status.name),
             },
           },
         },

@@ -46,7 +46,15 @@ function addAvailability(
         `${name}-pdb${selectors.length > 1 ? `-${index}` : ""}`,
         {
           metadata: { name: `${name}${selectors.length > 1 ? `-${index}` : ""}`, namespace },
-          spec: spec.spec,
+          spec: {
+            ...spec.spec,
+            selector: {
+              matchLabels: {
+                ...selector,
+                "app.kubernetes.io/instance": release.status.apply((status) => status.name),
+              },
+            },
+          },
         },
         { provider, dependsOn: [release] }
       );

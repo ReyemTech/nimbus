@@ -25,7 +25,7 @@ import { createDashboards, lokiLogsDashboard } from "./dashboards/index";
 import { resolveStorageTier } from "../types/storage-tiers";
 import { createGlobalAlertRules, buildAlertmanagerConfig } from "./alerts";
 import { createPrometheusRule } from "./alerts";
-import { buildPodDisruptionBudgetSpec } from "../availability";
+import { buildPodDisruptionBudgetSpec, resolvePodDisruptionBudget } from "../availability";
 import { chartPodPlacement } from "../platform/components/scheduling";
 import type { IPodDisruptionBudgetConfig, IPodSchedulingConfig } from "../availability";
 
@@ -106,14 +106,14 @@ export function createObservabilityStack(
       );
     if (
       config.prometheus?.podDisruptionBudget?.enabled !== false &&
-      hasRawPdb(config.prometheus?.values?.prometheus)
+      hasRawPdb(rawKubePrometheusValues.prometheus)
     )
       throw new Error("Prometheus Nimbus podDisruptionBudget conflicts with raw Helm PDB settings");
     if (config.grafana?.podDisruptionBudget?.enabled !== false && hasRawPdb(config.grafana?.values))
       throw new Error("Grafana Nimbus podDisruptionBudget conflicts with raw Helm PDB settings");
     if (
       config.alertmanager?.podDisruptionBudget?.enabled !== false &&
-      hasRawPdb(config.alertmanager?.values?.alertmanager)
+      hasRawPdb(rawKubePrometheusValues.alertmanager)
     )
       throw new Error(
         "Alertmanager Nimbus podDisruptionBudget conflicts with raw Helm PDB settings"
@@ -133,18 +133,9 @@ export function createObservabilityStack(
       cluster.eksAddons,
       config.kubeStateMetrics
     );
-    const instance = kubePrometheusReleaseName(name);
-    if (prometheusEnabled)
-      addChartBudget(
-        `${name}-prometheus-pdb`,
-        namespace,
-        "prometheus",
-        instance,
-        config.prometheus?.podDisruptionBudget,
-        config.prometheus?.scheduling?.replicas ?? 1,
-        provider,
-        components["kube-prometheus-stack"]
-      );
+    const instance = components["kube-prometheus-stack"].status.apply(
+      (s) => s?.name ?? kubePrometheusReleaseName(name)
+    );
     if (grafanaEnabled)
       addChartBudget(
         `${name}-grafana-pdb`,
@@ -153,17 +144,6 @@ export function createObservabilityStack(
         instance,
         config.grafana?.podDisruptionBudget,
         config.grafana?.scheduling?.replicas ?? 1,
-        provider,
-        components["kube-prometheus-stack"]
-      );
-    if (alertmanagerEnabled)
-      addChartBudget(
-        `${name}-alertmanager-pdb`,
-        namespace,
-        "alertmanager",
-        instance,
-        config.alertmanager?.podDisruptionBudget,
-        config.alertmanager?.scheduling?.replicas ?? 1,
         provider,
         components["kube-prometheus-stack"]
       );
@@ -262,7 +242,7 @@ export function createObservabilityStack(
           `${name}-loki-${workload}-pdb`,
           namespace,
           "loki",
-          `${name}-loki`,
+          components["loki"].status.apply((s) => s?.name ?? `${name}-loki`),
           config.loki.podDisruptionBudget,
           replicas,
           provider,
@@ -275,7 +255,7 @@ export function createObservabilityStack(
         `${name}-loki-pdb`,
         namespace,
         "loki",
-        `${name}-loki`,
+        components["loki"].status.apply((s) => s?.name ?? `${name}-loki`),
         config.loki.podDisruptionBudget,
         config.loki.scheduling?.replicas ?? 1,
         provider,
@@ -433,7 +413,7 @@ export function createObservabilityStack(
       String(config.uptimeKuma.values?.nameOverride ?? "uptime-kuma")
         .slice(0, 63)
         .replace(/-+$/, ""),
-      `${name}-uptime-kuma`,
+      components["uptime-kuma"].status.apply((s) => s?.name ?? `${name}-uptime-kuma`),
       config.uptimeKuma.podDisruptionBudget,
       config.uptimeKuma.scheduling?.replicas ?? 1,
       provider,
@@ -724,6 +704,34 @@ function deployKubePrometheusStack(
       ? { alertmanager: { ...alertmanagerValues, ...buildAlertmanagerConfig(alertConfig) } }
       : {}),
   };
+  if (prometheus?.enabled) {
+    const values = (stackValues.prometheus as Record<string, unknown>) ?? {};
+    const spec = (values.prometheusSpec as Record<string, unknown> | undefined) ?? {};
+    if (
+      prometheus.podDisruptionBudget?.enabled !== false ||
+      values.podDisruptionBudget === undefined
+    ) {
+      values.podDisruptionBudget = chartNativeBudget(
+        prometheus.podDisruptionBudget,
+        prometheus.scheduling?.replicas ?? replicaValue(spec.replicas) ?? 1
+      );
+    }
+    stackValues.prometheus = values;
+  }
+  if (alertmanager?.enabled) {
+    const values = (stackValues.alertmanager as Record<string, unknown>) ?? {};
+    const spec = (values.alertmanagerSpec as Record<string, unknown> | undefined) ?? {};
+    if (
+      alertmanager.podDisruptionBudget?.enabled !== false ||
+      values.podDisruptionBudget === undefined
+    ) {
+      values.podDisruptionBudget = chartNativeBudget(
+        alertmanager.podDisruptionBudget,
+        alertmanager.scheduling?.replicas ?? replicaValue(spec.replicas) ?? 1
+      );
+    }
+    stackValues.alertmanager = values;
+  }
   applyObservedScheduling(
     stackValues,
     "prometheus",
@@ -868,7 +876,7 @@ function addChartBudget(
   name: string,
   namespace: string,
   component: string,
-  instance: string,
+  instance: pulumi.Input<string>,
   policy: IPodDisruptionBudgetConfig | undefined,
   replicas: number,
   provider: k8s.Provider,
@@ -896,6 +904,20 @@ function hasRawPdb(values: unknown): boolean {
   if (typeof values !== "object" || values === null) return false;
   if (Object.prototype.hasOwnProperty.call(values, "podDisruptionBudget")) return true;
   return Object.values(values).some((value) => hasRawPdb(value));
+}
+
+function chartNativeBudget(
+  policy: IPodDisruptionBudgetConfig | undefined,
+  replicas: number
+): Record<string, unknown> {
+  const budget = resolvePodDisruptionBudget(policy ?? {}, replicas);
+  return budget ? { enabled: true, ...budget } : { enabled: false };
+}
+
+function replicaValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
+  if (typeof value === "string" && /^\d+$/.test(value) && Number(value) > 0) return Number(value);
+  return undefined;
 }
 
 function deployLoki(
@@ -1020,7 +1042,6 @@ function deployLoki(
                 config.scheduling?.spread,
                 {
                   "app.kubernetes.io/name": "loki",
-                  "app.kubernetes.io/instance": `${name}-loki`,
                   "app.kubernetes.io/component": workload,
                 },
                 raw,
@@ -1029,7 +1050,13 @@ function deployLoki(
             };
           }
         }
-        if (config.scheduling?.replicas !== undefined) {
+        if (mode === "distributed") {
+          const rawSingleBinary = (config.values?.singleBinary as Record<string, unknown>) ?? {};
+          if (rawSingleBinary.replicas !== undefined && rawSingleBinary.replicas !== 0) {
+            throw new Error("Loki distributed mode requires values.singleBinary.replicas to be 0");
+          }
+          values.singleBinary = { ...rawSingleBinary, replicas: 0 };
+        } else if (config.scheduling?.replicas !== undefined) {
           const rawSingleBinary = (config.values?.singleBinary as Record<string, unknown>) ?? {};
           if (rawSingleBinary.replicas !== undefined)
             throw new Error(
@@ -1041,12 +1068,12 @@ function deployLoki(
             replicas: config.scheduling.replicas,
           };
         }
-        if (config.scheduling?.spread) {
+        if (mode === "single-binary" && config.scheduling?.spread) {
           values.singleBinary = {
             ...(values.singleBinary as Record<string, unknown>),
             ...chartPodPlacement(
               config.scheduling.spread,
-              { "app.kubernetes.io/name": "loki", "app.kubernetes.io/instance": `${name}-loki` },
+              { "app.kubernetes.io/name": "loki" },
               (config.values?.singleBinary as Record<string, unknown>) ?? {},
               "Loki"
             ),
@@ -1200,7 +1227,6 @@ function deployUptimeKuma(
                 "app.kubernetes.io/name": String(config.values?.nameOverride ?? "uptime-kuma")
                   .slice(0, 63)
                   .replace(/-+$/, ""),
-                "app.kubernetes.io/instance": `${name}-uptime-kuma`,
               },
               config.values ?? {},
               "Uptime Kuma"

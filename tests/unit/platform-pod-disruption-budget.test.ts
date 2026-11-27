@@ -10,8 +10,14 @@ vi.mock("../../src/utils/ensure-namespace", () => ({ ensureNamespace: () => ({})
 vi.mock("@pulumi/kubernetes", () => {
   class Release {
     constructor(name: string, args: any, opts: any) {
+      this.status = {
+        apply: (callback: (status: { name: string }) => unknown) =>
+          callback({ name: `${name}-generated` }),
+      };
       releases.push({ name, args, opts, resource: this });
     }
+
+    status: any;
   }
   class PodDisruptionBudget {
     constructor(name: string, args: any, opts: any) {
@@ -42,7 +48,43 @@ function reset() {
   releases.length = 0;
   budgets.length = 0;
 }
+function actualSelector(selector: Record<string, string>, release: string): Record<string, string> {
+  return { ...selector, "app.kubernetes.io/instance": `${release}-generated` };
+}
+function stableSelector(selector: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(selector).filter(([key]) => key !== "app.kubernetes.io/instance")
+  );
+}
 afterEach(reset);
+
+it("uses Helm's generated release name for standalone workload PDB selectors", () => {
+  deployTrivyOperator("test", { podDisruptionBudget: {} }, mockProvider, "1.0.0");
+  deployExternalDns(
+    "test",
+    { dnsProvider: "route53", podDisruptionBudget: {} },
+    mockProvider,
+    "1.0.0"
+  );
+  deployArgocd("test", { podDisruptionBudget: {} }, "example.com", mockProvider, "1.0.0");
+  deployVault(
+    "test",
+    { podDisruptionBudget: {}, bootstrap: false },
+    "example.com",
+    mockProvider,
+    "1.0.0"
+  );
+
+  expect(
+    budgets.map((budget) => budget.args.spec.selector.matchLabels["app.kubernetes.io/instance"])
+  ).toEqual([
+    "test-trivy-operator-generated",
+    "test-external-dns-generated",
+    "test-argocd-generated",
+    "test-argocd-generated",
+    "test-vault-generated",
+  ]);
+});
 
 const componentCases = [
   {
@@ -490,7 +532,7 @@ describe.each(componentCases)(
         expect(budgets[index]!.args.metadata.namespace).toBe(workload.namespace);
         expect(budgets[index]!.args.spec).toEqual({
           minAvailable: 1,
-          selector: { matchLabels: workload.selector },
+          selector: { matchLabels: actualSelector(workload.selector, release) },
         });
         expect(budgets[index]!.opts.dependsOn).toContain(values);
       });
@@ -526,7 +568,7 @@ describe.each(componentCases)(
           maxSkew: 1,
           topologyKey: "topology.kubernetes.io/zone",
           whenUnsatisfiable: "DoNotSchedule",
-          ...(selector ? { labelSelector: { matchLabels: selector } } : {}),
+          ...(selector ? { labelSelector: { matchLabels: stableSelector(selector) } } : {}),
         };
         expect(path.reduce((value: any, key: string) => value?.[key], chartValues)).toEqual([
           expected,
@@ -539,7 +581,7 @@ describe.each(componentCases)(
           expect(budgets[0]!.args.spec.maxUnavailable).toBe(1);
           expect(budgets[1]!.args.spec).toEqual({
             minAvailable: 1,
-            selector: { matchLabels: fallback[1]!.selector },
+            selector: { matchLabels: actualSelector(fallback[1]!.selector, release) },
           });
         }
       }
@@ -561,8 +603,7 @@ describe.each(componentCases)(
             requiredDuringSchedulingIgnoredDuringExecution: [
               {
                 topologyKey: "kubernetes.io/hostname",
-                labelSelector: { matchLabels: selector },
-                matchLabelKeys: ["app.kubernetes.io/instance"],
+                labelSelector: { matchLabels: stableSelector(selector) },
               },
             ],
           },
@@ -624,7 +665,7 @@ describe.each(componentCases)(
         expect(budgets[0]!.args.spec.maxUnavailable).toBe(1);
         expect(budgets[1]!.args.spec).toEqual({
           minAvailable: 1,
-          selector: { matchLabels: fallback[1]!.selector },
+          selector: { matchLabels: actualSelector(fallback[1]!.selector, release) },
         });
       }
     });
@@ -702,7 +743,6 @@ it("keeps raw Trivy operator values while applying typed replicas and spread", (
       labelSelector: {
         matchLabels: {
           "app.kubernetes.io/name": "trivy-operator",
-          "app.kubernetes.io/instance": "test-trivy-operator",
         },
       },
     },

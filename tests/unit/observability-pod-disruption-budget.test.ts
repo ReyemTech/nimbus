@@ -188,15 +188,38 @@ describe("observability workload disruption budgets", () => {
       })
     ).toThrow(/conflicts with raw Helm PDB/);
   });
-  it("rejects raw kube-state-metrics PDB when Nimbus default protection is active", () => {
-    expect(() =>
-      stack({
+  it.each([
+    [
+      "Prometheus",
+      {
         prometheus: {
           enabled: true,
           values: { kubeStateMetrics: { podDisruptionBudget: { enabled: true } } },
         },
-      })
-    ).toThrow(/kube-state-metrics podDisruptionBudget conflicts with Helm values/);
+      },
+    ],
+    [
+      "Grafana",
+      {
+        grafana: {
+          enabled: true,
+          values: { kubeStateMetrics: { podDisruptionBudget: { enabled: true } } },
+        },
+      },
+    ],
+    [
+      "Alertmanager",
+      {
+        alertmanager: {
+          enabled: true,
+          values: { kubeStateMetrics: { podDisruptionBudget: { enabled: true } } },
+        },
+      },
+    ],
+  ])("rejects raw kube-state-metrics PDB supplied via %s values", (_source, config) => {
+    expect(() => stack(config)).toThrow(
+      /kube-state-metrics podDisruptionBudget conflicts with Helm values/
+    );
   });
   it("leaves kube-state-metrics PDB ownership to the EKS add-on", async () => {
     stack({

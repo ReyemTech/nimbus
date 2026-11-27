@@ -91,6 +91,19 @@ export function createObservabilityStack(
   }
 
   if (prometheusEnabled || grafanaEnabled || alertmanagerEnabled) {
+    const rawKubePrometheusValues = {
+      ...config.prometheus?.values,
+      ...config.grafana?.values,
+      ...config.alertmanager?.values,
+    };
+    if (
+      !cluster.eksAddons?.includes("kube-state-metrics") &&
+      config.kubeStateMetrics?.podDisruptionBudget?.enabled !== false &&
+      hasRawPdb(rawKubePrometheusValues.kubeStateMetrics)
+    )
+      throw new Error(
+        "kube-state-metrics podDisruptionBudget conflicts with Helm values.kubeStateMetrics"
+      );
     if (
       config.prometheus?.podDisruptionBudget?.enabled !== false &&
       hasRawPdb(config.prometheus?.values?.prometheus)
@@ -104,14 +117,6 @@ export function createObservabilityStack(
     )
       throw new Error(
         "Alertmanager Nimbus podDisruptionBudget conflicts with raw Helm PDB settings"
-      );
-    if (
-      !cluster.eksAddons?.includes("kube-state-metrics") &&
-      config.kubeStateMetrics?.podDisruptionBudget?.enabled !== false &&
-      hasRawPdb(config.prometheus?.values?.kubeStateMetrics)
-    )
-      throw new Error(
-        "kube-state-metrics podDisruptionBudget conflicts with Helm values.kubeStateMetrics"
       );
     components["kube-prometheus-stack"] = deployKubePrometheusStack(
       name,

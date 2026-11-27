@@ -271,6 +271,25 @@ describe("access workload availability resources", () => {
       })
     ).toThrow(/minAvailable supports integer values only/);
   });
+  it("uses replicaCount when WireGuard autoscaling is disabled", () => {
+    deployWireGuard("scaled-off", {
+      cluster: { provider } as any,
+      provider: "wireguard",
+      wireguard: {
+        endpoint: "vpn.example.com",
+        serverCidr: "10.0.0.0/24",
+        routes: [],
+        peers: [],
+        podDisruptionBudget: {},
+        values: { autoscaling: { enabled: false, minReplicas: 5 }, replicaCount: 3 },
+      },
+    });
+    expect(releases.at(0)?.args.values.replicaCount).toBe(3);
+    expect(releases.at(0)?.args.values.disruptionBudget).toEqual({
+      enabled: true,
+      minAvailable: 2,
+    });
+  });
   it("rejects Tailscale scheduling because its chart fixes one replica and has no spread values", () => {
     expect(() =>
       deployTailscale("t", {
@@ -342,5 +361,17 @@ describe("access workload availability resources", () => {
     expect(budgets.at(2)?.args.spec.selector.matchLabels).toEqual({
       app: "contains-tailscale-operator",
     });
+    deployTailscale("dash", {
+      cluster: { provider } as any,
+      provider: "tailscale",
+      tailscale: {
+        oauthClientId: "id",
+        oauthClientSecret: "secret",
+        routes: [],
+        podDisruptionBudget: {},
+        values: { fullnameOverride: "operator--" },
+      },
+    });
+    expect(budgets.at(3)?.args.spec.selector.matchLabels).toEqual({ app: "operator-" });
   });
 });

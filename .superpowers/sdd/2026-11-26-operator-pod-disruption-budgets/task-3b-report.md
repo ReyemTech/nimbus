@@ -107,3 +107,19 @@ Implemented Task 3B in commit `74e4b2e` (`feat: add remaining controller disrupt
 - `tests/unit/access-pod-disruption-budget.test.ts`
 
 Helm rendering was not run. Upstream sources are current `main` branches and the charts remain unpinned, so exact installed chart versions can still differ from the inspected sources.
+
+## Round 3 review fixes
+
+### Test-first evidence
+
+- **RED:** Before production edits, `npx vitest run tests/unit/access-pod-disruption-budget.test.ts` failed **2 tests**. Disabled WireGuard autoscaling with `minReplicas: 5` and `replicaCount: 3` produced `minAvailable: 4` instead of `2`; Tailscale `fullnameOverride: "operator--"` selected `operator` instead of the chart helper's `operator-`.
+- **GREEN:** `npx vitest run tests/unit/access-pod-disruption-budget.test.ts` passed: **1 file, 10 tests**.
+- `npm run typecheck` passed.
+- `npx eslint src/access/tailscale.ts src/access/wireguard.ts tests/unit/access-pod-disruption-budget.test.ts` passed with no output.
+- `npx prettier --check src/access/tailscale.ts src/access/wireguard.ts tests/unit/access-pod-disruption-budget.test.ts` passed: all matched files use Prettier style.
+- `git diff --check` passed with no output.
+
+### Round 3 changes
+
+- WireGuard uses `autoscaling.minReplicas` only when autoscaling is enabled. When disabled, the desired count comes from `replicaCount` (or the chart default of 3).
+- Tailscale fullname normalization now removes one trailing dash, matching Helm's `trimSuffix "-"` behavior.

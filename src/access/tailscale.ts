@@ -75,7 +75,7 @@ export function deployTailscale(name: string, config: ITailscaleGatewayConfig): 
         : "operator"
   )
     .slice(0, 63)
-    .replace(/-+$/, "");
+    .replace(/-$/, "");
   if (operatorBudget)
     new k8s.policy.v1.PodDisruptionBudget(
       `${name}-tailscale-operator-pdb`,

@@ -95,7 +95,7 @@ export function deployWireGuard(name: string, config: IWireGuardGatewayConfig): 
     throw new Error("scheduling.replicas conflicts with Helm values.replicaCount");
   }
   const actualReplicas =
-    typeof rawAutoscaling.minReplicas === "number"
+    rawAutoscaling.enabled !== false && typeof rawAutoscaling.minReplicas === "number"
       ? rawAutoscaling.minReplicas
       : typeof rawReplicas === "number"
         ? rawReplicas

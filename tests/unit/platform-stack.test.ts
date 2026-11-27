@@ -1034,7 +1034,11 @@ describe("platform stack — ClusterSecretStore", () => {
       cluster,
       domain: "reyem.tech",
       certManager: { enabled: false },
-      vault: { enabled: true, esoSecretPaths: ["argocd/ghcr-reyemtech"] },
+      vault: {
+        enabled: true,
+        esoSecretPaths: ["argocd/ghcr-reyemtech"],
+        esoKubernetesAuthAudience: "eso.example.com",
+      },
       externalSecrets: { enabled: true },
     });
 
@@ -1047,7 +1051,7 @@ describe("platform stack — ClusterSecretStore", () => {
       serviceAccountRef: {
         name: "external-secrets",
         namespace: "external-secrets",
-        audiences: ["vault"],
+        audiences: ["eso.example.com"],
       },
     });
 
@@ -1058,6 +1062,7 @@ describe("platform stack — ClusterSecretStore", () => {
     const script = bootstrap.args.data["bootstrap.sh"] as string;
     expect(script).toContain("bound_service_account_names=external-secrets");
     expect(script).toContain("bound_service_account_namespaces=external-secrets");
+    expect(script).toContain("audience=eso.example.com");
     expect(script).toContain("audience=vault");
     expect(script).toMatch(
       /vault policy write eso - <<'EOPOLICY'\npath "secret\/data\/argocd\/ghcr-reyemtech" \{ capabilities = \["read"\] \}\nEOPOLICY/

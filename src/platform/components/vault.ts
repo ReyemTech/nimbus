@@ -31,7 +31,8 @@ const VAULT_HA_REPLICAS = 3;
  */
 const ESO_SERVICE_ACCOUNT = "external-secrets";
 const ESO_NAMESPACE = "external-secrets";
-const DEFAULT_ESO_AUDIENCE = "vault";
+const VAULT_BOOTSTRAP_AUDIENCE = "vault";
+const DEFAULT_ESO_AUDIENCE = VAULT_BOOTSTRAP_AUDIENCE;
 
 function validateEsoPaths(paths: ReadonlyArray<string>): void {
   for (const path of paths) {
@@ -242,7 +243,7 @@ EOPOLICY
 vault write auth/kubernetes/role/vault-bootstrap \\
   bound_service_account_names=${vaultServiceAccountName} \\
   bound_service_account_namespaces=vault \\
-  audience=vault \\
+  audience=${VAULT_BOOTSTRAP_AUDIENCE} \\
   policies=vault-bootstrap \\
   ttl=1h
 
@@ -736,7 +737,7 @@ export function deployVault(
           sources: [
             {
               serviceAccountToken: {
-                audience: esoAudience,
+                audience: VAULT_BOOTSTRAP_AUDIENCE,
                 expirationSeconds: 3600,
                 path: "token",
               },

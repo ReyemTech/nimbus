@@ -1,9 +1,10 @@
 /**
- * Cache implementation — deploys Bitnami Redis via Helm.
+ * Cache implementation — deploys the selected in-cluster cache through Helm.
  *
- * Supports standalone and replication (Sentinel) architectures.
- * Authentication is always enabled; Bitnami creates a `{releaseName}-redis`
- * secret with a `redis-password` key.
+ * Redis retains the Bitnami chart path; Valkey uses the official Valkey chart.
+ * Both paths support standalone and replication architectures.
+ * Authentication is always enabled. Redis uses the chart-generated password;
+ * Valkey credentials are managed in a Nimbus Kubernetes Secret.
  *
  * @module cache/cache
  */
@@ -19,6 +20,7 @@ import type { ICacheConfig, ICache } from "./interfaces";
 import { createPrometheusRule } from "../observability/alerts";
 import { buildPodDisruptionBudgetSpec, resolvePodDisruptionBudget } from "../availability";
 import { chartPodPlacement } from "../platform/components/scheduling";
+import { createValkeyCache } from "./valkey";
 
 /** Target namespace for all cache deployments. */
 const CACHE_NAMESPACE = "data";
@@ -82,6 +84,17 @@ export function createCache(
   provider: k8s.Provider,
   storageTiers?: StorageTierMap
 ): ICache {
+  const engine = config.engine ?? "redis";
+
+  if (engine === "valkey") {
+    if (config.mode === "managed") {
+      throw new Error(
+        "Valkey currently supports only mode: 'helm'; managed Valkey is not available"
+      );
+    }
+    return createValkeyCache(name, config, provider, storageTiers);
+  }
+
   // Resolve to a single cloud target (take the first when multi-cloud array is given)
   const resolved = resolveCloudTarget(config.cloud);
   const cloud: ResolvedCloudTarget = Array.isArray(resolved) ? resolved[0] : resolved;
@@ -465,7 +478,7 @@ export function createCache(
   return {
     name,
     cloud,
-    engine: config.engine,
+    engine,
     endpoint,
     port,
     secretRef,

@@ -2,7 +2,7 @@
  * Cache interfaces for @reyemtech/nimbus.
  *
  * Abstracts Redis/Memcached/Valkey provisioning — managed services
- * (ElastiCache, Azure Cache, Memorystore) or Helm-based (Bitnami Redis).
+ * (ElastiCache, Azure Cache, Memorystore) or Helm-based cache deployments.
  *
  * @module cache/interfaces
  */
@@ -19,7 +19,7 @@ export type CacheEngine = "redis" | "memcached" | "valkey";
 /** Cache deployment mode. */
 export type CacheMode =
   | "managed" // Cloud-native (ElastiCache, Azure Cache, Memorystore)
-  | "helm"; // In-cluster via Helm chart (Bitnami Redis)
+  | "helm"; // In-cluster via Helm chart
 
 /** Cache architecture. */
 export type CacheArchitecture =
@@ -67,8 +67,8 @@ export const CACHE_ARCHITECTURES = {
 export interface ICacheConfig {
   /** Cloud provider target or multi-cloud array. */
   readonly cloud: CloudArg;
-  /** Cache engine to provision. */
-  readonly engine: CacheEngine;
+  /** Cache engine to provision. Defaults to Redis for backward compatibility. */
+  readonly engine?: CacheEngine;
   /** Deployment mode: managed cloud service or Helm chart. */
   readonly mode?: CacheMode;
   /** Cache topology: standalone, replication, or cluster. */
@@ -83,15 +83,17 @@ export interface ICacheConfig {
   readonly storageTier?: StorageTier;
   /** Memory limit for cache instances (e.g., "512Mi", "1Gi"). Default: "256Mi". */
   readonly memory?: string;
+  /** Valkey Helm chart version. Defaults to the Nimbus-tested chart version. */
+  readonly chartVersion?: string;
   /** Enable Prometheus metrics exporter. */
   readonly metrics?: boolean;
   /** Resource tags applied to the cache and child resources. */
   readonly tags?: Readonly<Record<string, string>>;
   /** Namespaces to replicate connection secrets into (host, port, password, uri). */
   readonly namespaces?: string[];
-  /** Disruption policy applied to Redis controllers and the Nimbus master tracker. */
+  /** Disruption policy applied to cache and auxiliary controller pods. */
   readonly podDisruptionBudget?: IPodDisruptionBudgetConfig;
-  /** Replica count and placement for Redis controllers and the Nimbus tracker. */
+  /** Replica count and placement for cache workloads and auxiliary controllers. */
   readonly scheduling?: IPodSchedulingConfig;
 }
 

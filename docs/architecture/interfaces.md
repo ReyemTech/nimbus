@@ -380,7 +380,7 @@ interface IDatabase {
 
 ### ICache
 
-Abstracts Redis/Memcached provisioning.
+Abstracts Redis/Memcached provisioning, including opt-in in-cluster Valkey.
 
 ```typescript
 /** Cache engine */
@@ -395,12 +395,13 @@ type CacheArchitecture = "standalone" | "replication" | "cluster";
 /** Cache configuration input */
 interface ICacheConfig {
   readonly cloud: CloudArg;
-  readonly engine: CacheEngine;
+  readonly engine?: CacheEngine; // Defaults to Redis for compatibility
   readonly mode?: CacheMode; // Default: "helm"
   readonly architecture?: CacheArchitecture; // Default: "replication"
   readonly replicas?: number;
   readonly instanceClass?: string; // For managed
   readonly storageGb?: number; // For persistence
+  readonly chartVersion?: string; // Valkey chart version override
   readonly metrics?: boolean;
   readonly tags?: Readonly<Record<string, string>>;
 }

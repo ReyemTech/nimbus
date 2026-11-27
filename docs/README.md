@@ -20,6 +20,7 @@
 - [Migration guide](migration-guide.md)
 - [v3 migration](migrations/v3.md)
 - [CNPG declarative databases](cnpg-declarative-databases.md)
+- [Cache deployments](cache.md): Redis compatibility and in-cluster Valkey.
 - [Utilities](utilities.md)
 
 ## Architecture

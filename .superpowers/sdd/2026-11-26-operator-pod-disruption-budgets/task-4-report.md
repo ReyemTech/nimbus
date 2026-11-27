@@ -191,3 +191,52 @@ Exit code    0
 Distributed mode now scopes Nimbus budgets to the eight individual chart microservices: compactor (1), distributor (3), index gateway (2), ingester (3), querier (3), query frontend (2), query scheduler (2), and gateway (1). Optional pattern-ingester and ruler budgets are added only when their chart values explicitly enable them. SimpleScalable read/write/backend values are kept at zero; conflicting nonzero raw replica settings are rejected. Raw per-component values merge with typed replica/spread values, and conflicting raw replica counts are rejected. Nimbus native-PDB collision validation is applied only when the typed policy is active; opted-out policy allows chart-owned PDB values.
 
 These counts and mode distinctions follow the [official Loki microservices installation docs](https://grafana.com/docs/loki/latest/setup/install/helm/install-microservices/) and [official chart values reference](https://grafana.com/docs/loki/latest/setup/install/helm/reference/). The docs note that distributed mode requires object storage. This task's tests inspect Pulumi registrations and chart values, not a remote Helm render, so actual manifests for a user-selected chart version are still unverified.
+
+## Round 3
+
+Base: `b1c01ba`
+
+### RED
+
+Command:
+
+```text
+npm test -- tests/unit/observability-pod-disruption-budget.test.ts
+```
+
+Actual result before the fix:
+
+```text
+Test Files  1 failed (1)
+Tests       5 failed | 11 passed (16)
+Exit code   1
+```
+
+Resource-registration assertions showed optional enabled `ruler` and `patternIngester` did not receive typed topology spread, and conflicting raw replica counts did not throw. Existing opt-out coverage also exposed a Pulumi mock resource-queue leak from synchronous rejection tests; those tests now flush the runtime after asserting the rejection.
+
+### GREEN
+
+Focused command:
+
+```text
+npm test -- tests/unit/observability-pod-disruption-budget.test.ts
+```
+
+Actual result:
+
+```text
+Test Files  1 passed (1)
+Tests       16 passed (16)
+Duration    679ms
+Exit code    0
+```
+
+Additional checks:
+
+```text
+npm run typecheck                                                passed
+npx eslint src/observability/stack.ts tests/unit/observability-pod-disruption-budget.test.ts passed
+npx prettier --check src/observability/stack.ts tests/unit/observability-pod-disruption-budget.test.ts passed
+```
+
+Optional enabled `ruler` and `patternIngester` now share the core distributed microservices merge: caller values are preserved, typed replicas/spread are applied, and conflicting raw replica counts throw. Each optional controller's registered PDB uses the same replica count and selector as its Helm values. The full test suite was not rerun for this round; round 2's full-suite result remains above.

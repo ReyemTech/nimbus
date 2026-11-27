@@ -976,7 +976,15 @@ function deployLoki(
             ["queryScheduler", "query-scheduler", 2],
             ["gateway", "gateway", 1],
           ] as const;
-          for (const [key, workload, defaultReplicas] of distributed) {
+          const enabled: Array<readonly [string, string, number]> = [...distributed];
+          for (const [key, workload] of [
+            ["patternIngester", "pattern-ingester"],
+            ["ruler", "ruler"],
+          ] as const) {
+            const raw = config.values?.[key] as Record<string, unknown> | undefined;
+            if (raw?.enabled === true) enabled.push([key, workload, 1]);
+          }
+          for (const [key, workload, defaultReplicas] of enabled) {
             const raw = (config.values?.[key] as Record<string, unknown> | undefined) ?? {};
             if (
               config.scheduling?.replicas !== undefined &&

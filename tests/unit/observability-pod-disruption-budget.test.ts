@@ -222,7 +222,7 @@ describe("observability workload disruption budgets", () => {
       topologySpreadConstraints: [expect.objectContaining({ whenUnsatisfiable: "DoNotSchedule" })],
     });
   });
-  it("rejects raw native Loki PDB settings when Nimbus owns the policy", () => {
+  it("rejects raw native Loki PDB settings when Nimbus owns the policy", async () => {
     expect(() =>
       stack({
         loki: {
@@ -233,8 +233,9 @@ describe("observability workload disruption budgets", () => {
         },
       })
     ).toThrow(/Loki component native PDB conflicts with Nimbus/);
+    await pulumi.runtime.disconnect();
   });
-  it("rejects conflicting typed and raw distributed replica counts", () => {
+  it("rejects conflicting typed and raw distributed replica counts", async () => {
     expect(() =>
       stack({
         loki: {
@@ -246,7 +247,56 @@ describe("observability workload disruption budgets", () => {
         },
       })
     ).toThrow(/scheduling.replicas conflicts with Helm values.queryFrontend.replicas/);
+    await pulumi.runtime.disconnect();
   });
+  it.each([
+    ["ruler", "ruler"],
+    ["patternIngester", "pattern-ingester"],
+  ])(
+    "merges typed replicas and placement into enabled optional Loki %s",
+    async (key, component) => {
+      stack({
+        loki: {
+          enabled: true,
+          mode: "distributed",
+          podDisruptionBudget: {},
+          scheduling: { replicas: 2, spread: { strategy: "topology-spread", mode: "required" } },
+          values: { [key]: { enabled: true, replicas: 2 } },
+        },
+      });
+      await pulumi.runtime.disconnect();
+      const release = byType(HELM).find((resource) => (resource.inputs as any).chart === "loki");
+      expect((release?.inputs as any).values[key]).toMatchObject({
+        enabled: true,
+        replicas: 2,
+        topologySpreadConstraints: [
+          expect.objectContaining({ whenUnsatisfiable: "DoNotSchedule" }),
+        ],
+      });
+      const pdb = byType(PDB).find((resource) => resource.name === `obs-loki-${component}-pdb`);
+      expect((pdb?.inputs as any).spec.maxUnavailable).toBe(1);
+      expect((pdb?.inputs as any).spec.selector.matchLabels["app.kubernetes.io/component"]).toBe(
+        component
+      );
+    }
+  );
+  it.each(["ruler", "patternIngester"])(
+    "rejects conflicting typed and raw replicas for enabled Loki %s",
+    async (key) => {
+      expect(() =>
+        stack({
+          loki: {
+            enabled: true,
+            mode: "distributed",
+            podDisruptionBudget: {},
+            scheduling: { replicas: 2 },
+            values: { [key]: { enabled: true, replicas: 1 } },
+          },
+        })
+      ).toThrow(new RegExp(`scheduling\\.replicas conflicts with Helm values\\.${key}\\.replicas`));
+      await pulumi.runtime.disconnect();
+    }
+  );
   it("allows raw Loki PDB settings when Nimbus policy is opted out", async () => {
     stack({
       loki: {

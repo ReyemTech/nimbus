@@ -99,10 +99,10 @@ export function createObservabilityStack(
     if (
       !cluster.eksAddons?.includes("kube-state-metrics") &&
       config.kubeStateMetrics?.podDisruptionBudget?.enabled !== false &&
-      hasRawPdb(rawKubePrometheusValues.kubeStateMetrics)
+      hasRawPdb(rawKubePrometheusValues["kube-state-metrics"])
     )
       throw new Error(
-        "kube-state-metrics podDisruptionBudget conflicts with Helm values.kubeStateMetrics"
+        "kube-state-metrics podDisruptionBudget conflicts with Helm values.kube-state-metrics"
       );
     if (
       config.prometheus?.podDisruptionBudget?.enabled !== false &&
@@ -238,17 +238,21 @@ export function createObservabilityStack(
         const replicas =
           config.loki.scheduling?.replicas ??
           (typeof values?.replicas === "number" ? values.replicas : defaultReplicas);
-        addChartBudget(
-          `${name}-loki-${workload}-pdb`,
-          namespace,
-          "loki",
-          components["loki"].status.apply((s) => s?.name ?? `${name}-loki`),
-          config.loki.podDisruptionBudget,
-          replicas,
-          provider,
-          components["loki"],
-          workload
-        );
+        // The Loki chart already renders component PDBs for workloads with
+        // multiple replicas. Nimbus creates a separate PDB only for singleton
+        // components, which the chart does not protect natively.
+        if (replicas === 1)
+          addChartBudget(
+            `${name}-loki-${workload}-pdb`,
+            namespace,
+            "loki",
+            components["loki"].status.apply((s) => s?.name ?? `${name}-loki`),
+            config.loki.podDisruptionBudget,
+            replicas,
+            provider,
+            components["loki"],
+            workload
+          );
       }
     } else {
       addChartBudget(
@@ -758,12 +762,12 @@ function deployKubePrometheusStack(
   );
   if (managedEksAddons?.includes("kube-state-metrics") !== true) {
     const kubeStateMetricsConfig = kubeStateMetrics ?? {};
-    const values = (stackValues.kubeStateMetrics as Record<string, unknown>) ?? {};
-    const raw = (prometheus?.values?.kubeStateMetrics as Record<string, unknown>) ?? {};
+    const values = (stackValues["kube-state-metrics"] as Record<string, unknown>) ?? {};
+    const raw = (prometheus?.values?.["kube-state-metrics"] as Record<string, unknown>) ?? {};
     if (kubeStateMetricsConfig.scheduling?.replicas !== undefined) {
       if (raw.replicas !== undefined)
         throw new Error(
-          "kube-state-metrics scheduling.replicas conflicts with Helm values.kubeStateMetrics.replicas"
+          "kube-state-metrics scheduling.replicas conflicts with Helm values.kube-state-metrics.replicas"
         );
       values.replicas = kubeStateMetricsConfig.scheduling.replicas;
     }
@@ -772,7 +776,7 @@ function deployKubePrometheusStack(
       raw.podDisruptionBudget !== undefined
     ) {
       throw new Error(
-        "kube-state-metrics podDisruptionBudget conflicts with Helm values.kubeStateMetrics.podDisruptionBudget"
+        "kube-state-metrics podDisruptionBudget conflicts with Helm values.kube-state-metrics.podDisruptionBudget"
       );
     }
     Object.assign(
@@ -784,7 +788,7 @@ function deployKubePrometheusStack(
         "kube-state-metrics"
       )
     );
-    stackValues.kubeStateMetrics = values;
+    stackValues["kube-state-metrics"] = values;
   }
 
   // The EKS community add-ons own these agents when selected. Disable the
@@ -911,7 +915,31 @@ function chartNativeBudget(
   replicas: number
 ): Record<string, unknown> {
   const budget = resolvePodDisruptionBudget(policy ?? {}, replicas);
-  return budget ? { enabled: true, ...budget } : { enabled: false };
+  if (!budget) return { enabled: false };
+  return {
+    enabled: true,
+    ...budget,
+    ...("maxUnavailable" in budget ? { minAvailable: null } : { maxUnavailable: null }),
+  };
+}
+
+function lokiMaxUnavailable(
+  policy: IPodDisruptionBudgetConfig | undefined,
+  replicas: number
+): number | string {
+  if (policy?.enabled === false) return replicas;
+  const budget = resolvePodDisruptionBudget(policy ?? {}, replicas);
+  if (!budget) return replicas;
+  if ("maxUnavailable" in budget) return budget.maxUnavailable;
+  if (typeof budget.minAvailable === "number") {
+    if (budget.minAvailable > replicas)
+      throw new Error(`Loki podDisruptionBudget minAvailable cannot exceed ${replicas} replicas`);
+    return replicas - budget.minAvailable;
+  }
+  const minimum = Number(budget.minAvailable.slice(0, -1));
+  if (!Number.isFinite(minimum) || minimum > 100)
+    throw new Error("Loki podDisruptionBudget minAvailable percentage cannot exceed 100%");
+  return replicas - Math.ceil((replicas * minimum) / 100);
 }
 
 function replicaValue(value: unknown): number | undefined {
@@ -1038,6 +1066,9 @@ function deployLoki(
             values[key] = {
               ...raw,
               replicas,
+              ...(replicas > 1 && raw.maxUnavailable === undefined && raw.minAvailable === undefined
+                ? { maxUnavailable: lokiMaxUnavailable(config.podDisruptionBudget, replicas) }
+                : {}),
               ...chartPodPlacement(
                 config.scheduling?.spread,
                 {

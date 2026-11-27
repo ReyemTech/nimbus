@@ -88,14 +88,16 @@ describe("observability workload disruption budgets", () => {
     const kps = byType(HELM).find((x) => (x.inputs as any).chart === "kube-prometheus-stack");
     expect((kps?.inputs as any).values.prometheus.prometheusSpec.replicas).toBe(3);
     expect((kps?.inputs as any).values.alertmanager.alertmanagerSpec.replicas).toBe(2);
-    expect((kps?.inputs as any).values.kubeStateMetrics.replicas).toBe(2);
+    expect((kps?.inputs as any).values["kube-state-metrics"].replicas).toBe(2);
     expect((kps?.inputs as any).values.prometheus.podDisruptionBudget).toEqual({
       enabled: true,
       maxUnavailable: 1,
+      minAvailable: null,
     });
     expect((kps?.inputs as any).values.alertmanager.podDisruptionBudget).toEqual({
       enabled: true,
       maxUnavailable: 1,
+      minAvailable: null,
     });
     expect(
       byType(PDB).some((resource) => {
@@ -112,6 +114,7 @@ describe("observability workload disruption budgets", () => {
     expect((kps?.inputs as any).values.prometheus.podDisruptionBudget).toEqual({
       enabled: true,
       minAvailable: 1,
+      maxUnavailable: null,
     });
     expect(byType(PDB).map((x) => (x.inputs as any).spec)).toContainEqual({
       minAvailable: 1,
@@ -197,7 +200,7 @@ describe("observability workload disruption budgets", () => {
       {
         prometheus: {
           enabled: true,
-          values: { kubeStateMetrics: { podDisruptionBudget: { enabled: true } } },
+          values: { "kube-state-metrics": { podDisruptionBudget: { enabled: true } } },
         },
       },
     ],
@@ -206,7 +209,7 @@ describe("observability workload disruption budgets", () => {
       {
         grafana: {
           enabled: true,
-          values: { kubeStateMetrics: { podDisruptionBudget: { enabled: true } } },
+          values: { "kube-state-metrics": { podDisruptionBudget: { enabled: true } } },
         },
       },
     ],
@@ -215,7 +218,7 @@ describe("observability workload disruption budgets", () => {
       {
         alertmanager: {
           enabled: true,
-          values: { kubeStateMetrics: { podDisruptionBudget: { enabled: true } } },
+          values: { "kube-state-metrics": { podDisruptionBudget: { enabled: true } } },
         },
       },
     ],
@@ -229,7 +232,7 @@ describe("observability workload disruption budgets", () => {
       cluster: { ...cluster(), eksAddons: ["kube-state-metrics"] } as any,
       prometheus: {
         enabled: true,
-        values: { kubeStateMetrics: { podDisruptionBudget: { enabled: true } } },
+        values: { "kube-state-metrics": { podDisruptionBudget: { enabled: true } } },
       },
     });
     await pulumi.runtime.disconnect();
@@ -266,13 +269,21 @@ describe("observability workload disruption budgets", () => {
       write: { replicas: 0 },
       backend: { replicas: 0 },
     });
-    const distributor = byType(PDB).find((x) => x.name === "obs-loki-distributor-pdb");
-    expect((distributor?.inputs as any).spec.selector.matchLabels).toEqual({
-      "app.kubernetes.io/name": "loki",
-      "app.kubernetes.io/instance": "obs-loki-actual",
-      "app.kubernetes.io/component": "distributor",
+    expect((release?.inputs as any).values.distributor.maxUnavailable).toBe(1);
+    expect(byType(PDB)).toHaveLength(0);
+  });
+  it("translates percentage minAvailable to the equivalent Loki maxUnavailable count", async () => {
+    stack({
+      loki: {
+        enabled: true,
+        mode: "distributed",
+        podDisruptionBudget: { minAvailable: "50%" },
+        scheduling: { replicas: 3 },
+      },
     });
-    expect(byType(PDB)).toHaveLength(8);
+    await pulumi.runtime.disconnect();
+    const release = byType(HELM).find((x) => (x.inputs as any).chart === "loki");
+    expect((release?.inputs as any).values.distributor.maxUnavailable).toBe(1);
   });
   it("applies typed replica count to single-binary Loki only", async () => {
     stack({
@@ -351,14 +362,13 @@ describe("observability workload disruption budgets", () => {
       expect((release?.inputs as any).values[key]).toMatchObject({
         enabled: true,
         replicas: 2,
+        maxUnavailable: 1,
         topologySpreadConstraints: [
           expect.objectContaining({ whenUnsatisfiable: "DoNotSchedule" }),
         ],
       });
-      const pdb = byType(PDB).find((resource) => resource.name === `obs-loki-${component}-pdb`);
-      expect((pdb?.inputs as any).spec.maxUnavailable).toBe(1);
-      expect((pdb?.inputs as any).spec.selector.matchLabels["app.kubernetes.io/component"]).toBe(
-        component
+      expect(byType(PDB).some((resource) => resource.name === `obs-loki-${component}-pdb`)).toBe(
+        false
       );
     }
   );
@@ -391,6 +401,21 @@ describe("observability workload disruption budgets", () => {
     await pulumi.runtime.disconnect();
     const release = byType(HELM).find((x) => (x.inputs as any).chart === "loki");
     expect((release?.inputs as any).values.distributor.maxUnavailable).toBe(1);
+    expect(byType(PDB)).toHaveLength(0);
+  });
+  it("preserves raw Loki minAvailable when Nimbus policy is opted out", async () => {
+    stack({
+      loki: {
+        enabled: true,
+        mode: "distributed",
+        podDisruptionBudget: { enabled: false },
+        values: { distributor: { minAvailable: 1 } },
+      },
+    });
+    await pulumi.runtime.disconnect();
+    const release = byType(HELM).find((x) => (x.inputs as any).chart === "loki");
+    expect((release?.inputs as any).values.distributor.minAvailable).toBe(1);
+    expect((release?.inputs as any).values.distributor.maxUnavailable).toBeUndefined();
     expect(byType(PDB)).toHaveLength(0);
   });
   it("matches Uptime Kuma nameOverride in its registered PDB selector", async () => {

@@ -151,17 +151,14 @@ const componentCases = [
     ],
     replicaPaths: [["operator", "replicas"]],
     rawValues: { operator: { replicas: 2 } },
-    spreadPaths: [
+    placementPaths: [
       [
-        "operator",
-        "topologySpreadConstraints",
+        "affinity",
         {
           "app.kubernetes.io/name": "trivy-operator",
-          "app.kubernetes.io/instance": "test-trivy-operator",
         },
       ],
     ],
-    placementPaths: [],
   },
   {
     name: "traefik",
@@ -505,6 +502,7 @@ const componentCases = [
 describe.each(componentCases)(
   "$name availability integration",
   ({
+    name,
     run,
     release,
     nativePaths = [],
@@ -539,6 +537,25 @@ describe.each(componentCases)(
     });
 
     it("translates two replicas and required topology spread to each workload", () => {
+      if (name === "trivy-operator") {
+        expect(() =>
+          run({
+            enabled: true,
+            podDisruptionBudget: {},
+            scheduling: {
+              replicas: 2,
+              spread: {
+                strategy: "topology-spread",
+                topologyKey: "topology.kubernetes.io/zone",
+                mode: "required",
+              },
+            },
+            ha: true,
+            bootstrap: false,
+          })
+        ).toThrow(/supports pod anti-affinity, not topology spread/);
+        return;
+      }
       run({
         enabled: true,
         podDisruptionBudget: {},
@@ -625,6 +642,7 @@ describe.each(componentCases)(
           kind: "topologySpreadConstraints",
         });
       }
+      const strategy = name === "trivy-operator" ? "pod-anti-affinity" : "topology-spread";
       for (const { path, kind } of cases) {
         reset();
         const values: Record<string, any> = {};
@@ -632,7 +650,7 @@ describe.each(componentCases)(
         expect(() =>
           run({
             enabled: true,
-            scheduling: { spread: { strategy: "topology-spread", mode: "required" } },
+            scheduling: { spread: { strategy, mode: "required" } },
             values,
             ha: true,
             bootstrap: false,
@@ -711,7 +729,7 @@ it("rejects OAuth2 Proxy raw and typed PDB conflicts", () => {
   ).toThrow(/podDisruptionBudget conflicts with Helm values/);
   expect(releases).toHaveLength(0);
 });
-it("keeps raw Trivy operator values while applying typed replicas and spread", () => {
+it("keeps raw Trivy values and applies typed replicas and pod anti-affinity at chart root", () => {
   deployTrivyOperator(
     "test",
     {
@@ -719,7 +737,7 @@ it("keeps raw Trivy operator values while applying typed replicas and spread", (
       scheduling: {
         replicas: 3,
         spread: {
-          strategy: "topology-spread",
+          strategy: "pod-anti-affinity",
           mode: "required",
           topologyKey: "topology.kubernetes.io/zone",
         },
@@ -732,23 +750,29 @@ it("keeps raw Trivy operator values while applying typed replicas and spread", (
     mockProvider,
     "1.0.0"
   );
-  const operator = releases[0]!.args.values.operator;
+  const values = releases[0]!.args.values;
+  const operator = values.operator;
   expect(operator.scanJobTimeout).toBe("20m");
   expect(operator.replicas).toBe(3);
-  expect(operator.topologySpreadConstraints).toEqual([
+  expect(values.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution).toEqual([
     {
-      maxSkew: 1,
       topologyKey: "topology.kubernetes.io/zone",
-      whenUnsatisfiable: "DoNotSchedule",
-      labelSelector: {
-        matchLabels: {
-          "app.kubernetes.io/name": "trivy-operator",
-        },
-      },
+      labelSelector: { matchLabels: { "app.kubernetes.io/name": "trivy-operator" } },
     },
   ]);
-  expect(releases[0]!.args.values.trivy).toEqual({ ignoreUnfixed: true, mode: "ClientServer" });
+  expect(values.trivy).toEqual({ ignoreUnfixed: true, mode: "ClientServer" });
   expect(budgets[0]!.args.spec.maxUnavailable).toBe(1);
+});
+it("rejects topology spread for Trivy Operator", () => {
+  expect(() =>
+    deployTrivyOperator(
+      "test",
+      { scheduling: { spread: { strategy: "topology-spread", mode: "required" } } },
+      mockProvider,
+      "1.0.0"
+    )
+  ).toThrow(/supports pod anti-affinity, not topology spread/);
+  expect(releases).toHaveLength(0);
 });
 it("rejects enabled raw Descheduler PDB values in CronJob mode", () => {
   expect(() =>

@@ -20,6 +20,16 @@ export function deployTrivyOperator(
   const rawOperator = (raw.operator ?? {}) as Record<string, unknown>;
   const rawTrivy = (raw.trivy ?? {}) as Record<string, unknown>;
   const replicas = config.scheduling?.replicas ?? (rawOperator.replicas as number | undefined) ?? 1;
+  if (config.scheduling?.spread?.strategy === "topology-spread")
+    throw new Error(
+      "Trivy Operator chart supports pod anti-affinity, not topology spread constraints"
+    );
+  const placement = chartPodPlacement(
+    config.scheduling?.spread,
+    { "app.kubernetes.io/name": "trivy-operator", "app.kubernetes.io/instance": instance },
+    raw,
+    "Trivy Operator"
+  );
   const release = new k8s.helm.v3.Release(
     instance,
     {
@@ -30,16 +40,11 @@ export function deployTrivyOperator(
       createNamespace: true,
       values: {
         ...raw,
+        ...placement,
         operator: {
           scanJobTimeout: "10m",
           scanJobsConcurrentLimit: 5,
           ...rawOperator,
-          ...chartPodPlacement(
-            config.scheduling?.spread,
-            { "app.kubernetes.io/name": "trivy-operator", "app.kubernetes.io/instance": instance },
-            rawOperator,
-            "Trivy Operator"
-          ),
           ...(config.scheduling?.replicas !== undefined
             ? { replicas: config.scheduling.replicas }
             : {}),

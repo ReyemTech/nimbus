@@ -29,3 +29,5 @@ Examples are split by provider and use case:
 - [Standalone](examples/standalone.md): resources without cluster creation and state backend.
 
 For portable ServiceAccount kubeconfigs, see the [Kubernetes access guide](guides/kubernetes-access.md).
+
+For in-cluster Redis and Valkey configurations, see [Cache deployments](cache.md).

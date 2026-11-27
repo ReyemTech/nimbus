@@ -12,6 +12,7 @@ import * as pulumi from "@pulumi/pulumi";
 import type { IWireGuardGatewayConfig, IWireGuardPeer, IAccessGateway } from "./interfaces";
 import { deployAccessDns } from "./dns";
 import { ensureNamespace } from "../utils/ensure-namespace";
+import { resolvePodDisruptionBudget } from "../availability";
 
 const NAMESPACE = "access";
 const DEFAULT_PORT = 51820;
@@ -93,11 +94,39 @@ export function deployWireGuard(name: string, config: IWireGuardGatewayConfig): 
     },
     { provider: k8sProvider, dependsOn: [nsResource] }
   );
+  const replicas = config.wireguard.scheduling?.replicas ?? 1;
+  const budget = resolvePodDisruptionBudget(config.wireguard.podDisruptionBudget ?? {}, replicas);
+  if (budget)
+    new k8s.policy.v1.PodDisruptionBudget(
+      `${name}-wireguard-pdb`,
+      {
+        metadata: { name: "wireguard", namespace: NAMESPACE },
+        spec: {
+          ...budget,
+          selector: {
+            matchLabels: {
+              "app.kubernetes.io/instance": "wireguard",
+              "app.kubernetes.io/name": "wireguard",
+            },
+          },
+        },
+      },
+      { provider: k8sProvider, dependsOn: [helmRelease] }
+    );
 
   // Split DNS
   let dnsClusterIp: pulumi.Output<string> | undefined;
   if (config.dns?.enabled) {
-    const dns = deployAccessDns(name, prefix, config.dns, NAMESPACE, k8sProvider, [], [nsResource]);
+    const dns = deployAccessDns(
+      name,
+      prefix,
+      config.dns,
+      NAMESPACE,
+      k8sProvider,
+      [],
+      [nsResource],
+      config.dns
+    );
     dnsClusterIp = dns.clusterIp;
   }
 

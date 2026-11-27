@@ -34,6 +34,9 @@ import { deployExternalDns } from "../../src/platform/components/external-dns";
 import { deployExternalSecrets } from "../../src/platform/components/external-secrets";
 import { deployTraefik } from "../../src/platform/components/traefik";
 import { deployVault } from "../../src/platform/components/vault";
+import { deployDescheduler } from "../../src/platform/components/descheduler";
+import { deployOAuth2Proxy } from "../../src/platform/components/oauth2-proxy";
+import { deployTrivyOperator } from "../../src/platform/components/trivy-operator";
 
 function reset() {
   releases.length = 0;
@@ -42,6 +45,92 @@ function reset() {
 afterEach(reset);
 
 const componentCases = [
+  {
+    name: "descheduler",
+    run: (config: any) => deployDescheduler("test", config, mockProvider, "1.0.0"),
+    release: "test-descheduler",
+    fallback: [
+      {
+        namespace: "kube-system",
+        selector: {
+          "app.kubernetes.io/name": "descheduler",
+          "app.kubernetes.io/instance": "test-descheduler",
+        },
+      },
+    ],
+    replicaPaths: [["replicas"]],
+    rawValues: { replicas: 2 },
+    spreadPaths: [
+      [
+        "topologySpreadConstraints",
+        {
+          "app.kubernetes.io/name": "descheduler",
+          "app.kubernetes.io/instance": "test-descheduler",
+        },
+      ],
+    ],
+    placementPaths: [],
+  },
+  {
+    name: "oauth2-proxy",
+    run: (config: any) =>
+      deployOAuth2Proxy(
+        "test",
+        { provider: "google", clientId: "id", clientSecret: "secret", ...config },
+        "example.com",
+        mockProvider,
+        "1.0.0"
+      ),
+    release: "test-oauth2-proxy",
+    fallback: [
+      {
+        namespace: "traefik",
+        selector: {
+          "app.kubernetes.io/name": "oauth2-proxy",
+          "app.kubernetes.io/instance": "test-oauth2-proxy",
+        },
+      },
+    ],
+    replicaPaths: [["replicaCount"]],
+    rawValues: { replicaCount: 2 },
+    spreadPaths: [
+      [
+        "topologySpreadConstraints",
+        {
+          "app.kubernetes.io/name": "oauth2-proxy",
+          "app.kubernetes.io/instance": "test-oauth2-proxy",
+        },
+      ],
+    ],
+    placementPaths: [],
+  },
+  {
+    name: "trivy-operator",
+    run: (config: any) => deployTrivyOperator("test", config, mockProvider, "1.0.0"),
+    release: "test-trivy-operator",
+    fallback: [
+      {
+        namespace: "trivy-system",
+        selector: {
+          "app.kubernetes.io/name": "trivy-operator",
+          "app.kubernetes.io/instance": "test-trivy-operator",
+        },
+      },
+    ],
+    replicaPaths: [["operator", "replicas"]],
+    rawValues: { operator: { replicas: 2 } },
+    spreadPaths: [
+      [
+        "operator",
+        "topologySpreadConstraints",
+        {
+          "app.kubernetes.io/name": "trivy-operator",
+          "app.kubernetes.io/instance": "test-trivy-operator",
+        },
+      ],
+    ],
+    placementPaths: [],
+  },
   {
     name: "traefik",
     run: (config: any) => deployTraefik("test", config, mockProvider, "1.0.0"),

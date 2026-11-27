@@ -14,6 +14,7 @@ import { deployAccessDns } from "./dns";
 import { deployAccessProxy } from "./proxy";
 import { TailscaleSplitDns } from "./tailscale-dns";
 import { ensureNamespace } from "../utils/ensure-namespace";
+import { resolvePodDisruptionBudget } from "../availability";
 
 const NAMESPACE = "access";
 
@@ -50,6 +51,28 @@ export function deployTailscale(name: string, config: ITailscaleGatewayConfig): 
     },
     { provider, dependsOn: [nsResource] }
   );
+  const replicas = config.tailscale.scheduling?.replicas ?? 1;
+  const operatorBudget = resolvePodDisruptionBudget(
+    config.tailscale.podDisruptionBudget ?? {},
+    replicas
+  );
+  if (operatorBudget)
+    new k8s.policy.v1.PodDisruptionBudget(
+      `${name}-tailscale-operator-pdb`,
+      {
+        metadata: { name: "tailscale-operator", namespace: NAMESPACE },
+        spec: {
+          ...operatorBudget,
+          selector: {
+            matchLabels: {
+              "app.kubernetes.io/name": "operator",
+              "app.kubernetes.io/instance": "tailscale-operator",
+            },
+          },
+        },
+      },
+      { provider, dependsOn: [helmRelease] }
+    );
 
   // Connector CRD — advertise subnet routes
   new k8s.apiextensions.CustomResource(
@@ -99,9 +122,15 @@ export function deployTailscale(name: string, config: ITailscaleGatewayConfig): 
   if (config.tailscale.services && config.tailscale.services.length > 0 && config.dns?.enabled) {
     const tld = config.dns.tld ?? "internal";
     const dnsSuffix = `${prefix}.${tld}`;
-    deployAccessProxy(name, config.tailscale.services, dnsSuffix, NAMESPACE, provider, [
-      nsResource,
-    ]);
+    deployAccessProxy(
+      name,
+      config.tailscale.services,
+      dnsSuffix,
+      NAMESPACE,
+      provider,
+      [nsResource],
+      config.dns
+    );
   }
 
   // Split DNS — deploy CoreDNS + configure Tailscale API
@@ -113,7 +142,8 @@ export function deployTailscale(name: string, config: ITailscaleGatewayConfig): 
       NAMESPACE,
       provider,
       config.tailscale.services ?? [],
-      [nsResource]
+      [nsResource],
+      config.dns
     );
 
     // Automatically configure Tailscale split DNS via API

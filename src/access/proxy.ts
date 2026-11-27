@@ -13,6 +13,8 @@
 import * as k8s from "@pulumi/kubernetes";
 import * as pulumi from "@pulumi/pulumi";
 import type { IExposedService } from "../types";
+import type { IAccessDnsConfig } from "./interfaces";
+import { resolvePodDisruptionBudget } from "../availability";
 
 /**
  * Build Nginx config from exposed services.
@@ -79,7 +81,8 @@ export function deployAccessProxy(
   dnsSuffix: string,
   namespace: string,
   provider: k8s.Provider,
-  dependsOn?: pulumi.Resource[]
+  dependsOn?: pulumi.Resource[],
+  availability?: IAccessDnsConfig
 ): k8s.core.v1.Service {
   const labels = {
     app: "access-proxy",
@@ -97,16 +100,32 @@ export function deployAccessProxy(
     { provider, dependsOn }
   );
 
-  new k8s.apps.v1.Deployment(
+  const deployment = new k8s.apps.v1.Deployment(
     `${name}-access-proxy`,
     {
       metadata: { name: "access-proxy", namespace },
       spec: {
-        replicas: 1,
+        replicas: availability?.scheduling?.replicas ?? 1,
         selector: { matchLabels: labels },
         template: {
           metadata: { labels },
           spec: {
+            ...(availability?.scheduling?.spread
+              ? {
+                  topologySpreadConstraints: [
+                    {
+                      topologyKey:
+                        availability.scheduling.spread.topologyKey ?? "kubernetes.io/hostname",
+                      maxSkew: 1,
+                      whenUnsatisfiable:
+                        availability.scheduling.spread.mode === "required"
+                          ? "DoNotSchedule"
+                          : "ScheduleAnyway",
+                      labelSelector: { matchLabels: labels },
+                    },
+                  ],
+                }
+              : {}),
             containers: [
               {
                 name: "nginx",
@@ -138,6 +157,19 @@ export function deployAccessProxy(
     },
     { provider, dependsOn: [configMap] }
   );
+  const budget = resolvePodDisruptionBudget(
+    availability?.podDisruptionBudget ?? {},
+    availability?.scheduling?.replicas ?? 1
+  );
+  if (budget)
+    new k8s.policy.v1.PodDisruptionBudget(
+      `${name}-access-proxy-pdb`,
+      {
+        metadata: { name: "access-proxy", namespace },
+        spec: { ...budget, selector: { matchLabels: labels } },
+      },
+      { provider, dependsOn: [deployment] }
+    );
 
   return new k8s.core.v1.Service(
     `${name}-access-proxy-svc`,

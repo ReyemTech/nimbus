@@ -1,3 +1,13 @@
+## [3.19.1](https://github.com/ReyemTech/nimbus/compare/v3.19.0...v3.19.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* **vault:** keep bootstrap service account stable ([936a2a5](https://github.com/ReyemTech/nimbus/commit/936a2a5f0b1c74a484ea77a80c09d743699307ad))
+* **vault:** make initial bootstrap resumable ([a4dcc3a](https://github.com/ReyemTech/nimbus/commit/a4dcc3aa84dff3c9c60ddc059b32db35268c7d94))
+* **vault:** scope ESO Kubernetes authentication ([4ba90ac](https://github.com/ReyemTech/nimbus/commit/4ba90ac4e9b58c749123a0191bb5b0b10427afde))
+* **vault:** separate bootstrap and ESO audiences ([2298360](https://github.com/ReyemTech/nimbus/commit/229836028d9ab2e8ee0b5b1a9d4f81bd1c02feb3))
+
 # [3.19.0](https://github.com/ReyemTech/nimbus/compare/v3.18.0...v3.19.0) (2026-11-27)
 
 

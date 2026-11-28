@@ -17,6 +17,7 @@ export type {
   IHeadlampPluginsConfig,
   IHeadlampConfig,
   IVaultConfig,
+  IVaultUserpassUser,
   IAutoUnsealConfig,
   IAwsKmsUnsealConfig,
   IAzureKeyVaultUnsealConfig,

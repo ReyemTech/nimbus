@@ -24,10 +24,10 @@ const VAULT_HA_REPLICAS = 3;
  * - Unseal (if Shamir) → read recovery keys from the PVC
  * - Enable KV-v2 secrets engine
  * - Enable + configure Kubernetes auth
- * - Create restricted bootstrap and ESO policies + roles
+ * - Create restricted bootstrap, ESO, and break-glass recovery policies + roles
  * - Revoke the one-time root token
  * - Create user-policy for human access
- * - Sleep infinity
+ * - Periodically reconcile configured userpass users
  */
 const ESO_SERVICE_ACCOUNT = "external-secrets";
 const ESO_NAMESPACE = "external-secrets";
@@ -57,19 +57,65 @@ function validateEsoPaths(paths: ReadonlyArray<string>): void {
   }
 }
 
-function buildEsoPolicy(paths: ReadonlyArray<string>): string {
-  if (paths.length === 0) {
-    return '# No secret reads are granted until esoSecretPaths is configured.\npath "secret/data/*" { capabilities = ["deny"] }';
+function validateSecretMount(mount: string): void {
+  if (
+    !mount ||
+    mount.startsWith("/") ||
+    mount.endsWith("/") ||
+    mount
+      .split("/")
+      .some((segment) => !/^[A-Za-z0-9._-]+$/.test(segment) || segment === "." || segment === "..")
+  ) {
+    throw new Error(
+      `Invalid Vault KV-v2 mount "${mount}". Use a relative mount path such as "secret".`
+    );
   }
-  return paths.map((path) => `path "secret/data/${path}" { capabilities = ["read"] }`).join("\n");
+}
+
+function validateUserpassUsers(users: NonNullable<IVaultConfig["userpassUsers"]>): void {
+  const seen = new Set<string>();
+  for (const user of users) {
+    if (
+      !/^[A-Za-z0-9_.-]+$/.test(user.username) ||
+      user.username.startsWith("-") ||
+      user.username.startsWith(".") ||
+      user.username.endsWith(".")
+    ) {
+      throw new Error(`Invalid Vault userpass username "${user.username}".`);
+    }
+    const normalized = user.username.toLowerCase();
+    if (seen.has(normalized))
+      throw new Error(`Duplicate Vault userpass username "${user.username}".`);
+    seen.add(normalized);
+    if (!user.policies.length)
+      throw new Error(`Vault userpass user "${user.username}" must specify at least one policy.`);
+    if (user.policies.some((policy) => !/^[A-Za-z0-9_.-]+$/.test(policy) || policy === "root")) {
+      throw new Error(
+        `Vault userpass user "${user.username}" has an invalid or reserved policy name.`
+      );
+    }
+  }
+}
+
+function buildEsoPolicy(paths: ReadonlyArray<string>, secretMount: string): string {
+  if (paths.length === 0) {
+    return `# No secret reads are granted until esoSecretPaths is configured.\npath "${secretMount}/data/*" { capabilities = ["deny"] }`;
+  }
+  return paths
+    .map((path) => `path "${secretMount}/data/${path}" { capabilities = ["read"] }`)
+    .join("\n");
 }
 
 function buildVaultBootstrapScript(
   esoSecretPaths: ReadonlyArray<string>,
   esoAudience: string,
-  vaultServiceAccountName: string
+  vaultServiceAccountName: string,
+  secretMount: string,
+  userpassUsers: NonNullable<IVaultConfig["userpassUsers"]>
 ): string {
   validateEsoPaths(esoSecretPaths);
+  validateSecretMount(secretMount);
+  validateUserpassUsers(userpassUsers);
   if (!/^[A-Za-z0-9:/._-]+$/.test(esoAudience)) {
     throw new Error(
       "Vault ESO Kubernetes auth audience must contain only letters, numbers, ':', '/', '.', '_' or '-'."
@@ -81,7 +127,23 @@ function buildVaultBootstrapScript(
   ) {
     throw new Error(`Invalid Vault service account name "${vaultServiceAccountName}".`);
   }
-  const esoPolicy = buildEsoPolicy(esoSecretPaths);
+  const esoPolicy = buildEsoPolicy(esoSecretPaths, secretMount);
+  const userpassCommands = userpassUsers
+    .map(
+      (user, index) => `  if ! vault write "auth/userpass/users/${user.username}" \\
+    password=@/vault/userpass/${index}/password \\
+    token_policies="${[...new Set(user.policies)].sort().join(",")}" >/dev/null 2>&1; then
+    echo "ERROR: failed to reconcile Vault userpass user ${user.username}; password values are not logged."
+    return 1
+  fi`
+    )
+    .join("\n");
+  const userpassSetup = userpassUsers.length
+    ? `# Enable userpass without changing existing auth mounts.\nvault auth list | grep -q "userpass/" || vault auth enable userpass\n\nreconcile_userpass_users() {\n${userpassCommands}\n}`
+    : "# No Nimbus-managed userpass users are configured.";
+  const userpassLoop = userpassUsers.length
+    ? `  # Refresh the projected JWT and mint a short-lived bootstrap token.\n  JWT=$(cat /var/run/vault-bootstrap-token/token)\n  if BOOTSTRAP_TOKEN=$(vault write -field=token auth/kubernetes/login role=vault-bootstrap jwt="$JWT" 2>/dev/null); then\n    export VAULT_TOKEN="$BOOTSTRAP_TOKEN"\n    if ! reconcile_userpass_users; then\n      vault token revoke -self >/dev/null 2>&1 || true\n      unset VAULT_TOKEN BOOTSTRAP_TOKEN\n      exit 1\n    fi\n    vault token revoke -self >/dev/null 2>&1 || true\n    unset VAULT_TOKEN BOOTSTRAP_TOKEN\n  else\n    echo "ERROR: Vault userpass reconciliation could not authenticate; retrying without logging credentials."\n  fi\n`
+    : "";
   return `#!/bin/sh
 set -e
 umask 077
@@ -249,10 +311,6 @@ fi
 
 # --- Configure secrets engines + auth ---
 
-# Enable KV-v2 (idempotent)
-vault secrets list | grep -q "secret/" || vault secrets enable -path=secret kv-v2
-echo "KV-v2 engine ready"
-
 # Enable K8s auth (idempotent)
 vault auth list | grep -q "kubernetes/" || vault auth enable kubernetes
 
@@ -261,24 +319,57 @@ vault write auth/kubernetes/config \\
   kubernetes_host="https://kubernetes.default.svc"
 echo "K8s auth configured"
 
-# ESO policy + role
-vault policy write eso - <<'EOPOLICY'
-${esoPolicy}
-EOPOLICY
-
-# Restricted policy for this Vault pod to re-apply Nimbus-managed auth settings.
-# It cannot read or write application secret data.
+# Update the bootstrap policy before using any newly granted operations. This
+# also makes upgrades from older Nimbus bootstrap policies idempotent.
 vault policy write vault-bootstrap - <<'EOPOLICY'
 path "sys/mounts" { capabilities = ["read"] }
-path "sys/mounts/secret" { capabilities = ["create", "read", "update"] }
+path "sys/mounts/${secretMount}" { capabilities = ["create", "read", "update"] }
 path "sys/auth" { capabilities = ["read"] }
 path "sys/auth/kubernetes" { capabilities = ["create", "read", "update"] }
 path "auth/kubernetes/config" { capabilities = ["create", "read", "update"] }
 path "auth/kubernetes/role/eso" { capabilities = ["create", "read", "update"] }
 path "auth/kubernetes/role/vault-bootstrap" { capabilities = ["create", "read", "update"] }
+path "auth/kubernetes/role/vault-root-recovery" { capabilities = ["create", "read", "update"] }
 path "sys/policies/acl/eso" { capabilities = ["create", "read", "update"] }
 path "sys/policies/acl/user-policy" { capabilities = ["create", "read", "update"] }
+path "sys/policies/acl/read-all-secrets" { capabilities = ["create", "read", "update"] }
+path "sys/policies/acl/vault-root-recovery" { capabilities = ["create", "read", "update"] }
 path "sys/policies/acl/vault-bootstrap" { capabilities = ["create", "read", "update"] }
+path "sys/auth/userpass" { capabilities = ["create", "read", "update"] }
+path "auth/userpass/users/*" { capabilities = ["create", "read", "update"] }
+EOPOLICY
+
+# A separate, short-lived role permits only the authenticated root-generation
+# ceremony required by Vault 2.x. The recurring bootstrap token does not receive
+# these capabilities.
+vault policy write vault-root-recovery - <<'EOPOLICY'
+path "sys/generate-root/attempt" { capabilities = ["create", "update", "read", "delete"] }
+path "sys/generate-root/update" { capabilities = ["create", "update"] }
+EOPOLICY
+
+vault write auth/kubernetes/role/vault-root-recovery \\
+  bound_service_account_names=${vaultServiceAccountName} \\
+  bound_service_account_namespaces=vault \\
+  audience=${VAULT_BOOTSTRAP_AUDIENCE} \\
+  policies=vault-root-recovery \\
+  ttl=15m \\
+  token_max_ttl=15m \\
+  token_no_default_policy=true
+
+# Enable KV-v2 (idempotent). This follows policy reconciliation so an existing
+# bootstrap token can use a newly configured mount path during migration.
+vault secrets list | grep -Fq "${secretMount}/" || vault secrets enable -path="${secretMount}" kv-v2
+echo "KV-v2 engine ready"
+
+# ESO policy + role
+vault policy write eso - <<'EOPOLICY'
+${esoPolicy}
+EOPOLICY
+
+vault policy write read-all-secrets - <<'EOPOLICY'
+path "${secretMount}/data/*" { capabilities = ["read"] }
+path "${secretMount}/metadata" { capabilities = ["list", "read"] }
+path "${secretMount}/metadata/*" { capabilities = ["list", "read"] }
 EOPOLICY
 
 vault write auth/kubernetes/role/vault-bootstrap \\
@@ -296,10 +387,12 @@ vault write auth/kubernetes/role/eso \\
   ttl=1h
 echo "ESO policy and role ready"
 
-# User policy (CRUD for humans)
+# User policy (CRUD for humans; retained for backward compatibility)
 vault policy write user-policy - <<'EOPOLICY'
-path "secret/data/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "${secretMount}/data/*" { capabilities = ["create", "read", "update", "delete", "list"] }
 EOPOLICY
+
+${userpassSetup}
 
 # Revoke any root token used for bootstrap, then remove all transient handoff
 # files. If the sidecar restarts between revoke and cleanup, it falls back to the
@@ -310,8 +403,10 @@ fi
 rm -f "$LEGACY_TOKEN_FILE" "$INIT_OUTPUT_FILE" "$INIT_OUTPUT_TMP_FILE"
 unset ROOT_TOKEN VAULT_TOKEN BOOTSTRAP_TOKEN
 
-echo "Bootstrap complete — sleeping"
-exec sleep infinity
+echo "Bootstrap complete — entering periodic reconciliation"
+while true; do
+${userpassLoop}  sleep 300
+done
 `;
 }
 
@@ -596,6 +691,26 @@ export function deployVault(
   const bootstrap = config.bootstrap ?? true;
   const esoSecretPaths = [...new Set(config.esoSecretPaths ?? [])].sort();
   const esoAudience = config.esoKubernetesAuthAudience ?? DEFAULT_ESO_AUDIENCE;
+  const secretMount = config.secretMount ?? "secret";
+  validateSecretMount(secretMount);
+  const userpassUsers = [...(config.userpassUsers ?? [])].sort((a, b) =>
+    a.username.localeCompare(b.username)
+  );
+  const userpassSecretNames = userpassUsers.map((user) => {
+    const safeStackName = name
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
+    const usernameHash = createHash("sha256").update(user.username).digest("hex").slice(0, 8);
+    return `${safeStackName || "nimbus"}-vault-userpass-${usernameHash}`;
+  });
+  validateUserpassUsers(userpassUsers);
+  if (userpassUsers.length > 0 && config.bootstrap === false) {
+    throw new Error(
+      "Vault userpassUsers require the Vault bootstrap sidecar; set bootstrap to true or omit it."
+    );
+  }
   const customServerValues = (config.values?.server as Record<string, unknown> | undefined) ?? {};
   const customServiceAccountValues =
     (customServerValues["serviceAccount"] as Record<string, unknown> | undefined) ?? {};
@@ -611,7 +726,9 @@ export function deployVault(
   const bootstrapScript = buildVaultBootstrapScript(
     esoSecretPaths,
     esoAudience,
-    vaultServiceAccountName
+    vaultServiceAccountName,
+    secretMount,
+    userpassUsers
   );
   const bootstrapConfigMapName = `vault-bootstrap-${createHash("sha256").update(bootstrapScript).digest("hex").slice(0, 12)}`;
 
@@ -647,6 +764,8 @@ export function deployVault(
 
   // Bootstrap sidecar: ConfigMap + RBAC
   const vaultDependencies: pulumi.Resource[] = [];
+  const vaultNamespace = ensureNamespace("vault", provider);
+  vaultDependencies.push(vaultNamespace);
 
   if (bootstrap) {
     const bootstrapConfigMap = new k8s.core.v1.ConfigMap(
@@ -658,6 +777,24 @@ export function deployVault(
       { provider }
     );
     vaultDependencies.push(bootstrapConfigMap);
+
+    userpassUsers.forEach((user, index) => {
+      const secretName = userpassSecretNames[index];
+      if (!secretName) return;
+      const userSecret = new k8s.core.v1.Secret(
+        secretName,
+        {
+          metadata: {
+            name: secretName,
+            namespace: "vault",
+          },
+          type: "Opaque",
+          stringData: { password: pulumi.secret(user.password) },
+        },
+        { provider, dependsOn: [vaultNamespace], additionalSecretOutputs: ["data"] }
+      );
+      vaultDependencies.push(userSecret);
+    });
 
     // Token review delegation (for K8s auth config)
     const authDelegator = new k8s.rbac.v1.ClusterRoleBinding(
@@ -792,6 +929,21 @@ export function deployVault(
         },
       },
     ];
+    userpassUsers.forEach((_user, index) => {
+      const secretName = userpassSecretNames[index];
+      if (!secretName) return;
+      (serverValues["volumes"] as Array<Record<string, unknown>>).push({
+        name: `userpass-${index}`,
+        secret: { secretName },
+      });
+      (
+        serverValues["extraContainers"] as Array<{ volumeMounts: Array<Record<string, unknown>> }>
+      )[0]?.volumeMounts.push({
+        name: `userpass-${index}`,
+        mountPath: `/vault/userpass/${index}`,
+        readOnly: true,
+      });
+    });
   }
 
   Object.assign(
@@ -807,8 +959,6 @@ export function deployVault(
       "Vault server"
     )
   );
-
-  ensureNamespace("vault", provider);
 
   const instance = `${name}-vault`;
   const values = {

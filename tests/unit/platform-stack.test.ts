@@ -276,6 +276,7 @@ vi.mock("@pulumi/pulumi", () => ({
   }),
   interpolate: (strings: TemplateStringsArray, ...values: unknown[]) =>
     mockOutput(strings.reduce((acc, str, i) => acc + str + (values[i] ?? ""), "")),
+  secret: (val: unknown) => ({ __secret: val }),
 }));
 
 import { createPlatformStack } from "../../src/platform/stack";
@@ -1036,6 +1037,7 @@ describe("platform stack — ClusterSecretStore", () => {
       certManager: { enabled: false },
       vault: {
         enabled: true,
+        secretMount: "kv-prod",
         esoSecretPaths: ["argocd/ghcr-reyemtech"],
         esoKubernetesAuthAudience: "eso.example.com",
       },
@@ -1065,11 +1067,27 @@ describe("platform stack — ClusterSecretStore", () => {
     expect(script).toContain("audience=eso.example.com");
     expect(script).toContain("audience=vault");
     expect(script).toMatch(
-      /vault policy write eso - <<'EOPOLICY'\npath "secret\/data\/argocd\/ghcr-reyemtech" \{ capabilities = \["read"\] \}\nEOPOLICY/
+      /vault policy write eso - <<'EOPOLICY'\npath "kv-prod\/data\/argocd\/ghcr-reyemtech" \{ capabilities = \["read"\] \}\nEOPOLICY/
     );
+    expect(css.args.spec.provider.vault.path).toBe("kv-prod");
     expect(script).not.toContain("token_reviewer_jwt=");
     expect(script).not.toContain("vault auth disable");
     expect(script).toContain("vault token revoke -self");
+    expect(script).toContain("auth/kubernetes/role/vault-root-recovery");
+    expect(script).toContain("ttl=15m");
+    expect(script).toContain("token_max_ttl=15m");
+    expect(script).toContain("token_no_default_policy=true");
+    expect(script).toContain(
+      'path "sys/generate-root/attempt" { capabilities = ["create", "update", "read", "delete"] }'
+    );
+    expect(script).toContain(
+      'path "sys/generate-root/update" { capabilities = ["create", "update"] }'
+    );
+    const bootstrapPolicy = script.match(
+      /vault policy write vault-bootstrap - <<'EOPOLICY'\n([\s\S]*?)\nEOPOLICY/
+    )?.[1];
+    expect(bootstrapPolicy).toBeDefined();
+    expect(bootstrapPolicy).not.toContain("sys/generate-root");
     expect(script).toContain("auth/kubernetes/login");
     expect(script).toContain("/var/run/vault-bootstrap-token/token");
     expect(script).toContain('INIT_OUTPUT_TMP_FILE="${INIT_OUTPUT_FILE}.tmp"');
@@ -1132,6 +1150,132 @@ describe("platform stack — ClusterSecretStore", () => {
       createdClusterRoleBindings.find((binding) => binding.name === "test-vault-auth-delegator")
         ?.resource
     );
+  });
+
+  it("reconciles configured Vault userpass users without exposing passwords", () => {
+    const privatePassword = "must-not-appear-in-bootstrap";
+    createPlatformStack("test", {
+      cluster: makeCluster("test"),
+      domain: "reyem.tech",
+      certManager: { enabled: false },
+      vault: {
+        enabled: true,
+        secretMount: "kv-prod",
+        userpassUsers: [
+          {
+            username: "mariomeyer",
+            password: privatePassword,
+            policies: ["default", "read-all-secrets"],
+          },
+        ],
+      },
+    });
+
+    const bootstrap = createdConfigMaps.find(
+      (resource) => resource.name === "test-vault-bootstrap-script"
+    );
+    if (!bootstrap) throw new Error("Vault bootstrap ConfigMap was not created");
+    const script = bootstrap.args.data["bootstrap.sh"] as string;
+    expect(script).toContain("auth/userpass/users/mariomeyer");
+    expect(script).toContain("vault policy write read-all-secrets");
+    expect(script).toContain('token_policies="default,read-all-secrets"');
+    expect(script).toContain('path "kv-prod/data/*" { capabilities = ["read"] }');
+    expect(script).toContain('path "kv-prod/metadata/*" { capabilities = ["list", "read"] }');
+    expect(script).toContain("password=@/vault/userpass/0/password");
+    expect(script).not.toContain(privatePassword);
+
+    const secret = createdSecrets.find((resource) =>
+      resource.args.metadata.name.startsWith("test-vault-userpass-")
+    );
+    if (!secret) throw new Error("Vault userpass Secret was not created");
+    expect(secret.args.stringData.password).toEqual({ __secret: privatePassword });
+
+    const vaultValues = createdReleases.find((release) => release.name === "test-vault")?.args
+      .values as {
+      server: {
+        volumes: Array<{ name: string; secret?: { secretName: string } }>;
+        extraContainers: Array<{ volumeMounts: Array<{ name: string; mountPath: string }> }>;
+      };
+    };
+    expect(vaultValues.server.volumes).toContainEqual({
+      name: "userpass-0",
+      secret: { secretName: secret.args.metadata.name },
+    });
+    expect(vaultValues.server.extraContainers[0]?.volumeMounts).toContainEqual({
+      name: "userpass-0",
+      mountPath: "/vault/userpass/0",
+      readOnly: true,
+    });
+    expect(script).toContain('path "kv-prod/data/*" { capabilities = ["read"] }');
+    expect(script).toContain('path "kv-prod/metadata" { capabilities = ["list", "read"] }');
+    expect(script).toContain('path "kv-prod/metadata/*" { capabilities = ["list", "read"] }');
+    const readAllPolicy = script.match(
+      /vault policy write read-all-secrets - <<'EOPOLICY'\n([\s\S]*?)\nEOPOLICY/
+    )?.[1];
+    expect(readAllPolicy).toBeDefined();
+    expect(readAllPolicy).not.toMatch(/create|update|delete/);
+    expect(script).toContain("sleep 300");
+    expect(script).toContain("vault token revoke -self >/dev/null 2>&1");
+  });
+
+  it("validates userpass usernames and requires explicit non-root policies", () => {
+    const base = {
+      cluster: makeCluster("test"),
+      domain: "reyem.tech",
+      certManager: { enabled: false },
+      vault: { enabled: true },
+    };
+    expect(() =>
+      createPlatformStack("test", {
+        ...base,
+        vault: {
+          enabled: true,
+          userpassUsers: [{ username: "-admin", password: "x", policies: ["default"] }],
+        },
+      })
+    ).toThrow(/Invalid Vault userpass username/);
+    expect(() =>
+      createPlatformStack("test", {
+        ...base,
+        vault: {
+          enabled: true,
+          userpassUsers: [{ username: "admin", password: "x", policies: ["root"] }],
+        },
+      })
+    ).toThrow(/invalid or reserved policy/);
+    expect(() =>
+      createPlatformStack("test", {
+        ...base,
+        vault: {
+          enabled: true,
+          userpassUsers: [{ username: "admin", password: "x", policies: [] }],
+        },
+      })
+    ).toThrow(/must specify at least one policy/);
+  });
+
+  it("rejects unsafe KV-v2 mount paths and userpass without bootstrap", () => {
+    const base = {
+      cluster: makeCluster("test"),
+      domain: "reyem.tech",
+      certManager: { enabled: false },
+    };
+    expect(() =>
+      createPlatformStack("test", {
+        ...base,
+        vault: { enabled: true, secretMount: "../secrets" },
+      })
+    ).toThrow(/Invalid Vault KV-v2 mount/);
+    expect(() =>
+      createPlatformStack("test", {
+        ...base,
+        vault: {
+          enabled: true,
+          bootstrap: false,
+          userpassUsers: [{ username: "admin", password: "x", policies: ["default"] }],
+        },
+      })
+    ).toThrow(/userpassUsers require the Vault bootstrap sidecar/);
   });
 
   it("rejects custom Vault ServiceAccounts that could strand bootstrap authentication", () => {

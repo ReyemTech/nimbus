@@ -199,10 +199,24 @@ export interface IVaultConfig extends IPlatformComponentConfig {
   readonly autoUnseal?: IAutoUnsealConfig;
   /** Deploy bootstrap sidecar (init, KV-v2, K8s auth, ESO policy/role). Default: true. */
   readonly bootstrap?: boolean;
-  /** Exact KV-v2 paths ESO may read, relative to the `secret` mount. Required with ESO. */
+  /** KV-v2 mount managed by Nimbus. Default: "secret". */
+  readonly secretMount?: string;
+  /** Exact KV-v2 paths ESO may read, relative to `secretMount`. Required with ESO. */
   readonly esoSecretPaths?: ReadonlyArray<string>;
   /** Audience requested for the ESO ServiceAccount token. Default: "vault". */
   readonly esoKubernetesAuthAudience?: string;
+  /** Declaratively managed Vault userpass users. Passwords must be Pulumi secrets. */
+  readonly userpassUsers?: ReadonlyArray<IVaultUserpassUser>;
+}
+
+/** A Vault userpass account reconciled by the Vault bootstrap sidecar. */
+export interface IVaultUserpassUser {
+  /** Vault userpass username. */
+  readonly username: string;
+  /** Password stored in a Kubernetes Secret; pass `pulumi.secret(...)` or `requireSecret(...)`. */
+  readonly password: pulumi.Input<string>;
+  /** Explicit Vault ACL policies granted to tokens issued at login. */
+  readonly policies: ReadonlyArray<string>;
 }
 
 /** Image pull secret configuration for private registries. */

@@ -431,16 +431,27 @@ Nimbus auto-configures the full Vault + ESO pipeline:
 3. **External Secrets Operator** — Helm chart with fixed service account name `external-secrets`
 4. **ClusterSecretStore** — `vault-backend`, requests a short-lived `vault`-audience token for the ESO service account and authenticates through role `eso`
 
-All of this is configured automatically when both `vault` and `externalSecrets` are enabled in the platform stack:
+All of this is configured automatically when both `vault` and `externalSecrets` are enabled in the platform stack. The fluent `cluster.createPlatformStack()` form is shown below; the standalone `createPlatformStack()` factory remains supported.
 
 ```typescript
-const platform = createPlatformStack("reyemtech", {
-  cluster,
+import * as pulumi from "@pulumi/pulumi";
+
+const config = new pulumi.Config();
+const platform = cluster.createPlatformStack("reyemtech", {
   domain: "reyem.ca",
   vault: {
     enabled: true,
-    // KV-v2 paths are relative to the `secret` mount; add every ESO path.
+    // Optional; defaults to "secret". ESO paths are relative to this mount.
+    secretMount: "secret",
+    // ESO receives only this path allowlist; it does not inherit human access.
     esoSecretPaths: ["argocd/ghcr-reyemtech"],
+    userpassUsers: [
+      {
+        username: "mariomeyer",
+        password: config.requireSecret("vaultUserPassword"),
+        policies: ["default", "read-all-secrets"],
+      },
+    ],
     autoUnseal: { provider: "awskms", region: "us-east-1", awsProvider },
   },
   externalSecrets: { enabled: true },
@@ -452,6 +463,40 @@ Nimbus binds the Vault `eso` role only to `external-secrets` in the
 grants read access only to paths listed in `esoSecretPaths`; it grants no list
 or write access. When Vault and ESO use Nimbus bootstrap, omitting this list
 fails deployment rather than granting broad access.
+
+Nimbus also reconciles the read-only Vault policy `read-all-secrets` for the
+configured `secretMount`. It grants `read` on KV-v2 data paths and `list`/`read`
+on KV-v2 metadata paths so a human can browse and read all secrets in that
+mount. It does not grant create, update, delete, or list access to secret data.
+Users only receive policies explicitly named in their `policies` array. Add a
+separate policy there only when a user intentionally needs additional access.
+The `secretMount` defaults to `secret`; treat a non-default mount as a
+foundational setting and keep it stable after initial setup.
+
+Pass each userpass password as a Pulumi secret, for example with
+`requireSecret()` as shown above or `pulumi.secret(value)`. Nimbus wraps the
+input as secret data again when creating the Kubernetes Secret, mounts it only
+into the Vault bootstrap sidecar, and sends it to Vault from a file reference
+so it does not appear in a command argument or bootstrap ConfigMap. Never put
+passwords in ordinary config, source control, logs, or stack exports. Configure
+the value with `pulumi config set --secret vaultUserPassword`.
+
+The sidecar enables userpass only when `userpassUsers` is non-empty, preserves
+all existing Vault auth methods, and periodically reconciles configured
+usernames, passwords, and policy assignments. Password updates are picked up
+after Kubernetes projects the updated Secret and the next reconciliation
+(every five minutes). Removing a user from Nimbus configuration does not delete
+the Vault account or revoke its tokens; remove the account and revoke tokens
+explicitly when access should end. Updating a user's policy assignment affects
+new logins. Already issued tokens retain their existing policy assignment until
+they expire or are revoked, so revoke and reissue a token when access must
+change immediately. Editing a policy's rules affects tokens that already carry
+that policy on subsequent requests.
+
+`userpassUsers` requires the bootstrap sidecar. Bootstrap reconciles users with
+a short-lived Kubernetes-authenticated token and revokes it after each pass;
+it does not keep a root token. The ESO policy remains limited to
+`esoSecretPaths`, regardless of any human user's policies.
 
 Vault uses its rotating Kubernetes ServiceAccount token for TokenReview. Nimbus
 uses the stable `vault` ServiceAccount and keeps its `system:auth-delegator`
@@ -466,6 +511,12 @@ failed bootstrap keeps the handoff until reconciliation succeeds. On upgrade,
 Nimbus also revokes and removes the legacy root-token file. Existing Kubernetes
 auth mounts and userpass users remain enabled.
 
+Adding `userpassUsers` to an existing Vault stack is an in-place reconciliation:
+Nimbus adds a Kubernetes Secret and updates the bootstrap sidecar configuration;
+it does not replace the Vault release, reinitialize Vault, or remove existing
+accounts. If the configured username already exists, Nimbus updates that
+userpass account's password and token policy assignments.
+
 ### Upgrade and migration
 
 Before upgrading an existing Vault + ESO stack, add every path used by
@@ -477,6 +528,46 @@ restarts one pod at a time. The upgrade corrects TokenReview identity, narrows
 the ESO role, and removes the legacy root-token file without disabling
 Kubernetes auth or userpass. With `vault.bootstrap: false`, manage these Vault
 auth settings externally.
+
+### Break-glass root-token recovery
+
+Nimbus revokes the initialization root token after bootstrap. Do not restore a
+persistent root token or enable unauthenticated root generation. Vault 2.x
+requires an authenticated token for the root-generation endpoints. Nimbus
+provisions a dedicated `vault-root-recovery` Kubernetes auth role with only the
+capabilities needed for that ceremony. Its tokens have a 15-minute TTL, no
+default policy, and cannot read secrets or administer other Vault paths. The
+regular `vault-bootstrap` role does not receive `sys/generate-root` access.
+
+For an emergency task, an operator with permission to exec into the Vault
+bootstrap container can obtain the dedicated token there. Find the Vault server
+pod, then open a shell in its `bootstrap` container:
+
+```sh
+kubectl exec -it -n vault <vault-server-pod> -c bootstrap -- sh
+JWT=$(cat /var/run/vault-bootstrap-token/token)
+VAULT_TOKEN=$(printf '%s' "$JWT" | vault write -field=token \
+  auth/kubernetes/login role=vault-root-recovery jwt=-)
+unset JWT
+export VAULT_TOKEN
+```
+
+Use `vault operator generate-root -init`, provide three of the five recovery
+shares to complete the configured 3-of-5 quorum, and decode the returned
+encoded token using the one-time password. Keep the nonce, OTP, shares, encoded
+token, and decoded root token out of logs, Pulumi outputs/state, shell history,
+and tickets. Capture the decoded root token without printing it, use it only
+for the emergency administrative task, then revoke it immediately with
+`vault token revoke -self` and unset `VAULT_TOKEN`. The recovery-role token
+expires after 15 minutes even if the operator forgets to revoke it.
+
+This recovery role is deliberately separate from bootstrap and requires both
+Kubernetes access to the Vault bootstrap pod and the recovery-share quorum.
+Nimbus creates the role only when the bootstrap sidecar is enabled; with
+`vault.bootstrap: false`, configure the equivalent policy and Kubernetes role
+through your external Vault administration process.
+HashiCorp documents the [authenticated generate-root endpoints](https://developer.hashicorp.com/vault/api-docs/system/generate-root)
+and the [root-token recovery procedure](https://developer.hashicorp.com/vault/docs/troubleshoot/generate-root-token).
 
 ### Vault Paths Convention
 

@@ -710,7 +710,7 @@ function deployToCluster(
           provider: {
             vault: {
               server: `https://vault.${config.domain}`,
-              path: "secret",
+              path: config.vault?.secretMount ?? "secret",
               version: "v2",
               auth: {
                 kubernetes: {

@@ -199,6 +199,10 @@ export interface IVaultConfig extends IPlatformComponentConfig {
   readonly autoUnseal?: IAutoUnsealConfig;
   /** Deploy bootstrap sidecar (init, KV-v2, K8s auth, ESO policy/role). Default: true. */
   readonly bootstrap?: boolean;
+  /** Exact KV-v2 paths ESO may read, relative to the `secret` mount. Required with ESO. */
+  readonly esoSecretPaths?: ReadonlyArray<string>;
+  /** Audience requested for the ESO ServiceAccount token. Default: "vault". */
+  readonly esoKubernetesAuthAudience?: string;
 }
 
 /** Image pull secret configuration for private registries. */

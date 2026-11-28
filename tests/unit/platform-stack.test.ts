@@ -44,6 +44,8 @@ let createdConfigMaps: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdClusterRoles: Array<{ name: string; args: any }>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createdClusterRoleBindings: Array<{ name: string; args: any; opts?: any; resource: any }>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createdCustomResourcesForAssertions: Array<{ name: string; args: any; opts?: any }>;
 
 // Mock @pulumi/aws
@@ -207,7 +209,12 @@ vi.mock("@pulumi/kubernetes", () => {
   const mockLimitRange = class {};
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
-  const mockClusterRoleBinding = class {};
+  const mockClusterRoleBinding = class {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    constructor(name: string, args: any, opts?: any) {
+      createdClusterRoleBindings.push({ name, args, opts, resource: this });
+    }
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-extraneous-class
   const mockClusterRole = class {
@@ -303,6 +310,7 @@ beforeEach(() => {
   createdDeploymentPatches = [];
   createdConfigMaps = [];
   createdClusterRoles = [];
+  createdClusterRoleBindings = [];
   createdCustomResourcesForAssertions = [];
 });
 
@@ -1026,14 +1034,143 @@ describe("platform stack — ClusterSecretStore", () => {
       cluster,
       domain: "reyem.tech",
       certManager: { enabled: false },
-      vault: { enabled: true },
+      vault: {
+        enabled: true,
+        esoSecretPaths: ["argocd/ghcr-reyemtech"],
+        esoKubernetesAuthAudience: "eso.example.com",
+      },
       externalSecrets: { enabled: true },
     });
 
     const css = createdCustomResources.find((r) => r.args.kind === "ClusterSecretStore");
-    expect(css).toBeDefined();
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    expect(css!.args.spec.provider.vault.server).toBe("https://vault.reyem.tech");
+    if (!css) throw new Error("ClusterSecretStore was not created");
+    expect(css.args.spec.provider.vault.server).toBe("https://vault.reyem.tech");
+    expect(css.args.spec.provider.vault.auth.kubernetes).toMatchObject({
+      mountPath: "kubernetes",
+      role: "eso",
+      serviceAccountRef: {
+        name: "external-secrets",
+        namespace: "external-secrets",
+        audiences: ["eso.example.com"],
+      },
+    });
+
+    const bootstrap = createdConfigMaps.find(
+      (resource) => resource.name === "test-vault-bootstrap-script"
+    );
+    if (!bootstrap) throw new Error("Vault bootstrap ConfigMap was not created");
+    const script = bootstrap.args.data["bootstrap.sh"] as string;
+    expect(script).toContain("bound_service_account_names=external-secrets");
+    expect(script).toContain("bound_service_account_namespaces=external-secrets");
+    expect(script).toContain("audience=eso.example.com");
+    expect(script).toContain("audience=vault");
+    expect(script).toMatch(
+      /vault policy write eso - <<'EOPOLICY'\npath "secret\/data\/argocd\/ghcr-reyemtech" \{ capabilities = \["read"\] \}\nEOPOLICY/
+    );
+    expect(script).not.toContain("token_reviewer_jwt=");
+    expect(script).not.toContain("vault auth disable");
+    expect(script).toContain("vault token revoke -self");
+    expect(script).toContain("auth/kubernetes/login");
+    expect(script).toContain("/var/run/vault-bootstrap-token/token");
+    expect(script).toContain('INIT_OUTPUT_TMP_FILE="${INIT_OUTPUT_FILE}.tmp"');
+    expect(script).toContain('> "$INIT_OUTPUT_TMP_FILE"');
+    expect(script).toContain('mv "$INIT_OUTPUT_TMP_FILE" "$INIT_OUTPUT_FILE"');
+    expect(script).toContain('ROOT_TOKEN=$(json_field "$(cat "$INIT_OUTPUT_FILE")" root_token)');
+    expect(script).toContain('RECOVERY_KEYS=$(json_array "$INIT_OUTPUT" recovery_keys_b64)');
+    expect(script).toContain("vault token lookup >/dev/null 2>&1");
+    expect(script).toContain(
+      'rm -f "$LEGACY_TOKEN_FILE" "$INIT_OUTPUT_FILE" "$INIT_OUTPUT_TMP_FILE"'
+    );
+    expect(script).not.toContain('echo "$ROOT_TOKEN"');
+
+    const configMapName = bootstrap.args.metadata.name as string;
+    expect(configMapName).toMatch(/^vault-bootstrap-[a-f0-9]{12}$/);
+    type MockVaultValues = {
+      server: {
+        volumes: Array<{
+          name: string;
+          configMap?: { name: string };
+          projected?: { sources: Array<{ serviceAccountToken: object }> };
+        }>;
+        extraContainers: Array<{ volumeMounts: object[] }>;
+        serviceAccount: { name: string };
+        updateStrategyType: string;
+      };
+    };
+    const vaultValues = createdReleases.find((release) => release.name === "test-vault")?.args
+      .values as MockVaultValues;
+    const scriptVolume = vaultValues.server.volumes[0];
+    if (!scriptVolume?.configMap) throw new Error("Bootstrap script volume was not created");
+    expect(scriptVolume.configMap.name).toBe(configMapName);
+    const bootstrapTokenVolume = vaultValues.server.volumes.find(
+      (volume) => volume.name === "vault-bootstrap-token"
+    );
+    if (!bootstrapTokenVolume?.projected) throw new Error("Bootstrap token volume was not created");
+    const tokenSource = bootstrapTokenVolume.projected.sources[0];
+    if (!tokenSource) throw new Error("Projected token source was not created");
+    expect(tokenSource.serviceAccountToken).toEqual({
+      audience: "vault",
+      expirationSeconds: 3600,
+      path: "token",
+    });
+    const bootstrapContainer = vaultValues.server.extraContainers[0];
+    if (!bootstrapContainer) throw new Error("Vault bootstrap sidecar was not created");
+    expect(bootstrapContainer.volumeMounts).toContainEqual({
+      name: "vault-bootstrap-token",
+      mountPath: "/var/run/vault-bootstrap-token",
+      readOnly: true,
+    });
+    expect(vaultValues.server.serviceAccount.name).toBe("vault");
+    expect(vaultValues.server.updateStrategyType).toBe("RollingUpdate");
+    expect(
+      createdClusterRoleBindings.find((binding) => binding.name === "test-vault-auth-delegator")
+        ?.args.subjects
+    ).toEqual([{ kind: "ServiceAccount", name: "vault", namespace: "vault" }]);
+    expect(
+      createdReleases.find((release) => release.name === "test-vault")?.opts.dependsOn
+    ).toContain(
+      createdClusterRoleBindings.find((binding) => binding.name === "test-vault-auth-delegator")
+        ?.resource
+    );
+  });
+
+  it("rejects custom Vault ServiceAccounts that could strand bootstrap authentication", () => {
+    expect(() =>
+      createPlatformStack("test", {
+        cluster: makeCluster("test"),
+        domain: "reyem.tech",
+        certManager: { enabled: false },
+        vault: {
+          enabled: true,
+          esoSecretPaths: ["argocd/ghcr-reyemtech"],
+          values: { server: { serviceAccount: { name: "vault-server" } } },
+        },
+      })
+    ).toThrow(/Vault server ServiceAccount name is fixed to "vault"/);
+  });
+
+  it("requires explicit Vault paths when ESO is enabled", () => {
+    expect(() =>
+      createPlatformStack("test", {
+        cluster: makeCluster("test"),
+        domain: "reyem.tech",
+        certManager: { enabled: false },
+        vault: { enabled: true },
+        externalSecrets: { enabled: true },
+      })
+    ).toThrow(/esoSecretPaths/);
+  });
+
+  it("rejects Vault ESO paths that could escape the generated policy", () => {
+    expect(() =>
+      createPlatformStack("test", {
+        cluster: makeCluster("test"),
+        domain: "reyem.tech",
+        certManager: { enabled: false },
+        vault: { enabled: true, esoSecretPaths: ['argocd/ghcr" } { capabilities = ["read"] }'] },
+        externalSecrets: { enabled: true },
+      })
+    ).toThrow(/Invalid Vault ESO path/);
   });
 
   it("does not create ClusterSecretStore when vault is missing", () => {

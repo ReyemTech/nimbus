@@ -335,7 +335,7 @@ path "sys/policies/acl/user-policy" { capabilities = ["create", "read", "update"
 path "sys/policies/acl/read-all-secrets" { capabilities = ["create", "read", "update"] }
 path "sys/policies/acl/vault-root-recovery" { capabilities = ["create", "read", "update"] }
 path "sys/policies/acl/vault-bootstrap" { capabilities = ["create", "read", "update"] }
-path "sys/auth/userpass" { capabilities = ["create", "read", "update"] }
+path "sys/auth/userpass" { capabilities = ["create", "read", "update", "sudo"] }
 path "auth/userpass/users/*" { capabilities = ["create", "read", "update"] }
 EOPOLICY
 

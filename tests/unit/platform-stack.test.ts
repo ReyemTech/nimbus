@@ -1088,6 +1088,10 @@ describe("platform stack — ClusterSecretStore", () => {
     )?.[1];
     expect(bootstrapPolicy).toBeDefined();
     expect(bootstrapPolicy).not.toContain("sys/generate-root");
+    expect(bootstrapPolicy).toContain(
+      'path "sys/auth/userpass" { capabilities = ["create", "read", "update", "sudo"] }'
+    );
+    expect(bootstrapPolicy).not.toMatch(/path "sys\/auth" \{[^}]*sudo/);
     expect(script).toContain("auth/kubernetes/login");
     expect(script).toContain("/var/run/vault-bootstrap-token/token");
     expect(script).toContain('INIT_OUTPUT_TMP_FILE="${INIT_OUTPUT_FILE}.tmp"');
